@@ -129,6 +129,7 @@ export function AppSidebarNav({ tree }: Props) {
             className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
           >
             RSS
+            {/* &mdash; git vommit -m &quot;barf&quot; */}
           </a>
           <ThemeToggle />
         </div>
