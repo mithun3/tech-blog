@@ -1,0 +1,377 @@
+---
+title: "ASUS Merlin — Router Firmware"
+description: "Advanced homelab features in ASUS Merlin firmware: script automation, Entware packages, VPN Director, and custom DNS configuration."
+publishedAt: "2026-05-03"
+order: 3
+status: published
+---
+
+# ASUS Merlin — Router Firmware
+
+**Router:** ASUS RT-AX88U
+**Firmware:** Merlin (community fork of ASUS stock)
+
+Merlin unlocks automation, scripting, and advanced routing capabilities that stock firmware doesn't expose. It's based on the official ASUS codebase, actively maintained, and can be rolled back to stock at any time.
+
+---
+
+## Merlin vs Stock ASUS
+
+| Feature | Stock | Merlin | Notes |
+|---------|-------|--------|-------|
+| Web UI | ✅ | ✅ identical | No change |
+| Stability | ✅ | ✅ | Negligible difference |
+| Script automation | ❌ | ✅ 15+ event hooks | Critical for homelab |
+| Cron jobs | ❌ | ✅ Full crontab | Enables scheduling |
+| Custom firewall rules | Web UI only | CLI + scripts | More control |
+| Entware packages | ❌ | ✅ 1,000+ packages | Major advantage |
+| VPN Director | ❌ | ✅ | Route specific clients through VPN |
+| DHCP/DNS customization | Limited | Edit dnsmasq directly | Full control |
+| Persistent JFFS partition | Limited | ✅ | Scripts survive reboots |
+| WireGuard | Limited | ✅ Full client + server | Modern VPN |
+| SSH access | Limited | ✅ Full bash | Enables automation |
+
+---
+
+## Installation
+
+### Before you start
+
+- Download latest stable build for RT-AX88U from https://asuswrt-merlin.net/
+- Back up current config: **Administration → System Settings → Backup**
+- Do not extract the `.tar.gz` file — flash it as downloaded
+
+### Flash
+
+1. **Administration → Firmware Upgrade → Choose File**
+2. Select the `.tar.gz` Merlin firmware file
+3. Click Upload — router reboots (5–10 minutes, do not power off)
+
+### Post-installation
+
+```bash
+ssh admin@192.168.1.1
+
+# Enable JFFS (persistent script storage across reboots)
+nvram set jffs2_on=1
+nvram commit
+
+# Create scripts directory
+mkdir -p /jffs/scripts
+chmod 755 /jffs/scripts
+
+reboot
+```
+
+### Updating later
+
+Scripts in `/jffs/scripts` and Entware packages survive firmware updates. The process is the same — download new `.tar.gz`, flash via web UI.
+
+---
+
+## Script Automation
+
+Merlin runs scripts automatically at specific system events. All scripts live in `/jffs/scripts/` and must be executable (`chmod +x`).
+
+### Available event hooks
+
+| Script | Trigger |
+|--------|---------|
+| `services-start` | System boot (before services start) |
+| `firewall-start` | After the firewall loads |
+| `nat-start` | After NAT module loads |
+| `wan-event` | WAN connection state changes |
+| `openvpn-event` | VPN client/server state changes |
+| `post-mount` | USB drive mounted |
+| `dnsmasq.postconf` | Before dnsmasq starts |
+| `dhcpc-event` | DHCP lease events |
+
+### Example: custom firewall rules on boot
+
+`/jffs/scripts/firewall-start`
+
+```bash
+#!/bin/sh
+
+# Block Telnet inbound
+iptables -I INPUT -i eth0 -p tcp --dport 23 -j DROP
+
+# Allow SSH from LAN only
+iptables -I INPUT -i eth0 -p tcp --dport 22 -s 192.168.1.0/24 -j ACCEPT
+iptables -I INPUT -i eth0 -p tcp --dport 22 -j DROP
+
+logger "Custom firewall rules applied"
+```
+
+```bash
+chmod +x /jffs/scripts/firewall-start
+```
+
+### Example: VPN health monitor
+
+`/jffs/scripts/vpn-health-check.sh`
+
+```bash
+#!/bin/sh
+
+# Reconnect VPN if tunnel goes down
+if ! ping -c 1 10.8.0.1 >/dev/null 2>&1; then
+  logger "VPN DOWN — reconnecting"
+  nvram set vpn_client1_state=0
+  sleep 5
+  nvram set vpn_client1_state=2
+fi
+```
+
+Schedule via cron to run every 5 minutes:
+
+```bash
+crontab -e
+# Add:
+*/5 * * * * /jffs/scripts/vpn-health-check.sh
+```
+
+### Example: daily router backup to NAS
+
+`/jffs/scripts/backup-daily.sh`
+
+```bash
+#!/bin/sh
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/tmp/mnt/usb/backups"
+
+mkdir -p $BACKUP_DIR
+
+# Export all settings
+nvram show > $BACKUP_DIR/nvram_$TIMESTAMP.txt
+tar czf $BACKUP_DIR/config_$TIMESTAMP.tar.gz /etc/config/
+
+# Sync to NAS
+rsync -avz --delete $BACKUP_DIR/ user@192.168.1.30:/backups/router/
+
+# Keep only last 30 days
+find $BACKUP_DIR -type f -mtime +30 -delete
+
+logger "Backup complete: $TIMESTAMP"
+```
+
+```bash
+chmod +x /jffs/scripts/backup-daily.sh
+crontab -e
+# Add:
+0 2 * * * /jffs/scripts/backup-daily.sh
+```
+
+---
+
+## Entware Package Manager
+
+Entware gives the router access to 1,000+ Linux packages — think `apt` on Ubuntu, but for the router.
+
+### Install (one-time)
+
+```bash
+ssh admin@192.168.1.1
+amtm         # launches the ASUS Terminal Menu
+# Select: ep  (Install Entware)
+# Requires USB drive connected to router
+```
+
+### Common commands
+
+```bash
+opkg update                      # refresh package list
+opkg search nginx                # find a package
+opkg install openssh-server      # install
+opkg list-installed              # show installed
+opkg remove openssh-server       # remove
+```
+
+### Useful packages for homelab
+
+```bash
+opkg install htop          # interactive process viewer
+opkg install nethogs       # per-process bandwidth monitor
+opkg install openssh-server openssh-sftp-server
+opkg install tailscale     # mesh VPN
+opkg install nginx         # web server
+opkg install minidlna      # media server (DLNA)
+opkg install rsync         # reliable file sync / backups
+opkg install nmap          # network scanner
+```
+
+### Auto-start packages on boot
+
+```bash
+# Add to /jffs/scripts/services-start
+echo "/opt/etc/init.d/S22openssh-sftp-server start" >> /jffs/scripts/services-start
+chmod +x /jffs/scripts/services-start
+```
+
+---
+
+## VPN Director (Selective Routing)
+
+Route specific devices through VPN while others use WAN directly — impossible with stock firmware.
+
+### Setup via web UI
+
+**NAT/QoS → VPN Director → Enable → Add rules**
+
+| Field | Description |
+|-------|-------------|
+| Source IP | The device IP to match (e.g. `192.168.1.51`) |
+| Policy | Route to WAN / Route to OpenVPN Client 1 / Drop |
+
+### Common scenarios
+
+```
+NAS running Plex (needs full speed):
+  192.168.1.30  →  WAN  (bypass VPN)
+
+Torrent client (needs privacy):
+  192.168.1.51  →  OpenVPN Client 1
+
+All other devices:
+  Default route  →  WAN
+```
+
+### CLI approach
+
+```bash
+ssh admin@192.168.1.1
+
+# Format: src_ip|protocol|src_port|dst_ip|dst_port|wan|vpn1|vpn2|drop
+# Route 192.168.1.51 through VPN:
+echo "192.168.1.51|0|0|0|0|0|1|0|0" >> /jffs/config/vpndirector.conf
+
+service restart firewall
+```
+
+---
+
+## Advanced DNS with dnsmasq
+
+Edit `/jffs/configs/dnsmasq.conf.add` — appended to the router's dnsmasq config on every start.
+
+### Local hostname records
+
+```
+address=/proxmox.home/192.168.1.20
+address=/nas.home/192.168.1.30
+address=/openwebui.home/192.168.1.25
+```
+
+Now `http://proxmox.home` works from any device on the network.
+
+### Block domains network-wide
+
+```
+# Sinkhole ad/tracking domains
+address=/ads.example.com/127.0.0.1
+address=/tracking.example.com/127.0.0.1
+
+# Load from blocklist file
+addn-hosts=/jffs/blocklist.txt
+```
+
+Download a blocklist:
+
+```bash
+wget -O /jffs/blocklist.txt https://adguardteam.github.io/AdGuardHome/filters/filter1.txt
+service restart dnsmasq
+```
+
+### Per-device DNS
+
+```
+# Tag devices by MAC
+dhcp-host=AA:BB:CC:DD:EE:01,iot-sensor,set:iot
+dhcp-host=AA:BB:CC:DD:EE:02,guest-laptop,set:guest
+
+# Force IoT devices to use Quad9 (security-focused)
+dhcp-option=tag:iot,option:dns-server,149.112.112.112
+
+# Force guest WiFi to Cloudflare
+dhcp-option=tag:guest,option:dns-server,1.1.1.1
+```
+
+### Apply changes
+
+```bash
+ssh admin@192.168.1.1
+dnsmasq --test            # validate syntax
+service restart dnsmasq   # apply
+tail -f /var/log/messages | grep dnsmasq
+```
+
+---
+
+## Troubleshooting
+
+### Scripts not running
+
+```bash
+ssh admin@192.168.1.1
+
+# JFFS must be enabled
+nvram get jffs2_on        # should output: 1
+
+# Script must be executable
+ls -la /jffs/scripts/firewall-start
+# Should show: -rwxr-xr-x
+
+# Fix permissions
+chmod 755 /jffs/scripts/*
+
+# Test syntax
+sh -n /jffs/scripts/firewall-start
+
+# Run manually
+/jffs/scripts/firewall-start
+echo $?    # 0 = success
+```
+
+### Entware packages not found
+
+```bash
+opkg update   # refresh package index first
+opkg --version  # confirms Entware is installed
+
+# If not installed:
+amtm   # Select: ep
+```
+
+### VPN Director rules not taking effect
+
+```bash
+# Verify VPN client is connected
+ifconfig | grep tun
+
+# Check rules file
+cat /jffs/config/vpndirector.conf
+
+# Force reload
+service restart firewall
+
+# Inspect iptables
+iptables -L -n | grep -i vpn
+```
+
+### Roll back to stock firmware
+
+1. Download latest official ASUS firmware for RT-AX88U from asus.com
+2. **Administration → Firmware Upgrade → Choose File**
+3. Upload the stock firmware file and wait for reboot
+
+Scripts in `/jffs` will be erased. Back up anything important beforehand.
+
+---
+
+## Resources
+
+- Official site: https://asuswrt-merlin.net/
+- Community forum: https://www.snbforums.com/
+- Script examples: https://github.com/RMerl/asuswrt-merlin.ng/wiki
+- Entware packages: https://bin.entware.net/
