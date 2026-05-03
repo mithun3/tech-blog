@@ -6,11 +6,21 @@ import { useState, useEffect } from 'react'
 import type { NavNode } from '@/lib/wiki'
 import { ThemeToggle } from './theme-toggle'
 
+/** Pages that belong to the "More" section — excluded from the dynamic Notes tree. */
+const MORE_HREFS = new Set([
+  '/pages/about',
+  '/pages/contact',
+  '/pages/privacy',
+  '/pages/terms',
+  '/pages/faq',
+])
+
 type Props = {
   tree: NavNode[]
 }
 
 export function AppSidebarNav({ tree }: Props) {
+  const notes = tree.filter((node) => !MORE_HREFS.has(node.href))
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -68,14 +78,9 @@ export function AppSidebarNav({ tree }: Props) {
         >
           <ul className="space-y-0.5">
             <NavLink href="/" label="Home" isActive={pathname === '/'} />
-            <NavLink
-              href="/blog"
-              label="Blog"
-              isActive={pathname === '/blog' || pathname.startsWith('/blog/')}
-            />
           </ul>
 
-          {tree.length > 0 && (
+          {notes.length > 0 && (
             <>
               <div className="mt-5 mb-2 px-3">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
@@ -83,7 +88,7 @@ export function AppSidebarNav({ tree }: Props) {
                 </span>
               </div>
               <ul className="space-y-0.5">
-                {tree.map((node) => (
+                {notes.map((node) => (
                   <SidebarItem
                     key={node.href}
                     node={node}
@@ -93,6 +98,28 @@ export function AppSidebarNav({ tree }: Props) {
               </ul>
             </>
           )}
+
+          <div className="mt-5 mb-2 px-3">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+              More
+            </span>
+          </div>
+          <ul className="space-y-0.5">
+            {[
+              { href: '/pages/about', label: 'About' },
+              { href: '/pages/contact', label: 'Contact' },
+              { href: '/pages/privacy', label: 'Privacy Policy' },
+              { href: '/pages/terms', label: 'Terms of Service' },
+              { href: '/pages/faq', label: 'FAQ' },
+            ].map(({ href, label }) => (
+              <NavLink
+                key={href}
+                href={href}
+                label={label}
+                isActive={pathname === href}
+              />
+            ))}
+          </ul>
         </nav>
 
         {/* Sidebar footer */}

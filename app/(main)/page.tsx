@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { buildNavTree } from "@/lib/wiki";
 
+const META_HREFS = new Set(['/pages/about', '/pages/contact', '/pages/privacy', '/pages/terms', '/pages/faq'])
+
 export default function HomePage() {
-  const sections = buildNavTree();
+  const sections = buildNavTree().filter((s) => !META_HREFS.has(s.href));
 
   return (
     <div className="space-y-20">
@@ -10,7 +12,10 @@ export default function HomePage() {
       <section className="space-y-3 pt-4">
         <h1 className="text-4xl font-bold tracking-tight">Tech Notes</h1>
         <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-xl">
-          "It’s hard to find good answers in a sea of short videos and shallow tutorials. This site is for the deep dives. It’s meant to be the bridge between a quick proof-of-concept and a solid production app. I’ve skipped the trackers, the ads, and the fluff. What you'll find instead is honest research and practical lessons translated into clear documentation. Whether you're a developer or just a curious mind, this is where ideas actually get built."
+          It’s hard to find good answers in a sea of short videos and shallow tutorials. <br />
+          This site is for the deep dives. It’s meant to be the bridge between a quick proof-of-concept and a solid production app.  <br />
+          I’ve skipped the trackers, the ads, and the fluff. What you'll find instead is honest research and practical lessons translated into clear documentation.  <br />
+          Whether you're a developer or just a curious mind, this is where ideas actually get built.
         </p>
       </section>
 
