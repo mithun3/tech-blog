@@ -62,12 +62,12 @@ export default async function PostPage({ params }: Props) {
     ...(post.updatedAt && { dateModified: post.updatedAt }),
     author: {
       "@type": "Person",
-      name: "Tech Notes",
+      name: "poc to prod",
       url: siteUrl,
     },
     publisher: {
       "@type": "Person",
-      name: "Tech Notes",
+      name: "poc to prod",
       url: siteUrl,
     },
     mainEntityOfPage: {

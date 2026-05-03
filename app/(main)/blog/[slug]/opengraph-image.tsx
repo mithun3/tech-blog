@@ -9,7 +9,7 @@ type Props = { params: Promise<{ slug: string }> }
 export default async function Image({ params }: Props) {
   const { slug } = await params
   const post = await getPostBySlug(slug)
-  const title = post?.title ?? 'Tech Notes'
+  const title = post?.title ?? 'poc to prod'
 
   return new ImageResponse(
     (
@@ -40,7 +40,7 @@ export default async function Image({ params }: Props) {
               textTransform: 'uppercase',
             }}
           >
-            Tech Notes
+            poc to prod
           </div>
         </div>
 

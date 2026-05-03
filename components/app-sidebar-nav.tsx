@@ -63,7 +63,7 @@ export function AppSidebarNav({ tree }: Props) {
         <div className="px-6 py-6 shrink-0">
           <Link href="/" className="block group">
             <span className="text-base font-bold text-zinc-900 dark:text-zinc-100 leading-tight block">
-              Tech Notes
+              poc to prod
             </span>
             <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 block leading-snug">
               Software engineering &amp; building things

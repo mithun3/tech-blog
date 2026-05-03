@@ -10,7 +10,7 @@ export default function HomePage() {
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'Tech Notes',
+    name: 'poc to prod',
     url: siteUrl,
     description:
       'Notes, guides, and deep-dives on software engineering, infrastructure, and building things.',
@@ -27,7 +27,7 @@ export default function HomePage() {
       <div className="space-y-20">
       {/* Hero */}
       <section className="space-y-3 pt-4">
-        <h1 className="text-4xl font-bold tracking-tight">Tech Notes</h1>
+        <h1 className="text-4xl font-bold tracking-tight">poc to prod</h1>
         <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-xl">
           It’s hard to find good answers in a sea of short videos and shallow tutorials. <br />
           This site is for the deep dives. It’s meant to be the bridge between a quick proof-of-concept and a solid production app.  <br />
