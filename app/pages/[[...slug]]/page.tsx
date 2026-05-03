@@ -34,15 +34,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const meta = getPageMeta(slug)
   if (!meta) return {}
 
+  const href = slug.length === 0 ? '/pages' : `/pages/${slug.join('/')}`
+  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}${href}`
+
   return {
     title: meta.title,
     description: meta.description,
+    alternates: { canonical: url },
     openGraph: {
       title: meta.title,
       description: meta.description,
       type: 'article',
+      url,
       ...(meta.publishedAt && { publishedTime: meta.publishedAt }),
       ...(meta.updatedAt && { modifiedTime: meta.updatedAt }),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: meta.title,
+      description: meta.description ?? undefined,
     },
   }
 }

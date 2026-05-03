@@ -13,16 +13,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = await getPostBySlug(slug);
   if (!post) return {};
 
+  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/blog/${slug}`;
+
   return {
     title: post.title,
     description: post.summary,
+    alternates: { canonical: url },
     openGraph: {
       title: post.title,
       description: post.summary,
       type: "article",
+      url,
       publishedTime: post.publishedAt,
       ...(post.updatedAt && { modifiedTime: post.updatedAt }),
       ...(post.image && { images: [{ url: post.image }] }),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description: post.summary ?? undefined,
     },
   };
 }
@@ -40,8 +49,42 @@ export default async function PostPage({ params }: Props) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const postUrl = `${siteUrl}/blog/${slug}`;
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    headline: post.title,
+    description: post.summary,
+    url: postUrl,
+    datePublished: post.publishedAt,
+    ...(post.updatedAt && { dateModified: post.updatedAt }),
+    author: {
+      "@type": "Person",
+      name: "Tech Notes",
+      url: siteUrl,
+    },
+    publisher: {
+      "@type": "Person",
+      name: "Tech Notes",
+      url: siteUrl,
+    },
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": postUrl,
+    },
+  };
+
   return (
-    <article className="space-y-8">
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
+      <article className="space-y-8">
       <header className="space-y-4">
         {post.tags && post.tags.length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -81,5 +124,6 @@ export default async function PostPage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: post.htmlContent }}
       />
     </article>
+    </>
   );
 }

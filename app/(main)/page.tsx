@@ -5,9 +5,26 @@ const META_HREFS = new Set(['/pages/about', '/pages/contact', '/pages/privacy', 
 
 export default function HomePage() {
   const sections = buildNavTree().filter((s) => !META_HREFS.has(s.href));
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Tech Notes',
+    url: siteUrl,
+    description:
+      'Notes, guides, and deep-dives on software engineering, infrastructure, and building things.',
+  };
 
   return (
-    <div className="space-y-20">
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c'),
+        }}
+      />
+      <div className="space-y-20">
       {/* Hero */}
       <section className="space-y-3 pt-4">
         <h1 className="text-4xl font-bold tracking-tight">Tech Notes</h1>
@@ -58,6 +75,7 @@ export default function HomePage() {
         </div>
       </section>
     </div>
+    </>
   );
 }
 
