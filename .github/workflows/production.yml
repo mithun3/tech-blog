@@ -91,13 +91,153 @@ jobs:
             exit 1
           fi
 
-          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "deploy_url_raw=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve deployment URL from Vercel API
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          DEPLOYMENTS_API="https://api.vercel.com/v6/deployments?projectId=${{ env.VERCEL_PROJECT_ID }}&target=production&sha=${{ github.sha }}&limit=20&teamId=${{ env.VERCEL_ORG_ID }}"
+
+          RESPONSE="$(curl -sS "$DEPLOYMENTS_API" -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}")"
+
+          DEPLOY_HOST="$(echo "$RESPONSE" | node -e '
+            const fs = require("fs");
+            const input = fs.readFileSync(0, "utf8");
+            const data = JSON.parse(input);
+
+            if (data.error) {
+              console.error("Failed to list deployments:", JSON.stringify(data));
+              process.exit(1);
+            }
+
+            const deployments = Array.isArray(data.deployments) ? data.deployments : [];
+            deployments.sort((a, b) => (b.created || b.createdAt || 0) - (a.created || a.createdAt || 0));
+
+            const ready = deployments.find((d) => (d.readyState || d.state) === "READY" && d.url);
+            const fallback = deployments.find((d) => d.url);
+            const chosen = ready || fallback;
+
+            if (!chosen) {
+              console.error("No deployment URL found for this sha/project.");
+              process.exit(1);
+            }
+
+            process.stdout.write(chosen.url);
+          ')"
+
+          echo "Resolved deployment host: $DEPLOY_HOST"
+          echo "deploy_url=https://$DEPLOY_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Deployment diagnostics snapshot
+        run: |
+          set -euo pipefail
+
+          RAW_URL="${{ steps.deploy.outputs.deploy_url_raw }}"
+          RESOLVED_URL="${{ steps.resolve.outputs.deploy_url }}"
+          RESOLVED_HOST="${RESOLVED_URL#https://}"
+
+          echo "Raw URL parsed from CLI: $RAW_URL"
+          echo "Resolved URL from API:   $RESOLVED_URL"
+
+          PROJECT_API="https://api.vercel.com/v9/projects/${{ env.VERCEL_PROJECT_ID }}?teamId=${{ env.VERCEL_ORG_ID }}"
+          DEPLOYMENTS_API="https://api.vercel.com/v6/deployments?projectId=${{ env.VERCEL_PROJECT_ID }}&target=production&limit=5&teamId=${{ env.VERCEL_ORG_ID }}"
+          LOOKUP_API="https://api.vercel.com/v13/deployments/$RESOLVED_HOST?teamId=${{ env.VERCEL_ORG_ID }}"
+
+          echo "--- Project protection snapshot ---"
+          curl -sS "$PROJECT_API" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | node -e '
+              const fs = require("fs");
+              const input = fs.readFileSync(0, "utf8");
+              const data = JSON.parse(input);
+              if (data.error) {
+                console.error(JSON.stringify(data));
+                process.exit(1);
+              }
+              console.log(JSON.stringify({
+                id: data.id,
+                name: data.name,
+                paused: data.paused ?? null,
+                delegatedProtection: data.delegatedProtection ?? null,
+                ssoProtection: data.ssoProtection ?? null,
+                trustedIps: data.trustedIps ?? null,
+                passwordProtection: data.passwordProtection ?? null,
+                security: data.security
+                  ? {
+                      attackModeEnabled: data.security.attackModeEnabled ?? null,
+                      firewallEnabled: data.security.firewallEnabled ?? null,
+                    }
+                  : null,
+              }, null, 2));
+            '
+
+          echo "--- Latest production deployments (top 5) ---"
+          DEPLOY_HOST="$RESOLVED_HOST" curl -sS "$DEPLOYMENTS_API" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | node -e '
+              const fs = require("fs");
+              const expected = process.env.DEPLOY_HOST;
+              const input = fs.readFileSync(0, "utf8");
+              const data = JSON.parse(input);
+              if (data.error) {
+                console.error(JSON.stringify(data));
+                process.exit(1);
+              }
+              const deployments = Array.isArray(data.deployments) ? data.deployments : [];
+              const view = deployments.map((d) => ({
+                uid: d.uid,
+                url: d.url,
+                state: d.state,
+                readyState: d.readyState,
+                target: d.target,
+                aliasAssigned: d.aliasAssigned ?? null,
+                aliasError: d.aliasError ?? null,
+                errorCode: d.errorCode ?? null,
+                created: d.created,
+                ready: d.ready,
+                inspectorUrl: d.inspectorUrl ?? null,
+              }));
+              console.log(JSON.stringify({
+                expectedHost: expected,
+                containsExpectedHost: deployments.some((d) => d.url === expected),
+                deployments: view,
+              }, null, 2));
+            '
+
+          echo "--- Direct deployment lookup by host ---"
+          LOOKUP_BODY="$(curl -sS "$LOOKUP_API" -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}")"
+          echo "$LOOKUP_BODY" | node -e '
+            const fs = require("fs");
+            const input = fs.readFileSync(0, "utf8");
+            const data = JSON.parse(input);
+            if (data.error) {
+              console.error("Deployment lookup error:", JSON.stringify(data));
+              process.exit(1);
+            }
+            console.log(JSON.stringify({
+              uid: data.uid ?? data.id ?? null,
+              url: data.url ?? null,
+              state: data.state ?? null,
+              readyState: data.readyState ?? null,
+              target: data.target ?? null,
+              aliasAssigned: data.aliasAssigned ?? null,
+              aliasError: data.aliasError ?? null,
+              errorCode: data.errorCode ?? null,
+              projectId: data.projectId ?? null,
+              inspectorUrl: data.inspectorUrl ?? null,
+            }, null, 2));
+          '
 
       - name: Smoke check deployment URL
         run: |
           set -euo pipefail
 
-          DEPLOY_URL="${{ steps.deploy.outputs.deploy_url }}"
+          DEPLOY_URL="${{ steps.resolve.outputs.deploy_url }}"
+          if [[ -z "$DEPLOY_URL" ]]; then
+            echo "Resolved deployment URL is empty"
+            exit 1
+          fi
+
           BLOCKED='^(401|403|404)$'
 
           check_url() {
