@@ -26,6 +26,7 @@ export function AppSidebarNav({ tree }: Props) {
 
   // Close mobile menu on navigation
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMobileOpen(false)
   }, [pathname])
 
@@ -172,6 +173,7 @@ function SidebarItem({
   const [isOpen, setIsOpen] = useState(isActive || isAncestor)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isActive || isAncestor) setIsOpen(true)
   }, [isActive, isAncestor])
 
@@ -188,7 +190,7 @@ function SidebarItem({
   return (
     <li>
       <div className="flex items-center">
-        <Link href={node.href} className={linkClass(isActive, true)}>
+        <Link href={node.href} className={linkClass(isActive)}>
           {node.title}
         </Link>
         <button
@@ -267,7 +269,7 @@ function ChevronIcon({ isOpen }: { isOpen: boolean }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-function linkClass(isActive: boolean, hasChildren = false): string {
+function linkClass(isActive: boolean): string {
   const base =
     'flex-1 block px-3 py-1.5 rounded-md text-sm transition-colors'
   const active =

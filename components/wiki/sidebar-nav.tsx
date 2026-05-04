@@ -48,6 +48,7 @@ function NavItem({
 
   // Keep section open when navigating into a child
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isActive || isAncestor) setIsOpen(true)
   }, [isActive, isAncestor])
 
@@ -66,7 +67,7 @@ function NavItem({
       <div className="flex items-center">
         <Link
           href={node.href}
-          className={navLinkClass(isActive, depth, true)}
+          className={navLinkClass(isActive, depth)}
         >
           {node.title}
         </Link>
@@ -120,7 +121,6 @@ function ChevronIcon({ isOpen }: { isOpen: boolean }) {
 function navLinkClass(
   isActive: boolean,
   depth = 0,
-  hasChildren = false,
 ): string {
   const base =
     'flex-1 block rounded px-2.5 py-1.5 text-sm transition-colors'

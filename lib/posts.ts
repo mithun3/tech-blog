@@ -64,7 +64,7 @@ function parsePostFile(filename: string) {
 export function getAllPostsMeta(): PostMeta[] {
   return getPostFiles()
     .map((filename) => {
-      const { slug, frontmatter, rawContent, stats } = parsePostFile(filename)
+      const { slug, frontmatter, stats } = parsePostFile(filename)
       return { slug, readingTime: stats.text, ...frontmatter }
     })
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
