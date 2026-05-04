@@ -53,6 +53,30 @@ jobs:
       - name: Pull Vercel environment information
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Ensure production access is public
+        run: |
+          set -euo pipefail
+
+          PROJECT_API="https://api.vercel.com/v9/projects/${{ env.VERCEL_PROJECT_ID }}?teamId=${{ env.VERCEL_ORG_ID }}"
+
+          RESPONSE="$(curl -sS -X PATCH "$PROJECT_API" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"ssoProtection":null,"trustedIps":null,"passwordProtection":null}')"
+
+          echo "$RESPONSE" | node -e '
+            const fs = require("fs");
+            const input = fs.readFileSync(0, "utf8");
+            const data = JSON.parse(input);
+            if (data.error) {
+              console.error("Failed to update deployment protection:", JSON.stringify(data));
+              process.exit(1);
+            }
+            console.log("ssoProtection:", data.ssoProtection ?? null);
+            console.log("trustedIps:", data.trustedIps ?? null);
+            console.log("passwordProtection:", data.passwordProtection ?? null);
+          '
+
       - name: Deploy to Vercel (production)
         id: deploy
         run: |
@@ -74,17 +98,38 @@ jobs:
           set -euo pipefail
 
           DEPLOY_URL="${{ steps.deploy.outputs.deploy_url }}"
+          BLOCKED='^(401|403|404)$'
+
+          check_url() {
+            local label="$1"
+            local url="$2"
+            local attempts=8
+            local delay=5
+
+            for attempt in $(seq 1 "$attempts"); do
+              status="$(curl -sS -L -D /tmp/headers.txt -o /tmp/body.txt -w '%{http_code}' "$url")"
+              echo "[$label][$attempt/$attempts] $url -> $status"
+
+              if [[ ! "$status" =~ $BLOCKED ]]; then
+                return 0
+              fi
+
+              if [[ "$attempt" -lt "$attempts" ]]; then
+                sleep "$delay"
+              fi
+            done
+
+            echo "Smoke check failed for $url"
+            echo "--- Response headers ---"
+            sed -n '1,30p' /tmp/headers.txt || true
+            echo "--- Response body ---"
+            sed -n '1,40p' /tmp/body.txt || true
+            return 1
+          }
 
           for path in "" "/blog"; do
             url="$DEPLOY_URL$path"
-            status="$(curl -sS -L -o /tmp/deploy-response.txt -w '%{http_code}' "$url")"
-            echo "[deploy] $url -> $status"
-
-            if [[ "$status" =~ ^(401|403|404)$ ]]; then
-              echo "Deployment URL smoke check failed for $url with status $status"
-              head -n 40 /tmp/deploy-response.txt || true
-              exit 1
-            fi
+            check_url "deploy" "$url"
           done
 
       - name: Smoke check custom domain
@@ -92,6 +137,35 @@ jobs:
           set -euo pipefail
 
           CUSTOM_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}"
+          BLOCKED='^(401|403|404)$'
+
+          check_url() {
+            local label="$1"
+            local url="$2"
+            local attempts=8
+            local delay=5
+
+            for attempt in $(seq 1 "$attempts"); do
+              status="$(curl -sS -L -D /tmp/headers.txt -o /tmp/body.txt -w '%{http_code}' "$url")"
+              echo "[$label][$attempt/$attempts] $url -> $status"
+
+              if [[ ! "$status" =~ $BLOCKED ]]; then
+                return 0
+              fi
+
+              if [[ "$attempt" -lt "$attempts" ]]; then
+                sleep "$delay"
+              fi
+            done
+
+            echo "Smoke check failed for $url"
+            echo "--- Response headers ---"
+            sed -n '1,30p' /tmp/headers.txt || true
+            echo "--- Response body ---"
+            sed -n '1,40p' /tmp/body.txt || true
+            return 1
+          }
+
           if [[ -z "$CUSTOM_URL" ]]; then
             echo "Missing NEXT_PUBLIC_SITE_URL secret"
             exit 1
@@ -99,13 +173,6 @@ jobs:
 
           for path in "" "/blog"; do
             url="$CUSTOM_URL$path"
-            status="$(curl -sS -L -o /tmp/custom-response.txt -w '%{http_code}' "$url")"
-            echo "[custom] $url -> $status"
-
-            if [[ "$status" =~ ^(401|403|404)$ ]]; then
-              echo "Custom domain smoke check failed for $url with status $status"
-              head -n 40 /tmp/custom-response.txt || true
-              exit 1
-            fi
+            check_url "custom" "$url"
           done
 
