@@ -54,5 +54,58 @@ jobs:
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy to Vercel (production)
-        run: vercel deploy --yes --prod --token=${{ secrets.VERCEL_TOKEN }}
+        id: deploy
+        run: |
+          set -euo pipefail
+
+          DEPLOY_OUTPUT="$(vercel deploy --yes --prod --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "$DEPLOY_OUTPUT"
+
+          DEPLOY_URL="$(printf '%s\n' "$DEPLOY_OUTPUT" | grep -Eo 'https://[^ ]+\.vercel\.app' | tail -n1)"
+          if [[ -z "$DEPLOY_URL" ]]; then
+            echo "Failed to parse deployment URL from Vercel CLI output"
+            exit 1
+          fi
+
+          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke check deployment URL
+        run: |
+          set -euo pipefail
+
+          DEPLOY_URL="${{ steps.deploy.outputs.deploy_url }}"
+
+          for path in "" "/blog"; do
+            url="$DEPLOY_URL$path"
+            status="$(curl -sS -L -o /tmp/deploy-response.txt -w '%{http_code}' "$url")"
+            echo "[deploy] $url -> $status"
+
+            if [[ "$status" =~ ^(401|403|404)$ ]]; then
+              echo "Deployment URL smoke check failed for $url with status $status"
+              head -n 40 /tmp/deploy-response.txt || true
+              exit 1
+            fi
+          done
+
+      - name: Smoke check custom domain
+        run: |
+          set -euo pipefail
+
+          CUSTOM_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}"
+          if [[ -z "$CUSTOM_URL" ]]; then
+            echo "Missing NEXT_PUBLIC_SITE_URL secret"
+            exit 1
+          fi
+
+          for path in "" "/blog"; do
+            url="$CUSTOM_URL$path"
+            status="$(curl -sS -L -o /tmp/custom-response.txt -w '%{http_code}' "$url")"
+            echo "[custom] $url -> $status"
+
+            if [[ "$status" =~ ^(401|403|404)$ ]]; then
+              echo "Custom domain smoke check failed for $url with status $status"
+              head -n 40 /tmp/custom-response.txt || true
+              exit 1
+            fi
+          done
 
