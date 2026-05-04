@@ -130,6 +130,24 @@ jobs:
           echo "Resolved deployment host: $DEPLOY_HOST"
           echo "deploy_url=https://$DEPLOY_HOST" >> "$GITHUB_OUTPUT"
 
+      - name: Explicitly alias deployment to custom host
+        run: |
+          set -euo pipefail
+
+          RESOLVED_URL="${{ steps.resolve.outputs.deploy_url }}"
+          CUSTOM_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}"
+
+          if [[ -z "$RESOLVED_URL" || -z "$CUSTOM_URL" ]]; then
+            echo "Missing RESOLVED_URL or NEXT_PUBLIC_SITE_URL"
+            exit 1
+          fi
+
+          DEPLOY_HOST="${RESOLVED_URL#https://}"
+          CUSTOM_HOST="$(CUSTOM_URL="$CUSTOM_URL" node -e 'process.stdout.write(new URL(process.env.CUSTOM_URL).hostname)')"
+
+          echo "Aliasing $DEPLOY_HOST -> $CUSTOM_HOST"
+          vercel alias set "$DEPLOY_HOST" "$CUSTOM_HOST" --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Deployment diagnostics snapshot
         run: |
           set -euo pipefail
@@ -173,8 +191,8 @@ jobs:
             '
 
           echo "--- Latest production deployments (top 5) ---"
-          DEPLOY_HOST="$RESOLVED_HOST" curl -sS "$DEPLOYMENTS_API" \
-            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | node -e '
+          curl -sS "$DEPLOYMENTS_API" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | DEPLOY_HOST="$RESOLVED_HOST" node -e '
               const fs = require("fs");
               const expected = process.env.DEPLOY_HOST;
               const input = fs.readFileSync(0, "utf8");
@@ -190,9 +208,11 @@ jobs:
                 state: d.state,
                 readyState: d.readyState,
                 target: d.target,
+                defaultRoute: d.defaultRoute ?? null,
                 aliasAssigned: d.aliasAssigned ?? null,
                 aliasError: d.aliasError ?? null,
                 errorCode: d.errorCode ?? null,
+                seatBlock: d.seatBlock ?? null,
                 created: d.created,
                 ready: d.ready,
                 inspectorUrl: d.inspectorUrl ?? null,
@@ -220,99 +240,109 @@ jobs:
               state: data.state ?? null,
               readyState: data.readyState ?? null,
               target: data.target ?? null,
+              defaultRoute: data.defaultRoute ?? null,
               aliasAssigned: data.aliasAssigned ?? null,
               aliasError: data.aliasError ?? null,
               errorCode: data.errorCode ?? null,
               projectId: data.projectId ?? null,
+              seatBlock: data.seatBlock ?? null,
               inspectorUrl: data.inspectorUrl ?? null,
             }, null, 2));
           '
 
-      - name: Smoke check deployment URL
+          echo "--- Project domain mappings ---"
+          DOMAINS_API="https://api.vercel.com/v9/projects/${{ env.VERCEL_PROJECT_ID }}/domains?teamId=${{ env.VERCEL_ORG_ID }}"
+          DOMAINS_BODY="$(curl -sS "$DOMAINS_API" -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}")"
+          echo "$DOMAINS_BODY" | node -e '
+            const fs = require("fs");
+            const input = fs.readFileSync(0, "utf8");
+            const data = JSON.parse(input);
+            if (data.error) {
+              console.log("Domain mapping lookup error:", JSON.stringify(data));
+              process.exit(0);
+            }
+            const domains = Array.isArray(data.domains) ? data.domains : [];
+            console.log(JSON.stringify(domains.map((d) => ({
+              name: d.name,
+              apexName: d.apexName ?? null,
+              verified: d.verified ?? null,
+              redirect: d.redirect ?? null,
+              redirectStatusCode: d.redirectStatusCode ?? null,
+              gitBranch: d.gitBranch ?? null,
+            })), null, 2));
+          '
+
+      - name: Smoke check public access
         run: |
           set -euo pipefail
 
           DEPLOY_URL="${{ steps.resolve.outputs.deploy_url }}"
-          if [[ -z "$DEPLOY_URL" ]]; then
-            echo "Resolved deployment URL is empty"
-            exit 1
-          fi
-
-          BLOCKED='^(401|403|404)$'
-
-          check_url() {
-            local label="$1"
-            local url="$2"
-            local attempts=8
-            local delay=5
-
-            for attempt in $(seq 1 "$attempts"); do
-              status="$(curl -sS -L -D /tmp/headers.txt -o /tmp/body.txt -w '%{http_code}' "$url")"
-              echo "[$label][$attempt/$attempts] $url -> $status"
-
-              if [[ ! "$status" =~ $BLOCKED ]]; then
-                return 0
-              fi
-
-              if [[ "$attempt" -lt "$attempts" ]]; then
-                sleep "$delay"
-              fi
-            done
-
-            echo "Smoke check failed for $url"
-            echo "--- Response headers ---"
-            sed -n '1,30p' /tmp/headers.txt || true
-            echo "--- Response body ---"
-            sed -n '1,40p' /tmp/body.txt || true
-            return 1
-          }
-
-          for path in "" "/blog"; do
-            url="$DEPLOY_URL$path"
-            check_url "deploy" "$url"
-          done
-
-      - name: Smoke check custom domain
-        run: |
-          set -euo pipefail
-
           CUSTOM_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}"
           BLOCKED='^(401|403|404)$'
-
-          check_url() {
-            local label="$1"
-            local url="$2"
-            local attempts=8
-            local delay=5
-
-            for attempt in $(seq 1 "$attempts"); do
-              status="$(curl -sS -L -D /tmp/headers.txt -o /tmp/body.txt -w '%{http_code}' "$url")"
-              echo "[$label][$attempt/$attempts] $url -> $status"
-
-              if [[ ! "$status" =~ $BLOCKED ]]; then
-                return 0
-              fi
-
-              if [[ "$attempt" -lt "$attempts" ]]; then
-                sleep "$delay"
-              fi
-            done
-
-            echo "Smoke check failed for $url"
-            echo "--- Response headers ---"
-            sed -n '1,30p' /tmp/headers.txt || true
-            echo "--- Response body ---"
-            sed -n '1,40p' /tmp/body.txt || true
-            return 1
-          }
+          FAILURE=0
 
           if [[ -z "$CUSTOM_URL" ]]; then
             echo "Missing NEXT_PUBLIC_SITE_URL secret"
             exit 1
           fi
 
+          if [[ -z "$DEPLOY_URL" ]]; then
+            echo "Resolved deployment URL is empty"
+            FAILURE=1
+          fi
+
+          check_url() {
+            local label="$1"
+            local url="$2"
+            local attempts=8
+            local delay=5
+            local status=""
+
+            for attempt in $(seq 1 "$attempts"); do
+              status="$(curl -sS -L -D /tmp/headers.txt -o /tmp/body.txt -w '%{http_code}' "$url")"
+              echo "[$label][$attempt/$attempts] $url -> $status"
+
+              if [[ ! "$status" =~ $BLOCKED ]]; then
+                return 0
+              fi
+
+              if [[ "$attempt" -lt "$attempts" ]]; then
+                sleep "$delay"
+              fi
+            done
+
+            echo "Smoke check failed for $url"
+            echo "--- Response headers ---"
+            sed -n '1,30p' /tmp/headers.txt || true
+            echo "--- Response body ---"
+            sed -n '1,40p' /tmp/body.txt || true
+            return 1
+          }
+
+          # Custom domain must be publicly reachable.
           for path in "" "/blog"; do
             url="$CUSTOM_URL$path"
-            check_url "custom" "$url"
+            if ! check_url "custom" "$url"; then
+              FAILURE=1
+            fi
+          done
+
+          # Deployment URL can be protected in some Vercel configurations.
+          if [[ -n "$DEPLOY_URL" ]]; then
+            for path in "" "/blog"; do
+              url="$DEPLOY_URL$path"
+              if ! check_url "deploy" "$url"; then
+                echo "Warning: deployment URL check failed for $url"
+              fi
+            done
+          fi
+
+          if [[ "$FAILURE" -ne 0 ]]; then
+            echo "Public smoke checks failed (custom domain unreachable)."
+            exit 1
+          fi
+
+          for path in "" "/blog"; do
+            echo "Public smoke check passed for $CUSTOM_URL$path"
           done
 
