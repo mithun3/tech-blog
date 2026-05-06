@@ -1,0 +1,36 @@
+---
+title: "Virtualization"
+description: "How virtual machines, Linux containers, and Proxmox fit together in a practical homelab."
+publishedAt: "2026-05-06"
+order: 2
+status: published
+---
+
+# Virtualization
+
+If networking is the plumbing, virtualization is the floor plan. It is the part of a homelab that turns one box into several useful machines without making the whole thing feel improvised.
+
+This section stays focused on compute, isolation, storage behavior, and day-2 operations. When a topic slides into bridges, DNS, or router behavior, it points back to the Networking section instead of repeating the same explanation with different nouns.
+
+## In This Section
+
+- [Virtualization Fundamentals](/pages/virtualization/fundamentals) - the three big models, where they came from, and when each one earns its keep.
+- [VM Architecture](/pages/virtualization/vm-architecture) - what QEMU and KVM actually do, why VirtIO matters, and which defaults usually age well.
+- [LXC and OCI Containers](/pages/virtualization/lxc-and-oci) - the difference between system containers, application containers, and the standards around them.
+- [Resource Allocation](/pages/virtualization/resource-allocation) - practical sizing for CPU, memory, disk, and headroom.
+- [Storage and Snapshots](/pages/virtualization/storage-and-snapshots) - disk formats, controller choices, snapshots, templates, and backup boundaries.
+- [Networking Models](/pages/virtualization/networking-models) - bridged, NAT, isolated labs, and where VM or container networking choices start.
+- [Proxmox Stack](/pages/virtualization/proxmox-stack) - how Proxmox sits on top of Linux and why it works well for mixed VM and container labs.
+- [VM Lifecycle](/pages/virtualization/vm-lifecycle) - create, baseline, snapshot, clone, back up, migrate, retire.
+- [Best Practices](/pages/virtualization/best-practices) - the habits that keep a lab understandable six months later.
+- [Troubleshooting and Performance](/pages/virtualization/troubleshooting) - what to check when guests feel slow, flaky, or strangely fragile.
+
+## Read This Alongside Networking
+
+These pages pair well with the existing networking material:
+
+- [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox)
+- [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking)
+- [Router Essentials](/pages/networking/basics/router-essentials)
+
+Those pages explain how packets move. This section explains what kind of machine is sending them, how isolated it really is, and how much trouble it will cause when you need to change it later.

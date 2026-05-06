@@ -1,0 +1,98 @@
+---
+title: "VM Architecture"
+description: "How QEMU and KVM divide the work, what a guest really sees, and which VM defaults are usually worth keeping."
+publishedAt: "2026-05-06"
+order: 2
+status: published
+---
+
+# VM Architecture
+
+A virtual machine is not magic. It is a careful lie.
+
+The guest OS is allowed to believe it has a motherboard, firmware, CPUs, disks, and network cards. Underneath, a hypervisor builds that illusion and keeps it fast enough to be useful.
+
+## The Stack In Plain English
+
+```text
+Applications inside the guest
+Guest operating system
+QEMU virtual hardware model
+KVM acceleration in the Linux kernel
+Host Linux kernel and Proxmox services
+Physical CPU, RAM, storage, and network
+```
+
+On Proxmox, QEMU creates the machine and KVM keeps it from being unbearably slow.
+
+## QEMU And KVM Do Different Jobs
+
+QEMU is the user-space hypervisor. It provides the virtual hardware model: disks, NICs, firmware options, display devices, PCI layout, and the rest of the machine shape.
+
+KVM is the kernel-side accelerator. It uses CPU virtualization features such as VT-x or AMD-V so guest code can run close to native speed instead of being interpreted instruction by instruction.
+
+That division of labor matters because it explains most behavior you see in practice:
+
+- CPU-heavy guests often perform surprisingly well
+- I/O choices still matter a lot because device emulation and storage layout still exist
+- the guest can be fast and still feel wrong if you picked awkward virtual hardware
+
+## What The Guest Actually Gets
+
+### vCPU
+
+Each vCPU is a scheduling target on the host. You can oversubscribe CPU moderately because idle guests give time back.
+
+That works well right up until too many guests become busy at once. When that happens, the host starts context-switching its way into mediocrity.
+
+### Memory
+
+Memory is less elastic than CPU. A VM has a configured upper bound, and that number should be treated seriously.
+
+Proxmox can reclaim memory with ballooning when the guest supports it, so the story is more flexible than "RAM can never move." Still, memory planning is where sloppy labs usually get punished.
+
+### Disk
+
+The guest sees disks or controllers. The host sees image files, block devices, or storage volumes. That split is why controller choice, image format, and storage backend all matter.
+
+### Network
+
+The guest sees a NIC. The host sees a tap-backed or otherwise virtual interface attached to a bridge or other network model.
+
+For the full bridge path, see [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking) and [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox).
+
+## VirtIO Should Usually Be Your First Choice
+
+Proxmox documentation is pretty clear here, and experience agrees: use VirtIO devices whenever your guest supports them.
+
+That usually means:
+
+- VirtIO SCSI or VirtIO Block for disks
+- VirtIO NICs for networking
+- the guest agent for cleaner shutdowns, filesystem coordination, and better telemetry
+
+Old emulated devices still have a place for ancient guests or awkward imports, but they should feel like compatibility tools, not defaults.
+
+## A Few Defaults That Age Well
+
+### CPU Type
+
+If this is a single-node lab or a cluster with matching CPUs, `host` is usually the cleanest choice.
+
+If live migration across unlike nodes matters, pick a lower common CPU model and accept the slightly less aggressive feature set. That tradeoff is easier than discovering a migration problem during maintenance.
+
+### Firmware
+
+SeaBIOS is still fine for many ordinary Linux guests.
+
+OVMF makes more sense for modern guests, Windows 11-class installs, and hardware passthrough scenarios. If you use OVMF, treat the EFI disk as part of the VM, because it is.
+
+### Machine Type
+
+Q35 is the better fit for PCIe-aware setups and passthrough work. Old defaults still exist, but there is no reason to cling to them unless a specific guest demands it.
+
+## The Practical Takeaway
+
+You do not need to memorize every QEMU knob. You do need to remember that virtual hardware choices are real architectural choices.
+
+The guest will live with them long after the create wizard is closed.

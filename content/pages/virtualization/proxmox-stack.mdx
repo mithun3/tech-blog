@@ -1,0 +1,66 @@
+---
+title: "Proxmox Stack"
+description: "How Proxmox layers QEMU, KVM, LXC, Linux storage, and networking into one workable homelab platform."
+publishedAt: "2026-05-06"
+order: 7
+status: published
+---
+
+# Proxmox Stack
+
+Proxmox is not a mystery box. It is a pragmatic stack with a good control plane.
+
+```text
+Web UI and API
+Proxmox management services
+QEMU/KVM for VMs and LXC for containers
+Linux kernel, storage stack, and networking stack
+Physical CPU, RAM, disks, and NICs
+```
+
+That layering is why Proxmox feels approachable once you stop treating it like an appliance.
+
+## What Proxmox Actually Gives You
+
+Proxmox does not invent virtualization from scratch. It integrates existing Linux virtualization building blocks and makes them manageable.
+
+In practice that means one place to manage:
+
+- VM and container lifecycle
+- storage targets and volumes
+- snapshots, templates, and backups
+- bridges, VLAN-aware interfaces, and guest networking
+- clustering and migration workflows
+
+## Why It Works Well In A Homelab
+
+It sits in a useful middle ground.
+
+It is more convenient than hand-rolling raw KVM, libvirt, and LXC plumbing.
+
+It is less financially absurd than dragging enterprise hypervisor habits into a personal lab.
+
+And, maybe most importantly, it lets VMs and containers live in the same mental model.
+
+## Where The Boundaries Still Matter
+
+Proxmox helps, but it does not repeal reality.
+
+You still need:
+
+- decent storage
+- sensible network design
+- backups you can restore
+- realistic expectations about hardware passthrough and migration
+
+If the storage is fragile, Proxmox cannot make it reliable with a prettier panel.
+
+## A Reasonable Split In A Mixed Lab
+
+Use Proxmox VMs for workloads that need full machine behavior, different operating systems, or stronger isolation.
+
+Use LXC containers for lightweight Linux services that benefit from fast start and low overhead.
+
+Use OCI tooling inside purpose-built guests when your application workflow really wants Docker or Kubernetes semantics.
+
+That split stays understandable as the lab grows. That is the real win.

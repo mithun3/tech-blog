@@ -1,0 +1,83 @@
+---
+title: "Storage and Snapshots"
+description: "How VM disk formats, controller choices, snapshots, templates, and backup boundaries work in a Proxmox homelab."
+publishedAt: "2026-05-06"
+order: 5
+status: published
+---
+
+# Storage and Snapshots
+
+Disks are where virtualization stops being abstract. Every clean demo stays easy right up until storage gets slow, full, or inconsistent.
+
+## The First Decision Is The Storage Layer
+
+On file-based storage, you usually have a choice between raw and qcow2 images.
+
+On block-backed storage such as LVM, ZFS, or Ceph, the story changes. Raw volumes are common there, and snapshot behavior often comes from the storage layer rather than from the VM image format itself.
+
+That is why "qcow2 vs raw" is not a universal religious war. It depends on where the disk actually lives.
+
+## QCOW2 Vs Raw In Practice
+
+### QCOW2
+
+QCOW2 is flexible. It supports thin provisioning, copy-on-write behavior, and convenient snapshot workflows on file-backed storage.
+
+That makes it a strong fit for labs where rollback speed matters more than squeezing the last few percent out of storage throughput.
+
+### Raw
+
+Raw is simpler and can be a little faster. On storage backends that already provide snapshots and thin allocation, raw is often the right answer because the backend is doing the heavy lifting.
+
+## Controller Choices Matter More Than People Expect
+
+For modern Linux guests, Proxmox recommends VirtIO-based controllers for good reason.
+
+The default that ages well is usually:
+
+- VirtIO SCSI single
+- IO Thread enabled for busy disks
+- Discard enabled when the storage and guest support trim
+
+IDE and other legacy controllers still exist mostly for compatibility work, imports, or very old guests.
+
+## Snapshots, Templates, And Backups Are Different Tools
+
+### Snapshot
+
+A snapshot is a fast "let me come back here" point. It is perfect before risky changes.
+
+It is not a real backup plan.
+
+### Template
+
+A template is a reusable starting image. Use it when you want repeatable clones without reinstalling the OS every time.
+
+### Backup
+
+A backup is for recovery after something genuinely bad happened: storage trouble, host failure, corruption, or your own impatience.
+
+If the host disappears and your plan dies with it, that was never a snapshot problem. It was a backup problem.
+
+## Copy-On-Write Is Why Snapshots Feel Instant
+
+The reason snapshots are so useful is that they usually avoid copying the whole disk up front.
+
+Instead, the base state is preserved and new writes are stored separately. That is why snapshots are quick and why leaving too many of them around quietly becomes its own storage problem.
+
+## Trim And Discard
+
+If your storage supports thin provisioning, enable discard where it makes sense and make sure the guest can issue trim.
+
+Otherwise guests will happily free space internally while the backend keeps believing the old blocks are still in use.
+
+## Guest Agent Helps Here Too
+
+The QEMU Guest Agent is not just a convenience feature. It improves the storage story:
+
+- better shutdown behavior
+- filesystem freeze and thaw for consistent snapshot-style operations
+- optional guest trim after some move or clone operations
+
+That is especially useful once the lab stops being toy-sized.

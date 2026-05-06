@@ -1,0 +1,84 @@
+---
+title: "LXC and OCI Containers"
+description: "What LXC system containers are, how OCI containers differ, and where each one fits in a Proxmox-based homelab."
+publishedAt: "2026-05-06"
+order: 3
+status: published
+---
+
+# LXC and OCI Containers
+
+People say "containers" as if there is one thing hiding behind that word. In a Proxmox lab, there are at least two different ideas that deserve to stay separate in your head.
+
+## LXC Feels Like A Small Linux Server
+
+An LXC container shares the host kernel but gets its own isolated view of processes, networking, mounts, and resource limits.
+
+That is why it feels like a tiny Linux machine:
+
+- it has a root filesystem
+- it can run an init system
+- you can SSH into it
+- it behaves like a service host rather than a single packaged process
+
+In Proxmox, LXC is the native container model. It is first-class, well integrated, and a very sensible home for lightweight infrastructure.
+
+## How LXC Isolation Actually Works
+
+### Namespaces
+
+Namespaces make a container believe it owns its own process tree, network interfaces, mount points, and sometimes user IDs.
+
+### Cgroups
+
+Cgroups enforce CPU, memory, swap, and other resource limits. That is where the "this container only gets so much" part becomes real.
+
+### Security Controls
+
+AppArmor, seccomp, and privilege choices narrow what the container can do. Proxmox defaults to unprivileged containers for a reason.
+
+The short version is simple: containers are isolated, but they are isolated by a shared kernel. That makes them efficient. It also defines their limits.
+
+## OCI Is A Standard Family, Not A Brand Name
+
+The Open Container Initiative defines specifications for container images, runtimes, and distribution.
+
+In plain terms:
+
+- OCI is the rulebook
+- Docker and Podman are tooling and user experience on top of that world
+- containerd and similar runtimes are the machinery that actually runs OCI-style containers
+
+This matters because OCI containers are usually application-shaped. They are built to package and run one service or process cleanly, especially inside orchestration systems.
+
+## LXC And OCI Solve Different Problems
+
+LXC is a system container. It is a lightweight place to run a Linux environment.
+
+OCI containers are application packaging. They are closer to "run this app image" than "manage this little server."
+
+That is why both can be useful in the same homelab without competing directly.
+
+## Where Proxmox Fits Today
+
+Proxmox is still centered on QEMU VMs and LXC system containers. That is the mental model worth keeping.
+
+Proxmox documentation has started exposing OCI image support, but it is best understood as an additional path, not as proof that Proxmox has suddenly become a Docker replacement.
+
+If you want the classic container ecosystem, it is still common to run Docker or Kubernetes inside a VM or an intentionally prepared Linux guest.
+
+## When To Use Which
+
+Use LXC when you want a small Linux service host with very little overhead.
+
+Use OCI containers when you care most about application packaging, repeatable builds, and runtime portability.
+
+Use a VM when the workload needs a separate kernel, stronger isolation, or an operating system that is not compatible with the host kernel.
+
+## Read This With The Networking Pages
+
+For the actual bridge path and NIC behavior, see [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking).
+
+For bridge design and `vmbr0` layout, see [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox).
+
+Those pages explain how traffic moves. This page explains why the guest types behave so differently before a single packet ever leaves them.

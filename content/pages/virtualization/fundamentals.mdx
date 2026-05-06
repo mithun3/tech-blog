@@ -1,0 +1,78 @@
+---
+title: "Virtualization Fundamentals"
+description: "The core virtualization models, the tradeoffs behind them, and how to choose between VMs, LXC, and OCI containers."
+publishedAt: "2026-05-06"
+order: 1
+status: published
+---
+
+# Virtualization Fundamentals
+
+Virtualization is an old idea wearing modern clothes. The packaging changed. The goal did not: get more useful work out of the same hardware without letting workloads trip over each other.
+
+## A Short Timeline
+
+```text
+1960s-1970s  Mainframes and time-sharing
+1990s        Paravirtualization research and early Linux experiments
+2005-2006    Intel VT-x and AMD-V make x86 virtualization practical
+2008 onward  KVM becomes a normal part of the Linux story
+2010s        LXC, Docker, and the container boom
+2015 onward  OCI standards and Kubernetes become mainstream
+```
+
+The important part is not the dates. It is the direction of travel. We kept moving toward less wasted hardware, faster provisioning, and tighter control over isolation.
+
+## The Three Models That Matter
+
+### Full Virtualization
+
+A virtual machine pretends to be a whole computer. The guest sees CPUs, RAM, disks, network cards, firmware, and a motherboard layout. It boots its own kernel and behaves like it owns the place.
+
+This is the right tool when you need:
+
+- a different operating system than the host
+- stronger isolation at the kernel boundary
+- easy snapshots and full-system recovery points
+- clean support for Windows, BSD, or older Linux releases
+
+The cost is overhead. Every VM brings a whole OS with it, and that means more memory, more disk, and slower startup.
+
+### Paravirtualization
+
+Paravirtualization is the idea that the guest knows it is virtualized and cooperates with the hypervisor instead of pretending the hardware is fully real.
+
+In modern homelabs you rarely choose "paravirtualization" as a platform on its own. You meet it through paravirtualized devices like VirtIO. That is why this topic still matters: a lot of VM performance comes from the guest using virtualization-friendly drivers instead of clinging to old emulated hardware.
+
+### OS-Level Virtualization
+
+Containers share the host kernel and isolate everything else with namespaces, cgroups, and security controls such as AppArmor or seccomp.
+
+This is the right tool when you want:
+
+- fast startup
+- high density
+- low overhead for Linux services
+- simple service-shaped workloads
+
+The tradeoff is obvious and important: if the host kernel is the shared foundation, the isolation model is different from a VM. Good enough for many workloads. Not the same thing.
+
+## Choosing The Right Level
+
+Use a VM when you need a different kernel, cleaner isolation, or a guest that expects to be treated like a whole machine.
+
+Use an LXC container when the workload is just a Linux service and you care about density, fast boot, and low overhead.
+
+Use OCI containers when you are packaging applications, especially if you want that packaging to travel cleanly across Docker, Kubernetes, or other runtimes.
+
+That last point matters: OCI is about standards, not brand names. Docker, containerd, and other tools sit on top of those standards rather than replacing them.
+
+## The Rule Of Thumb That Usually Holds Up
+
+When the workload is mostly "I need a small Linux server," start with LXC.
+
+When the workload is "I need a full machine with its own OS assumptions," start with a VM.
+
+When the workload is "I need portable application packaging and orchestration," start thinking in OCI images and container runtimes.
+
+That is not dogma. It is just the least painful default in most homelabs.

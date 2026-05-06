@@ -1,0 +1,84 @@
+---
+title: "VM Lifecycle"
+description: "A practical lifecycle for guests in Proxmox: create, baseline, snapshot, clone, back up, migrate, and retire."
+publishedAt: "2026-05-06"
+order: 8
+status: published
+---
+
+# VM Lifecycle
+
+A good guest has a life outside the create button. It gets a clean start, a stable baseline, safe change points, real backups, and an exit strategy.
+
+## 1. Create With Intent
+
+Pick the guest type, firmware, disk controller, and network model based on the workload, not on whatever the wizard suggested while you were in a hurry.
+
+For most modern Linux guests, that usually means:
+
+- VirtIO disk and NIC
+- a sane bridged network
+- enough disk for both the OS and the first obvious wave of data
+
+## 2. First Boot Is For Boring Work
+
+The first boot should handle the essentials:
+
+- apply updates
+- install the QEMU Guest Agent
+- install VirtIO drivers for Windows where needed
+- configure identity, time, and access
+- document what the guest is for before memory gets fuzzy
+
+This step is not glamorous, but it saves a lot of rework later.
+
+## 3. Take A Baseline Snapshot
+
+Once the guest is clean and stable, snapshot it.
+
+That baseline becomes your "known good" point before experiments, app installs, or large configuration changes.
+
+## 4. Change In Stages
+
+Do not stack five risky changes into one unlabelled afternoon.
+
+Snapshot before:
+
+- major OS upgrades
+- driver changes
+- database version jumps
+- new middleware or runtime installs
+- security policy changes that might lock you out
+
+That habit turns mistakes into brief detours instead of reconstruction projects.
+
+## 5. Clone Or Template When Repetition Starts
+
+If you find yourself installing the same base guest twice, it probably wants to become a template.
+
+Templates and clones are how a lab stops being artisanal in the worst possible way.
+
+## 6. Back Up For Actual Recovery
+
+Snapshots are for rollback. Backups are for disaster.
+
+Keep both ideas in the lab, but do not confuse them.
+
+## 7. Migrate Only When The Prerequisites Hold
+
+Live migration is great when the guest, storage, network, and hardware assumptions are all aligned.
+
+It is also the first feature people accidentally break with passthrough devices, unusual CPU choices, or local-only resources.
+
+For containers, the story is different. Proxmox containers do not give you the same seamless live migration story as VMs. Restart migration is the practical model to keep in mind.
+
+## 8. Retire Cleanly
+
+Before deleting a guest:
+
+- export or archive what still matters
+- remove it from backups and monitoring
+- note why it was retired
+- free the IP, storage, and naming assumptions around it
+
+Deletion is easy. Untangling a badly retired guest is not.

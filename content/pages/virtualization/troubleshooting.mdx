@@ -1,0 +1,91 @@
+---
+title: "Troubleshooting and Performance"
+description: "What to check when VMs or containers are slow, fail to boot, lose network access, or behave strangely under load."
+publishedAt: "2026-05-06"
+order: 10
+status: published
+---
+
+# Troubleshooting and Performance
+
+When a guest feels wrong, pick the layer before you pick the fix. Throwing more cores at a storage problem is how people lose weekends.
+
+## If The Guest Feels Slow
+
+Start with four questions:
+
+1. Is CPU actually busy?
+2. Is memory tight or swapping?
+3. Is disk I/O the real bottleneck?
+4. Is the problem really network latency in disguise?
+
+Use host graphs and guest-side tools together. One without the other usually tells a flattering lie.
+
+## If A VM Will Not Boot Cleanly
+
+Check the boring causes first:
+
+- storage unavailable or full
+- wrong controller or firmware choice for the guest
+- imported image expecting different hardware
+- guest agent or boot order assumptions that changed during edits
+
+This is also where old compatibility choices come back to collect rent.
+
+## If Networking Is Weird
+
+Do not debug that page from memory. Use the existing networking pages.
+
+Start with:
+
+- [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox)
+- [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking)
+- [Network Troubleshooting](/pages/networking/homelab-architecture/network-troubleshooting)
+
+They already cover the actual path better than a duplicate summary here would.
+
+## If A Container Refuses To Start
+
+Containers fail for different reasons than VMs.
+
+Common culprits are:
+
+- mount or bind path problems
+- permission issues with unprivileged mappings
+- features that expect kernel behavior the host is not offering
+- older distributions that do not play nicely with newer cgroup environments
+
+Sometimes the right answer is not "keep fighting the container." Sometimes the workload simply belongs in a VM.
+
+## If Snapshots Or Backups Behave Poorly
+
+Check whether the guest agent is installed, enabled, and actually running.
+
+For Windows, be aware that filesystem freeze behavior can get complicated around VSS-aware applications. The guest agent is still useful, but it is not something to configure blindly on important database workloads.
+
+## If Disk Usage Never Seems To Shrink
+
+Look for trim and discard gaps.
+
+The guest can delete files all day long, but if discard is disabled or trim never runs, the backend may still treat the old blocks as occupied.
+
+## Performance Knobs Worth Touching
+
+These usually matter:
+
+- VirtIO devices instead of legacy emulation
+- VirtIO SCSI single plus IO Thread for busy disks
+- CPU type chosen with migration requirements in mind
+- multiqueue on VirtIO NICs only when the guest truly handles high packet rates
+
+These are the ones to treat carefully:
+
+- aggressive CPU pinning
+- passthrough-heavy designs that quietly kill migration options
+- complicated storage layouts introduced before you needed them
+
+## The Habit That Saves Time
+
+When a guest misbehaves, change one thing, test it, and leave notes.
+
+The lab gets easier the moment you stop trying to debug three layers at once.

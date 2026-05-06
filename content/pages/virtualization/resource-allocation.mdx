@@ -1,0 +1,76 @@
+---
+title: "Resource Allocation"
+description: "Practical sizing for CPU, memory, disk, and headroom across VMs and containers in a homelab."
+publishedAt: "2026-05-06"
+order: 4
+status: published
+---
+
+# Resource Allocation
+
+Bad sizing decisions feel harmless on day one and annoying for months after. The goal is not to find the perfect number. It is to give each workload enough room to breathe while leaving the host some dignity.
+
+## CPU
+
+CPU is the most forgiving resource in a lab.
+
+You can oversubscribe it moderately because guests spend a lot of time idle, blocked on I/O, or simply waiting for humans. That is why a host with 12 physical cores can still support more than 12 total vCPUs across guests without immediately becoming unusable.
+
+That said, oversubscription is not free. If too many busy guests line up at once, the host pays in scheduling overhead and latency.
+
+Two Proxmox settings matter here:
+
+- CPU limit caps how much total CPU time a guest can consume
+- CPU weight decides who gets preference when guests compete
+
+Use those when one noisy guest keeps trying to behave like it rented the whole server.
+
+## Memory
+
+Memory needs more respect.
+
+VMs have a configured ceiling, and that number should not be picked casually. Proxmox can reclaim memory with ballooning when the guest supports it, so memory is not perfectly rigid, but it is still much easier to hurt the host with bad RAM planning than with slightly generous vCPU counts.
+
+Containers behave differently. Because they share the host kernel, they often sit below their configured limit until they actually need it.
+
+That means a mixed lab can feel roomier than the raw numbers suggest, but only if you leave real headroom.
+
+## Disk
+
+Disk sizing is where optimism usually sneaks in.
+
+The OS volume is rarely the real problem. Data, logs, caches, package layers, model files, and backups are the usual reason a guest ends up cramped.
+
+A simple habit helps: size for the workload, not just for the install media.
+
+## Starting Points That Usually Make Sense
+
+These are not laws. They are decent first drafts.
+
+- Reverse proxy or utility LXC: 1-2 vCPU, 512 MB-1 GB RAM, 4-8 GB disk
+- Small Linux app VM: 2 vCPU, 2-4 GB RAM, 20-40 GB disk
+- Database guest: 2-4 vCPU, 4-8 GB RAM, separate room for data growth
+- Windows lab VM: 4 vCPU, 8-16 GB RAM, 60 GB plus whatever the workload actually stores
+- Docker or k3s host VM: 2-4 vCPU, 4-8 GB RAM, disk sized for images, logs, and persistent volumes
+
+## Leave Headroom On Purpose
+
+Do not plan a homelab the way airlines sell seats.
+
+Leave space for:
+
+- the Proxmox host itself
+- temporary spikes during updates or rebuilds
+- snapshots that live longer than they should
+- the next service you have not admitted you will deploy yet
+
+As a practical baseline, keeping some CPU slack and a meaningful RAM buffer is more valuable than squeezing one extra guest onto the host.
+
+## A Simple Planning Loop
+
+1. Start small but not starved.
+2. Measure real usage for a week.
+3. Increase only the bottlenecked resource.
+4. Document the new baseline.
+
+That loop beats theoretical sizing almost every time.

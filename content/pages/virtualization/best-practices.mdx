@@ -1,0 +1,70 @@
+---
+title: "Best Practices"
+description: "Practical habits for keeping a Proxmox-based lab stable, understandable, and easy to recover."
+publishedAt: "2026-05-06"
+order: 9
+status: published
+---
+
+# Best Practices
+
+The cleanest homelabs stay a little boring. Most long-term pain comes from clever shortcuts that felt harmless on a quiet evening.
+
+## Keep The Host Boring
+
+Your Proxmox host should mostly be a hypervisor.
+
+The more application logic you pile onto the host itself, the more every maintenance window becomes emotionally complicated.
+
+## Prefer VirtIO And The Guest Agent
+
+Use the fast path unless the guest gives you a real reason not to.
+
+That usually means VirtIO devices and the QEMU Guest Agent. Those two choices solve more small operational annoyances than most people expect.
+
+## Use Unprivileged Containers By Default
+
+If you reach for a privileged container, know exactly why.
+
+Proxmox defaults to unprivileged containers for a reason, and that reason is security, not bureaucracy.
+
+## Keep Addressing Predictable
+
+Servers and long-lived services should not drift around the LAN like lost luggage.
+
+Use reservations, cloud-init, or a documented static plan so you know where things live before a failure forces you to care.
+
+## Be Deliberate With Storage
+
+Separate data from system disks when it helps with backups, growth, or restore workflow.
+
+And be careful with bind mounts or passthrough-heavy setups. They can be the right tool, but they come with backup, portability, and migration consequences.
+
+## Snapshots Are Seatbelts, Not Archives
+
+Take them often enough to be useful. Remove them before they turn into forgotten storage archaeology.
+
+## Document The Boring Bits
+
+Write down:
+
+- what the guest is for
+- VMID or CTID
+- CPU, RAM, and disk allocation
+- IP address or reservation
+- ports that matter
+- backup expectations
+
+Nobody enjoys this part until the night they suddenly need it.
+
+## Test Restores, Not Just Backups
+
+"Backup succeeded" is not the same sentence as "recovery works."
+
+If you have never restored the thing, you mostly have a theory.
+
+## Leave Headroom
+
+Do not size the host so tightly that one update job or indexing spike turns the whole lab sticky.
+
+Headroom is not waste. It is how the system stays calm.
