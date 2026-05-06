@@ -30,9 +30,13 @@ export default function HomePage() {
         <h1 className="text-4xl font-bold tracking-tight">poc to prod</h1>
         <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-xl">
           It&apos;s hard to find good answers in a sea of short videos and shallow tutorials. <br />
-          This site is for the deep dives. It&apos;s meant to be the bridge between a quick proof-of-concept and a solid production app. <br />
-          I&apos;ve skipped the trackers, the ads, and the fluff. What you&apos;ll find instead is honest research and practical lessons translated into clear documentation. <br />
-          Whether you&apos;re a developer or just a curious mind, this is where ideas actually get built.
+          Everything is sponsored, everyone seems biased. All the good stuff gets burried in between. <br />
+          This site is for the deep divers. <br />
+          It&apos;s meant to be the bridge the gap between a quick proof-of-concept and a solid production app. <br />
+          It combines best patterns and practices and is near production-grade. <br />
+          I&apos;ve skipped the trackers, the ads, and the fluff. <br />
+          What you&apos;ll find instead is honest research and a lot of man-hours dedicated to create some contents in this wiki. <br />
+          Whether you&apos;re a developer or just a curious mind, this is where stuff actually gets built.
         </p>
       </section>
 
