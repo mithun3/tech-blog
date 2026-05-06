@@ -131,6 +131,7 @@ jobs:
           echo "deploy_url=https://$DEPLOY_HOST" >> "$GITHUB_OUTPUT"
 
       - name: Explicitly alias deployment to custom host
+        id: alias
         run: |
           set -euo pipefail
 
@@ -146,7 +147,21 @@ jobs:
           CUSTOM_HOST="$(CUSTOM_URL="$CUSTOM_URL" node -e 'process.stdout.write(new URL(process.env.CUSTOM_URL).hostname)')"
 
           echo "Aliasing $DEPLOY_HOST -> $CUSTOM_HOST"
-          vercel alias set "$DEPLOY_HOST" "$CUSTOM_HOST" --token=${{ secrets.VERCEL_TOKEN }}
+
+          if ALIAS_OUTPUT="$(vercel alias set "$DEPLOY_HOST" "$CUSTOM_HOST" --token=${{ secrets.VERCEL_TOKEN }} 2>&1)"; then
+            echo "$ALIAS_OUTPUT"
+            echo "domain_access=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$ALIAS_OUTPUT"
+            if echo "$ALIAS_OUTPUT" | grep -Eiq "do not have access to the domain|don't have access to the domain|forbidden"; then
+              echo "domain_access=false" >> "$GITHUB_OUTPUT"
+              echo "domain_access_reason=token/team has no access to custom domain" >> "$GITHUB_OUTPUT"
+              echo "Warning: domain ownership/access mismatch. Continuing for diagnostics."
+            else
+              echo "Unexpected alias failure"
+              exit 1
+            fi
+          fi
 
       - name: Deployment diagnostics snapshot
         run: |
@@ -278,12 +293,21 @@ jobs:
 
           DEPLOY_URL="${{ steps.resolve.outputs.deploy_url }}"
           CUSTOM_URL="${{ secrets.NEXT_PUBLIC_SITE_URL }}"
+          DOMAIN_ACCESS="${{ steps.alias.outputs.domain_access }}"
+          DOMAIN_ACCESS_REASON="${{ steps.alias.outputs.domain_access_reason }}"
           BLOCKED='^(401|403|404)$'
           FAILURE=0
 
           if [[ -z "$CUSTOM_URL" ]]; then
             echo "Missing NEXT_PUBLIC_SITE_URL secret"
             exit 1
+          fi
+
+          if [[ "$DOMAIN_ACCESS" == "false" ]]; then
+            echo "Custom domain access mismatch: $DOMAIN_ACCESS_REASON"
+            echo "The deploy token/team cannot manage the domain from NEXT_PUBLIC_SITE_URL."
+            echo "Expected fix: move the domain to this Vercel team/project OR use matching VERCEL_ORG_ID/VERCEL_PROJECT_ID/VERCEL_TOKEN for the domain owner."
+            FAILURE=1
           fi
 
           if [[ -z "$DEPLOY_URL" ]]; then

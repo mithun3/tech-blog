@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!meta) return {}
 
   const href = slug.length === 0 ? '/pages' : `/pages/${slug.join('/')}`
-  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}${href}`
+  const url = `${process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'}${href}`
 
   return {
     title: meta.title,

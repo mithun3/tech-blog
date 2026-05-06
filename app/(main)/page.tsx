@@ -5,7 +5,7 @@ const META_HREFS = new Set(['/pages/about', '/pages/contact', '/pages/privacy', 
 
 export default function HomePage() {
   const sections = buildNavTree().filter((s) => !META_HREFS.has(s.href));
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000';
 
   const jsonLd = {
     '@context': 'https://schema.org',

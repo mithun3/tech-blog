@@ -2,7 +2,7 @@ import { getAllPostsMeta } from "@/lib/posts";
 import { getAllPageSlugs, getPageMeta } from "@/lib/wiki";
 import type { MetadataRoute } from "next";
 
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const posts = getAllPostsMeta();

@@ -13,7 +13,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = await getPostBySlug(slug);
   if (!post) return {};
 
-  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/blog/${slug}`;
+  const url = `${process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'}/blog/${slug}`;
 
   return {
     title: post.title,
@@ -49,7 +49,7 @@ export default async function PostPage({ params }: Props) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
   const postUrl = `${siteUrl}/blog/${slug}`;
 
   const jsonLd = {

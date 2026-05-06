@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
 const SITE_NAME = "poc to prod";
 const SITE_DESCRIPTION =
   "Notes, guides, and deep-dives on software engineering, infrastructure, and building things.";
