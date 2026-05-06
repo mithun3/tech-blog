@@ -1,3 +1,4 @@
+import HomePageIntro from "@/content/site/home-intro.mdx";
 import Link from "next/link";
 import { buildNavTree } from "@/lib/wiki";
 
@@ -28,16 +29,9 @@ export default function HomePage() {
       {/* Hero */}
       <section className="space-y-3 pt-4">
         <h1 className="text-4xl font-bold tracking-tight">poc to prod</h1>
-        <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-xl">
-          It&apos;s hard to find good answers in a sea of short videos and shallow tutorials. <br />
-          Everything is sponsored, everyone seems biased. All the good stuff gets burried in between. <br />
-          This site is for the deep divers. <br />
-          It&apos;s meant to be the bridge the gap between a quick proof-of-concept and a solid production app. <br />
-          It combines best patterns and practices and is near production-grade. <br />
-          I&apos;ve skipped the trackers, the ads, and the fluff. <br />
-          What you&apos;ll find instead is honest research and a lot of man-hours dedicated to create some contents in this wiki. <br />
-          Whether you&apos;re a developer or just a curious mind, this is where stuff actually gets built.
-        </p>
+        <div className="max-w-xl space-y-4 text-lg leading-relaxed text-zinc-600 dark:text-zinc-400 [&_p]:m-0">
+          <HomePageIntro />
+        </div>
       </section>
 
       {/* Pages sections */}
