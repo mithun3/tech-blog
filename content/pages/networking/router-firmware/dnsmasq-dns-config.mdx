@@ -1,0 +1,56 @@
+---
+title: "dnsmasq DNS Configuration"
+description: "Use dnsmasq on ASUS Merlin for local records, blocklists, per-device DNS, and safe config reloads."
+publishedAt: "2026-05-03"
+order: 5
+status: published
+---
+
+# dnsmasq DNS Configuration
+
+Merlin lets you extend dnsmasq with custom config files, which makes local DNS and policy-based DNS much easier to manage.
+
+Edit `/jffs/configs/dnsmasq.conf.add` to append custom directives to the router's dnsmasq config.
+
+## Local Hostname Records
+
+```text
+address=/proxmox.home/192.168.1.20
+address=/nas.home/192.168.1.30
+address=/openwebui.home/192.168.1.25
+```
+
+## Block Domains Network-wide
+
+```text
+address=/ads.example.com/127.0.0.1
+address=/tracking.example.com/127.0.0.1
+
+addn-hosts=/jffs/blocklist.txt
+```
+
+Download a blocklist and reload dnsmasq:
+
+```bash
+wget -O /jffs/blocklist.txt https://adguardteam.github.io/AdGuardHome/filters/filter1.txt
+service restart dnsmasq
+```
+
+## Per-device DNS
+
+```text
+dhcp-host=AA:BB:CC:DD:EE:01,iot-sensor,set:iot
+dhcp-host=AA:BB:CC:DD:EE:02,guest-laptop,set:guest
+
+dhcp-option=tag:iot,option:dns-server,149.112.112.112
+dhcp-option=tag:guest,option:dns-server,1.1.1.1
+```
+
+## Apply Changes Safely
+
+```bash
+ssh admin@192.168.1.1
+dnsmasq --test
+service restart dnsmasq
+tail -f /var/log/messages | grep dnsmasq
+```

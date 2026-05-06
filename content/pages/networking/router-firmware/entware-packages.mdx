@@ -1,0 +1,60 @@
+---
+title: "Entware Packages"
+description: "Install Entware on Merlin, use opkg, auto-start packages, and fix common package lookup problems."
+publishedAt: "2026-05-03"
+order: 3
+status: published
+---
+
+# Entware Packages
+
+Entware gives the router access to a large package ecosystem. Think of it as a lightweight package manager for services and utilities that do not ship with the firmware.
+
+## Install Entware
+
+```bash
+ssh admin@192.168.1.1
+amtm
+# Select: ep  (Install Entware)
+# Requires USB drive connected to router
+```
+
+## Common Commands
+
+```bash
+opkg update
+opkg search nginx
+opkg install openssh-server
+opkg list-installed
+opkg remove openssh-server
+```
+
+## Useful Packages
+
+```bash
+opkg install htop
+opkg install nethogs
+opkg install openssh-server openssh-sftp-server
+opkg install tailscale
+opkg install nginx
+opkg install minidlna
+opkg install rsync
+opkg install nmap
+```
+
+## Auto-start Packages On Boot
+
+```bash
+echo "/opt/etc/init.d/S22openssh-sftp-server start" >> /jffs/scripts/services-start
+chmod +x /jffs/scripts/services-start
+```
+
+## Troubleshooting Package Installs
+
+```bash
+opkg update
+opkg --version
+
+# If Entware is not installed:
+amtm
+```

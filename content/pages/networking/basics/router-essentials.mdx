@@ -1,0 +1,69 @@
+---
+title: "Router Essentials"
+description: "What your router does for the network: DHCP, NAT, firewalling, and DNS relaying."
+publishedAt: "2026-05-03"
+order: 3
+status: published
+---
+
+# Router Essentials
+
+The router is the gateway between your private local network and the internet. In a homelab it is usually doing several jobs at the same time.
+
+```text
+Internet <-> [ASUS Router] <-> Your Devices
+               |
+               |- DHCP Server: assigns IP addresses to devices
+               |- NAT: translates private <-> public IPs
+               |- Firewall: blocks unauthorized inbound traffic
+               |- WiFi: wireless access
+               `- DNS Relay: forwards DNS queries upstream
+```
+
+## DHCP
+
+Without DHCP you would need to manually assign a unique IP address to every device. With DHCP, the router allocates addresses automatically.
+
+```text
+New device connects -> Router assigns an IP from its pool
+Device disconnects  -> IP gets recycled for reuse
+Static assignment   -> Router always gives the same IP to a known MAC address
+```
+
+DHCP reservations are the practical middle ground for servers and infrastructure. They keep addresses stable without forcing manual configuration on every machine.
+
+## NAT
+
+Your router usually has one public IP from the ISP, but many devices behind it. NAT makes that arrangement possible.
+
+```text
+Your PC (192.168.1.100:12345)
+         v router translates outbound source
+Internet sees: 203.0.113.45:60000  (router's public IP)
+         v router remembers the mapping
+Response arrives at: 203.0.113.45:60000
+         v router translates back
+Your PC receives at: 192.168.1.100:12345
+```
+
+Side effects of NAT:
+
+- Your private IPs are not exposed to the internet.
+- Inbound connections are blocked by default.
+- Port forwarding opens a specific path for services you intentionally expose.
+
+## Stateful Firewall
+
+Stateful Packet Inspection tracks conversations, not just destination ports.
+
+```text
+Outbound request:  Your PC -> google.com:443
+Router notes:      "Opened port, expecting response"
+Inbound response:  google.com -> your PC
+Router checks:     "This matches an open conversation - allow"
+
+Unsolicited inbound (attack):
+Router checks:     "I don't recognise this - drop"
+```
+
+That default-deny behavior is why home networks are reasonably safe even when most devices are not hardened individually.

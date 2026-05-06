@@ -1,0 +1,47 @@
+---
+title: "Container vs VM Networking"
+description: "How LXC containers and KVM virtual machines connect to a Proxmox bridge, and what that means in practice."
+publishedAt: "2026-05-03"
+order: 2
+status: published
+---
+
+# Container vs VM Networking
+
+LXC containers and KVM virtual machines both connect cleanly to a Proxmox bridge, but they do it through different abstractions.
+
+## Container Networking (LXC)
+
+LXC containers share the host's Linux kernel but get their own isolated network namespace.
+
+```text
+Container has:
+|- Virtual ethernet interface: eth0
+|- IP address: 192.168.1.25 (assigned by DHCP from router)
+`- Gateway: 192.168.1.1 (ASUS Router)
+
+Connection path:
+Container eth0 <-> veth pair <-> vmbr0 bridge <-> physical ethernet
+```
+
+From the LAN's perspective, the container behaves like a normal machine on the network.
+
+## VM Networking (KVM)
+
+VMs get a fully emulated virtual network card, usually virtio for better performance. The path is similar to containers.
+
+```text
+VM virtual NIC <-> vmbr0 bridge <-> physical ethernet
+```
+
+VMs have more isolation because they emulate a full machine, but that comes with more overhead than a container.
+
+## Performance Comparison
+
+```text
+Native Proxmox host ping to router:   < 1 ms
+Container ping to router:             < 1 ms
+VM ping to router:                    < 1 ms
+```
+
+For typical homelab services, the networking difference is negligible. The real decision usually comes down to isolation, operating system requirements, and operational overhead rather than raw latency.

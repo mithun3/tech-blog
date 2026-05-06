@@ -1,0 +1,58 @@
+---
+title: "Network Security"
+description: "A layered security model for a Proxmox homelab, with firewall examples and DNS-level filtering."
+publishedAt: "2026-05-03"
+order: 3
+status: published
+---
+
+# Network Security
+
+Good homelab security is layered. The router, the hypervisor, and the individual service all contribute different controls.
+
+## Layered Defense
+
+```text
+Layer 1 - ASUS Router (perimeter)
+|- NAT: hides private network
+|- SPI firewall: drops unsolicited inbound traffic
+`- Port forwarding: only explicitly opened ports are reachable
+
+Layer 2 - Proxmox host (iptables)
+|- Firewall rules per bridge
+`- Can block traffic between containers if needed
+
+Layer 3 - Container / service
+`- Application-level auth (passwords, API keys, mTLS)
+```
+
+## Firewall Rule Example
+
+```bash
+# Allow web traffic to OpenWebUI from LAN only
+iptables -I INPUT -s 192.168.1.0/24 -p tcp --dport 8080 -j ACCEPT
+iptables -I INPUT -p tcp --dport 8080 -j DROP
+
+# Block Telnet inbound
+iptables -I INPUT -i eth0 -p tcp --dport 23 -j DROP
+```
+
+## Pi-hole
+
+DNS-level filtering can stop entire classes of traffic before a client ever reaches them.
+
+```text
+Without Pi-hole:
+  Device -> DNS -> malware.com resolves -> device connects -> infected
+
+With Pi-hole:
+  Device -> Pi-hole DNS -> "malware.com is blocked" -> drops query -> safe
+
+Benefits:
+|- Network-wide (all devices protected automatically)
+|- No per-device config
+|- Blocks ads and malicious domains
+`- Free, open-source
+```
+
+That kind of filtering does not replace firewalling or authentication, but it is a useful low-cost control for home infrastructure.

@@ -1,0 +1,22 @@
+---
+title: "Homelab Network Architecture"
+description: "How a Proxmox homelab is wired together: Linux bridges, VLANs, container and VM networking, and common troubleshooting."
+publishedAt: "2026-05-03"
+order: 2
+status: published
+---
+
+# Homelab Network Architecture
+
+This section covers how a Proxmox-based homelab is structured from physical layout down to containers and VMs. It is organized into focused pages so you can jump directly to design, security, or troubleshooting.
+
+## In This Section
+
+- [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox) - physical layout, network zones, traffic flow, `vmbr0`, and where VLANs fit.
+- [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking) - how LXC and KVM attach to the network and what differences actually matter.
+- [Network Security](/pages/networking/homelab-architecture/network-security) - layered defense, example firewall rules, and DNS-level filtering.
+- [Network Troubleshooting](/pages/networking/homelab-architecture/network-troubleshooting) - practical checks for connectivity, DNS, firewall, and performance issues.
+
+## How To Use It
+
+Read the Linux bridge page first if you are designing the lab. If the lab already exists and something is broken, start with troubleshooting and then follow the links into security or bridge layout as needed.

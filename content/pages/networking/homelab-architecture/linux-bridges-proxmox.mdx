@@ -1,0 +1,151 @@
+---
+title: "Linux Bridges in Proxmox"
+description: "Physical layout, network zones, traffic flow, Linux bridges, and where VLANs fit in a Proxmox homelab."
+publishedAt: "2026-05-03"
+order: 1
+status: published
+---
+
+# Linux Bridges in Proxmox
+
+This page covers how a Proxmox host connects the physical LAN to containers and VMs through Linux bridges.
+
+## Physical Layout
+
+```text
+Internet
+    |
+    v
+[ASUS RT-AX88U Router]  192.168.1.1
+|- LAN1: [Proxmox Host]          192.168.1.20  (ethernet, static)
+|- LAN2: [NAS / Backup Storage]  192.168.1.30  (ethernet, static)
+`- WiFi: computers, phones, guests
+```
+
+## Network Zones
+
+```text
+Zone 1 - WAN
+`- Internet <-> Router
+
+Zone 2 - LAN (192.168.1.x)
+|- Proxmox host: .20
+|- Backup storage: .30
+`- All internal communication happens here
+
+Zone 3 - Guest WiFi (192.168.2.x, isolated)
+|- Cannot reach: Proxmox, storage, internal servers
+`- Can reach: Internet only
+
+Zone 4 - Container network (inside Proxmox)
+|- OpenWebUI container: .25
+|- Ollama container: .26
+`- Managed by Linux bridges inside Proxmox
+```
+
+## Traffic Flow Examples
+
+### Access OpenWebUI from your PC
+
+```text
+Your PC (192.168.1.100)
+     v < 1 ms  (WiFi or ethernet to router)
+ASUS Router (192.168.1.1)
+     v < 1 ms  (ethernet)
+Proxmox Host (192.168.1.20)
+     v < 1 ms  (Linux bridge - same machine)
+OpenWebUI Container (192.168.1.25)
+     v
+Response flows back the same path
+
+Total round-trip: < 5 ms
+```
+
+### Container Accesses an External Service
+
+```text
+OpenWebUI Container -> Proxmox Host (has routes)
+     v
+ASUS Router (NAT translates private IP -> router's public IP)
+     v
+Internet
+     v
+Response comes back to router's public IP
+Router translates back to 192.168.1.25
+Container receives response
+```
+
+The container's private IP is never visible on the internet.
+
+## Physical To Virtual
+
+```text
+Physical hardware:
+`- Ethernet card: enp5s0 (1 Gbps)
+   `- Connected to: ASUS Router (LAN port)
+
+Proxmox creates:
+`- Linux bridge: vmbr0
+   |- Connects: physical card + containers + VMs
+   `- IP: 192.168.1.20  (Proxmox management address)
+```
+
+## Linux Bridges Explained
+
+Think of a bridge as a virtual network switch inside the Proxmox host.
+
+```text
+Without bridge:
+|- Physical card: can reach external network only
+|- Containers: no network
+`- VMs: no network
+
+With vmbr0 bridge:
+Internet <-> ASUS Router <-> [eth: enp5s0] <-> vmbr0
+                                              |- Proxmox host
+                                              |- OpenWebUI container
+                                              |- Ollama container
+                                              `- VMs
+```
+
+All devices connected to the same bridge can reach each other and the outside world through the physical card.
+
+## Multiple Bridges
+
+You can create extra bridges if you want separate traffic domains.
+
+```text
+vmbr0 (Main - 192.168.1.x):
+|- Proxmox host: .20
+|- OpenWebUI: .25
+`- Storage: .30
+
+vmbr1 (Guest - 192.168.2.x):
+`- Guest VMs (isolated from vmbr0 by firewall rules)
+```
+
+## Bridges vs VLANs
+
+### Bridge
+
+All devices on the same bridge share one flat Layer 2 network.
+
+```text
+vmbr0 - everyone on 192.168.1.x can talk to everyone else
+```
+
+### VLANs
+
+VLANs split a physical switching fabric into logical networks.
+
+```text
+VLAN 10 - Internal (192.168.10.x)
+|- Proxmox, containers, storage
+`- Cannot be reached from VLAN 20
+
+VLAN 20 - Guest (192.168.20.x)
+|- Guest machines
+`- Cannot reach VLAN 10
+```
+
+VLANs require hardware that supports 802.1q tagging. For a single-host homelab, one flat bridge is usually enough at the start.

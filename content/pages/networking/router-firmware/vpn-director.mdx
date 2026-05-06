@@ -1,0 +1,60 @@
+---
+title: "VPN Director"
+description: "Selective routing in ASUS Merlin, with UI and CLI configuration patterns plus rule debugging steps."
+publishedAt: "2026-05-03"
+order: 4
+status: published
+---
+
+# VPN Director
+
+VPN Director lets you route specific devices through a VPN while leaving the rest of the network on the normal WAN path.
+
+## Setup Via Web UI
+
+Open NAT/QoS -> VPN Director, enable the feature, then add policy rules.
+
+| Field | Description |
+|-------|-------------|
+| Source IP | The device IP to match, for example `192.168.1.51` |
+| Policy | Route to WAN / Route to OpenVPN Client 1 / Drop |
+
+## Common Scenarios
+
+```text
+NAS running Plex (needs full speed):
+  192.168.1.30  -> WAN
+
+Torrent client (needs privacy):
+  192.168.1.51  -> OpenVPN Client 1
+
+All other devices:
+  Default route -> WAN
+```
+
+## CLI Approach
+
+```bash
+ssh admin@192.168.1.1
+
+# Format: src_ip|protocol|src_port|dst_ip|dst_port|wan|vpn1|vpn2|drop
+echo "192.168.1.51|0|0|0|0|0|1|0|0" >> /jffs/config/vpndirector.conf
+
+service restart firewall
+```
+
+## Troubleshooting Rules
+
+```bash
+# Verify VPN client is connected
+ifconfig | grep tun
+
+# Check rules file
+cat /jffs/config/vpndirector.conf
+
+# Force reload
+service restart firewall
+
+# Inspect iptables
+iptables -L -n | grep -i vpn
+```

@@ -1,0 +1,71 @@
+---
+title: "Merlin Setup"
+description: "What Merlin adds over stock ASUS firmware, how to install it, and how to update or roll back safely."
+publishedAt: "2026-05-03"
+order: 1
+status: published
+---
+
+# Merlin Setup
+
+**Router:** ASUS RT-AX88U
+
+Merlin is a community-maintained fork of ASUS stock firmware. It stays close to the official codebase while exposing more automation and control.
+
+## Merlin vs Stock ASUS
+
+| Feature | Stock | Merlin | Notes |
+|---------|-------|--------|-------|
+| Web UI | Yes | Yes | No change |
+| Stability | Yes | Yes | Negligible difference |
+| Script automation | No | Yes | Critical for homelab |
+| Cron jobs | No | Yes | Enables scheduling |
+| Custom firewall rules | Web UI only | CLI + scripts | More control |
+| Entware packages | No | Yes | Major advantage |
+| VPN Director | No | Yes | Route specific clients through VPN |
+| DHCP/DNS customization | Limited | Edit dnsmasq directly | Full control |
+| Persistent JFFS partition | Limited | Yes | Scripts survive reboots |
+| WireGuard | Limited | Yes | Full client + server |
+| SSH access | Limited | Yes | Enables automation |
+
+## Installation
+
+### Before You Start
+
+- Download the latest stable build for RT-AX88U from https://asuswrt-merlin.net/
+- Back up the current config in Administration -> System Settings -> Backup
+- Do not extract the `.tar.gz` file before flashing
+
+### Flash
+
+1. Open Administration -> Firmware Upgrade -> Choose File.
+2. Select the Merlin firmware archive.
+3. Upload it and wait for the router to reboot.
+
+### Post-installation
+
+```bash
+ssh admin@192.168.1.1
+
+# Enable JFFS (persistent script storage across reboots)
+nvram set jffs2_on=1
+nvram commit
+
+# Create scripts directory
+mkdir -p /jffs/scripts
+chmod 755 /jffs/scripts
+
+reboot
+```
+
+## Updating Later
+
+Scripts in `/jffs/scripts` and Entware packages survive firmware updates. The update process is the same as the initial flash.
+
+## Roll Back To Stock Firmware
+
+1. Download the latest official ASUS firmware for RT-AX88U.
+2. Open Administration -> Firmware Upgrade -> Choose File.
+3. Upload the stock firmware file and wait for reboot.
+
+Anything stored in `/jffs` should be backed up before rollback.

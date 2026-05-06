@@ -1,0 +1,71 @@
+---
+title: "OSI Model"
+description: "A practical walkthrough of the seven OSI layers and how they work together during a real request."
+publishedAt: "2026-05-03"
+order: 1
+status: published
+---
+
+# OSI Model
+
+Network communication happens in seven layers. Each layer has a specific job and only needs to care about the layers directly above and below it.
+
+```text
+Layer 7: APPLICATION
+|- What: Web browsers, email, chat, databases
+|- Protocol: HTTP, HTTPS, SSH, DNS, FTP
+`- Example: OpenWebUI (web interface)
+
+Layer 6: PRESENTATION
+|- What: Encryption, compression, formatting
+`- Example: TLS (HTTPS uses TLS)
+
+Layer 5: SESSION
+|- What: Manages conversation flow
+`- Example: WebSocket connections
+
+Layer 4: TRANSPORT
+|- What: Ensures data arrives correctly
+|- Protocol: TCP (reliable), UDP (fast)
+`- Example: TCP port 80 (HTTP), 443 (HTTPS)
+
+Layer 3: NETWORK
+|- What: Routes data across networks
+|- Protocol: IP (v4, v6)
+`- Example: 192.168.1.20 (Proxmox IP)
+
+Layer 2: DATA LINK
+|- What: Moves data between devices on same network
+|- Protocol: Ethernet, WiFi
+`- Example: MAC address (physical hardware address)
+
+Layer 1: PHYSICAL
+|- What: Cables, radio waves, electricity
+`- Example: Cat6 ethernet cable, WiFi antenna
+```
+
+## Layers Working Together
+
+Here is what the stack looks like when a browser request leaves your machine and is unpacked on the server.
+
+```text
+You open browser: http://192.168.1.20:8080
+
+-> Sending
+Layer 7: Browser sends GET /api/chat
+Layer 6: Data compressed/formatted
+Layer 5: WebSocket session established
+Layer 4: TCP stream created
+Layer 3: IP header added - from=192.168.1.100, to=192.168.1.20
+Layer 2: Ethernet frame built, MAC addresses added
+Layer 1: Electrical signals sent through cable
+
+-> Receiving (server side, reversed)
+Layer 1: Signals -> bits
+Layer 2: Frame unpacked
+Layer 3: IP packet routed to Proxmox
+Layer 4: TCP stream assembled
+Layer 7: nginx processes the request
+```
+
+The important practical point is that failures usually map to a layer. A DNS issue is not the same class of problem as a dropped TCP connection or a broken cable.

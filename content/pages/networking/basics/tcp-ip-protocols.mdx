@@ -1,0 +1,59 @@
+---
+title: "TCP/IP Protocols"
+description: "The basics of IP addressing, TCP reliability, UDP speed, and when each transport protocol is the right fit."
+publishedAt: "2026-05-03"
+order: 2
+status: published
+---
+
+# TCP/IP Protocols
+
+At the transport layer, most homelab traffic reduces to a simple tradeoff: reliability or speed. TCP and UDP make different choices, and your applications inherit those choices.
+
+## IP Addresses
+
+```text
+IPv4 Format: 192.168.1.20
+|- 4 octets, each 0-255
+`- Total: 4.3 billion addresses (now running out)
+
+Private ranges (not routable on the internet):
+|- 192.168.0.0 - 192.168.255.255  <- your homelab network
+|- 10.0.0.0 - 10.255.255.255
+`- 172.16.0.0 - 172.31.255.255
+
+Public IP: assigned by your ISP, unique on the internet
+`- Changes on router reboot unless you pay for a static IP
+```
+
+## TCP
+
+TCP guarantees that data arrives in order and that lost packets are retransmitted. It establishes a connection first, then starts sending data.
+
+```text
+Client                  Server
+  |-- SYN ------------> |    "I want to connect"
+  |<- SYN-ACK --------- |    "OK, ready"
+  |-- ACK ------------> |    "Great, starting"
+  |                      |
+  |=== data flowing ====|
+```
+
+Used by HTTP, HTTPS, SSH, and databases - anything where missing or reordered data is unacceptable.
+
+## UDP
+
+UDP skips the handshake and sends packets immediately. That makes it faster and simpler, but packets can be lost or arrive out of order.
+
+Used by DNS queries, video streaming, VoIP, and gaming - situations where speed matters more than perfect delivery.
+
+## TCP vs UDP
+
+| | TCP | UDP |
+|---|-----|-----|
+| Guaranteed delivery | Yes | No |
+| Ordered arrival | Yes | No |
+| Speed | Slower (handshake overhead) | Faster |
+| Use cases | HTTP, SSH, FTP | DNS, video, gaming |
+
+If you are debugging a system, this matters because TCP failures usually look like connection resets, retries, or timeouts, while UDP failures often look like intermittent packet loss or missing responses.

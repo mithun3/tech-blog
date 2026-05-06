@@ -1,0 +1,94 @@
+---
+title: "Network Troubleshooting"
+description: "Practical troubleshooting steps for container connectivity, DNS failures, inter-container traffic, and slow network performance."
+publishedAt: "2026-05-03"
+order: 4
+status: published
+---
+
+# Network Troubleshooting
+
+These checks are useful when a container, VM, or service is unreachable and you need to narrow the failure down quickly.
+
+## Container Can't Reach The Internet
+
+```bash
+# Step 1: Test raw connectivity
+ping 8.8.8.8
+# Fails -> networking issue. Works -> DNS issue (see below)
+
+# Step 2: Check bridge
+ip addr show
+# Should show a veth interface connected to vmbr0
+
+# Step 3: Check default gateway
+ip route
+# Should show: default via 192.168.1.1
+
+# Step 4: Restart networking
+systemctl restart networking
+```
+
+## Container Can Ping But DNS Fails
+
+```bash
+# Check DNS config
+cat /etc/resolv.conf
+# Should show: nameserver 192.168.1.1
+
+# Test DNS directly
+nslookup google.com 8.8.8.8
+# Works -> router DNS is the problem; set upstream DNS to 8.8.8.8 in router UI
+
+# Add fallback manually
+echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+```
+
+## Can't Reach A Container From Another PC On The LAN
+
+```bash
+# From your PC: verify you're on the same subnet
+ipconfig      # Windows
+ifconfig      # macOS / Linux
+# Should show: 192.168.1.x
+
+# From Proxmox host: verify routing
+route -n
+# Should show: 192.168.1.0 via vmbr0
+
+# Temporarily disable firewall to test
+iptables -F   # testing only - re-enable after
+
+# Check container is actually listening
+ss -tlnp | grep 8080
+```
+
+## Two Containers Can't Reach Each Other
+
+```bash
+# Both containers must be on the same bridge
+# Check in Proxmox UI: Container > Network > Bridge field
+
+# From container A, ping container B
+ping 192.168.1.26
+
+# Verify target service is running and listening
+ss -tlnp | grep 11434
+```
+
+## Slow Network Performance
+
+```bash
+# Run a speed test inside container
+iperf3 -c 192.168.1.1
+# Expected: 900+ Mbps on gigabit ethernet
+
+# Check MTU
+ip link show
+# Should be 1500 bytes
+
+# Check host CPU (could be the bottleneck)
+top
+```
+
+When troubleshooting, separate layer-by-layer failures. Start with link and routing, then DNS, then service health.

@@ -1,0 +1,123 @@
+---
+title: "Router Scripting"
+description: "Merlin event hooks, practical boot-time and scheduled automation, and how to troubleshoot scripts that do not run."
+publishedAt: "2026-05-03"
+order: 2
+status: published
+---
+
+# Router Scripting
+
+Merlin can run your own scripts at specific lifecycle events. This is the main reason it is useful in a homelab.
+
+## Event Hooks
+
+All scripts live in `/jffs/scripts/` and must be executable.
+
+| Script | Trigger |
+|--------|---------|
+| `services-start` | System boot (before services start) |
+| `firewall-start` | After the firewall loads |
+| `nat-start` | After NAT module loads |
+| `wan-event` | WAN connection state changes |
+| `openvpn-event` | VPN client/server state changes |
+| `post-mount` | USB drive mounted |
+| `dnsmasq.postconf` | Before dnsmasq starts |
+| `dhcpc-event` | DHCP lease events |
+
+## Custom Firewall Rules On Boot
+
+`/jffs/scripts/firewall-start`
+
+```bash
+#!/bin/sh
+
+# Block Telnet inbound
+iptables -I INPUT -i eth0 -p tcp --dport 23 -j DROP
+
+# Allow SSH from LAN only
+iptables -I INPUT -i eth0 -p tcp --dport 22 -s 192.168.1.0/24 -j ACCEPT
+iptables -I INPUT -i eth0 -p tcp --dport 22 -j DROP
+
+logger "Custom firewall rules applied"
+```
+
+```bash
+chmod +x /jffs/scripts/firewall-start
+```
+
+## VPN Health Monitor
+
+`/jffs/scripts/vpn-health-check.sh`
+
+```bash
+#!/bin/sh
+
+# Reconnect VPN if tunnel goes down
+if ! ping -c 1 10.8.0.1 >/dev/null 2>&1; then
+  logger "VPN DOWN - reconnecting"
+  nvram set vpn_client1_state=0
+  sleep 5
+  nvram set vpn_client1_state=2
+fi
+```
+
+Schedule it every five minutes:
+
+```bash
+crontab -e
+*/5 * * * * /jffs/scripts/vpn-health-check.sh
+```
+
+## Daily Router Backup
+
+`/jffs/scripts/backup-daily.sh`
+
+```bash
+#!/bin/sh
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/tmp/mnt/usb/backups"
+
+mkdir -p $BACKUP_DIR
+
+# Export all settings
+nvram show > $BACKUP_DIR/nvram_$TIMESTAMP.txt
+tar czf $BACKUP_DIR/config_$TIMESTAMP.tar.gz /etc/config/
+
+# Sync to NAS
+rsync -avz --delete $BACKUP_DIR/ user@192.168.1.30:/backups/router/
+
+# Keep only last 30 days
+find $BACKUP_DIR -type f -mtime +30 -delete
+
+logger "Backup complete: $TIMESTAMP"
+```
+
+```bash
+chmod +x /jffs/scripts/backup-daily.sh
+crontab -e
+0 2 * * * /jffs/scripts/backup-daily.sh
+```
+
+## Troubleshooting Scripts
+
+```bash
+ssh admin@192.168.1.1
+
+# JFFS must be enabled
+nvram get jffs2_on
+
+# Script must be executable
+ls -la /jffs/scripts/firewall-start
+
+# Fix permissions
+chmod 755 /jffs/scripts/*
+
+# Test syntax
+sh -n /jffs/scripts/firewall-start
+
+# Run manually
+/jffs/scripts/firewall-start
+echo $?
+```

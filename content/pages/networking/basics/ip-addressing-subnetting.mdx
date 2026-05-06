@@ -1,0 +1,49 @@
+---
+title: "IP Addressing and Subnetting"
+description: "Private address ranges, `/24` subnet notation, example homelab layouts, and a brief IPv6 primer."
+publishedAt: "2026-05-03"
+order: 4
+status: published
+---
+
+# IP Addressing and Subnetting
+
+Addressing is the part of networking that tells devices where they are and whether a target is local or needs to go through a router.
+
+## Subnet Notation
+
+```text
+192.168.1.0/24
+
+/24 means the first 24 bits are the network, last 8 are hosts.
+Usable range: 192.168.1.1 - 192.168.1.254  (254 hosts)
+
+.0   = network address (not assignable)
+.1   = typically the router/gateway
+.255 = broadcast address (not assignable)
+```
+
+## Example Homelab Address Scheme
+
+```text
+192.168.1.0/24
+
+.1    ASUS Router (gateway)
+.20   Proxmox host
+.25   OpenWebUI container
+.26   Ollama container
+.30   NAS / backup storage
+.50-.254  DHCP pool (dynamic devices)
+```
+
+That kind of predictable layout makes troubleshooting much easier because you can infer what a machine is supposed to be just from the address range.
+
+## IPv6
+
+IPv6 uses 128-bit addresses instead of IPv4's 32-bit space, which solves address exhaustion.
+
+```text
+Example: 2001:0db8:85a3::8a2e:0370:7334
+```
+
+For many homelabs, IPv4 is still enough. If you do enable IPv6, dual stack is the normal transition path so both IPv4 and IPv6 stay available.
