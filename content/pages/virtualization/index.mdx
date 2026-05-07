@@ -1,6 +1,6 @@
 ---
 title: "Virtualization"
-description: "How virtual machines, Linux containers, and Proxmox fit together in a practical homelab."
+description: "How virtual machines, Linux containers, and hypervisor choices fit together in a practical homelab."
 publishedAt: "2026-05-06"
 order: 2
 status: published
@@ -10,7 +10,7 @@ status: published
 
 If networking is the plumbing, virtualization is the floor plan. It is the part of a homelab that turns one box into several useful machines without making the whole thing feel improvised.
 
-This section stays focused on compute, isolation, storage behavior, and day-2 operations. When a topic slides into bridges, DNS, or router behavior, it points back to the Networking section instead of repeating the same explanation with different nouns.
+This section stays focused on compute, isolation, storage behavior, and day-2 operations in a platform-agnostic way. When a topic becomes primarily about one product, it should live in that product's own section instead of stretching this overview into a mixed bag.
 
 ## Concepts
 
@@ -24,13 +24,9 @@ This section stays focused on compute, isolation, storage behavior, and day-2 op
 - [systemd-nspawn](/pages/virtualization/concepts/systemd-nspawn)
 - [VMware ESXi](/pages/virtualization/concepts/vmware-esxi)
 
-## Proxmox Platform
+## Platform Deep Dives
 
-- [Proxmox Platform](/pages/virtualization/proxmox) - the overview for platform setup and configuration.
-- [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack)
-- [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots)
-- [Networking Models](/pages/virtualization/proxmox/networking-models)
-- [Resource Allocation](/pages/virtualization/proxmox/resource-allocation)
+- [Proxmox](/pages/proxmox) - the dedicated Proxmox VE section for platform fundamentals, architecture, operations, and workload-specific guides.
 
 ## Day-2 Operations
 

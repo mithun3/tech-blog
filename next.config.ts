@@ -9,6 +9,20 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [{ protocol: 'https', hostname: '**' }],
   },
+  async redirects() {
+    return [
+      {
+        source: '/pages/virtualization/proxmox',
+        destination: '/pages/proxmox',
+        permanent: true,
+      },
+      {
+        source: '/pages/virtualization/proxmox/:path*',
+        destination: '/pages/proxmox/:path*',
+        permanent: true,
+      },
+    ]
+  },
 }
 
 const withMDX = createMDX({})
