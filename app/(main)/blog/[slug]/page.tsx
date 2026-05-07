@@ -85,47 +85,50 @@ export default async function PostPage({ params }: Props) {
           __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
         }}
       />
-      <article className="space-y-8">
-      <header className="space-y-4">
-        {post.tags && post.tags.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {post.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-400"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-        <h1 className="text-4xl font-bold tracking-tight">{post.title}</h1>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500">
-          <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
-          <span aria-hidden="true">·</span>
-          <span>{post.readingTime}</span>
-          {post.updatedAt && post.updatedAt !== post.publishedAt && (
-            <>
+      <div className="max-w-[78ch] space-y-12">
+        <article className="space-y-8">
+          <header className="space-y-4">
+            {post.tags && post.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {post.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            <h1 className="text-4xl font-bold tracking-tight">{post.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500">
+              <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
               <span aria-hidden="true">·</span>
-              <span>Updated {formatDate(post.updatedAt)}</span>
-            </>
-          )}
-        </div>
-      </header>
+              <span>{post.readingTime}</span>
+              {post.updatedAt && post.updatedAt !== post.publishedAt && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>Updated {formatDate(post.updatedAt)}</span>
+                </>
+              )}
+            </div>
+          </header>
 
-      <div
-        className="
-          prose prose-zinc dark:prose-invert max-w-none
-          prose-headings:font-semibold prose-headings:tracking-tight
-          prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-          prose-code:before:content-none prose-code:after:content-none
-          prose-pre:p-0 prose-pre:bg-transparent prose-pre:border prose-pre:border-zinc-200 dark:prose-pre:border-zinc-800
-          prose-img:rounded-lg
-        "
-        dangerouslySetInnerHTML={{ __html: post.htmlContent }}
-      />
-    </article>
-    <Comments />
+          <div
+            className="
+              prose prose-zinc dark:prose-invert max-w-none
+              prose-headings:font-semibold prose-headings:tracking-tight
+              prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+              prose-code:before:content-none prose-code:after:content-none
+              prose-pre:p-0 prose-pre:bg-transparent prose-pre:border prose-pre:border-zinc-200 dark:prose-pre:border-zinc-800
+              prose-img:rounded-lg
+            "
+            dangerouslySetInnerHTML={{ __html: post.htmlContent }}
+          />
+        </article>
+
+        <Comments />
+      </div>
     </>
   );
 }

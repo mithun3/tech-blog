@@ -18,12 +18,12 @@ export default function BlogPage() {
           {posts.length} {posts.length === 1 ? "post" : "posts"}
         </p>
       </div>
-      <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
         {posts.map((post) => (
           <PostCard key={post.slug} post={post} />
         ))}
         {posts.length === 0 && (
-          <p className="text-zinc-500">No posts yet. Check back soon!</p>
+          <p className="col-span-full text-zinc-500">No posts yet. Check back soon!</p>
         )}
       </div>
     </div>

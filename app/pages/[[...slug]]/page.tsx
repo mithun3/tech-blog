@@ -123,48 +123,49 @@ export default async function WikiPage({ params }: Props) {
   if (!page) notFound()
 
   return (
-    <>
-    <article className="min-w-0">
-      <WikiBreadcrumb slug={slug} />
+    <div className="max-w-[78ch] space-y-12">
+      <article className="min-w-0">
+        <WikiBreadcrumb slug={slug} />
 
-      <header className="mb-8 space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-          {page.title}
-        </h1>
-        {page.description && (
-          <p className="text-zinc-500 dark:text-zinc-400 text-base leading-relaxed">
-            {page.description}
-          </p>
-        )}
-        {page.publishedAt && (
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            {formatDate(page.publishedAt)}
-            {page.updatedAt && page.updatedAt !== page.publishedAt && (
-              <> · Updated {formatDate(page.updatedAt)}</>
-            )}
-          </p>
-        )}
-      </header>
+        <header className="mb-8 space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            {page.title}
+          </h1>
+          {page.description && (
+            <p className="max-w-[65ch] text-base leading-relaxed text-zinc-500 dark:text-zinc-400">
+              {page.description}
+            </p>
+          )}
+          {page.publishedAt && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              {formatDate(page.publishedAt)}
+              {page.updatedAt && page.updatedAt !== page.publishedAt && (
+                <> · Updated {formatDate(page.updatedAt)}</>
+              )}
+            </p>
+          )}
+        </header>
 
-      <div
-        className="
-          prose prose-zinc dark:prose-invert max-w-none
-          prose-headings:font-semibold prose-headings:tracking-tight
-          prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-          prose-code:before:content-none prose-code:after:content-none
-          prose-pre:p-0 prose-pre:bg-transparent prose-pre:border prose-pre:border-zinc-200 dark:prose-pre:border-zinc-800
-          prose-img:rounded-lg
-        "
-      >
-        <MDXRemote
-          source={page.rawContent}
-          components={mdxComponents}
-          options={mdxOptions}
-        />
-      </div>
-    </article>
-    <Comments />
-    </>
+        <div
+          className="
+            prose prose-zinc dark:prose-invert max-w-none
+            prose-headings:font-semibold prose-headings:tracking-tight
+            prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+            prose-code:before:content-none prose-code:after:content-none
+            prose-pre:p-0 prose-pre:bg-transparent prose-pre:border prose-pre:border-zinc-200 dark:prose-pre:border-zinc-800
+            prose-img:rounded-lg
+          "
+        >
+          <MDXRemote
+            source={page.rawContent}
+            components={mdxComponents}
+            options={mdxOptions}
+          />
+        </div>
+      </article>
+
+      <Comments />
+    </div>
   )
 }
 
