@@ -1,0 +1,195 @@
+---
+title: "Why I Use Proxmox"
+description: "A practical, personal case for Proxmox in a homelab: isolation, backups, LXCs, VMs, and room to grow without rebuilding everything later."
+publishedAt: "2026-05-07"
+order: 1
+status: published
+---
+
+# Why I Use Proxmox
+
+I did not move to Proxmox because I wanted my homelab to feel like a tiny enterprise data center.
+
+I moved to Proxmox because I got tired of a specific kind of risk: every new service felt like it was standing too close to everything else.
+
+That is the real reason I use it.
+
+When everything lives directly on one Linux host, the machine starts out simple and gradually turns into a pile of hidden coupling. A package upgrade for one app can affect another. A networking change made for one experiment can surprise a service that was already working. A bad decision at 11:30 PM becomes a system-wide event.
+
+Proxmox gives me a better default shape for a homelab. It lets me split workloads into VMs and containers, manage them from one place, back them up properly, and grow the lab without having to redesign the whole thing every six months.
+
+## The Biggest Win Is Blast Radius
+
+The most important benefit is not virtualization for its own sake. It is containment.
+
+I like being able to give each important service its own boundary.
+
+If I break a reverse proxy VM, I did not also break DNS, storage, monitoring, and whatever else happened to share the same host.
+
+If I want to test a new stack, I can spin up a temporary guest, try it, throw it away, and move on. That sounds small until you have lived through enough "quick" experiments that turned into cleanup projects.
+
+This is the theme that came up over and over in the HomeServer discussion you linked: Proxmox gives people a safer place to tinker. That matches my experience exactly. I do not use it because I expect perfection. I use it because I expect mistakes, experiments, and changing requirements.
+
+## Backups And Rollbacks Stop Feeling Optional
+
+The second reason is recovery.
+
+A lot of homelab pain is not caused by dramatic disasters. It is caused by ordinary, stupid failures:
+
+- a bad package update
+- a careless config edit
+- a service migration that went sideways
+- a host rebuild that takes longer than it should
+
+Proxmox makes that recovery path much more approachable.
+
+Snapshots are useful before risky changes. Scheduled backups are useful when the problem is bigger than one bad command. Restore workflows matter when the host itself dies.
+
+That combination changes behavior. When rollback is easy, I am more willing to improve things. When restore is realistic, I am less afraid of host failure. When backups can be pushed to separate storage, the platform stops feeling fragile.
+
+The official Proxmox documentation leans hard into this for good reason. Integrated backup and restore, storage-aware snapshots, replication, and Proxmox Backup Server support are not side features. They are a large part of why the platform remains practical after the fun of initial setup wears off.
+
+## I Get VMs And LXCs In The Same Mental Model
+
+This is where Proxmox feels unusually useful in a homelab.
+
+I do not want every workload to be a full VM. I also do not want every workload to be a Docker container living directly on the host.
+
+Proxmox gives me both ends of that spectrum in one control plane.
+
+I use VMs when I want:
+
+- stronger isolation
+- a different operating system
+- a clean guest that can own its own networking and storage behavior
+- safer separation for services that touch shared storage, authentication, or more sensitive network paths
+
+I use LXCs when I want:
+
+- lower overhead
+- fast provisioning
+- lightweight Linux services that still feel like their own machine
+- a cleaner boundary than "just install it on the host"
+
+That mix matters more than people sometimes admit. A good homelab is rarely one technology all the way down. Some services want the weight and clarity of a VM. Some are happier in a lighter container. Proxmox lets me choose based on the workload instead of based on what my host happened to start as.
+
+## It Grows With The Lab Instead Of Fighting It
+
+One of the most repeated points in the Reddit thread was also one of the truest: almost nobody actually stops at one service.
+
+Today it is Nextcloud.
+
+Then it is Pi-hole or AdGuard.
+
+Then WireGuard.
+
+Then Home Assistant.
+
+Then a media stack.
+
+Then a monitoring box, a test VM, a Windows guest, a second node, or a separate DNS instance because the first one became too important to keep casual.
+
+That is why starting with Proxmox often makes sense even if the first workload is small. It gives the lab room to become more interesting without forcing a migration from "single host with apps on it" to "actually I need a proper platform now."
+
+This is one of the places where Proxmox feels less like overengineering and more like choosing a stable base layer early.
+
+## The Host Becomes An Appliance, Which I Like
+
+One reason I prefer Proxmox over a hand-built KVM plus libvirt plus storage plus networking stack is that I do not want the host to be a forever-project.
+
+I want the host to be boring.
+
+Proxmox is still Linux underneath, which I like, but it presents itself as a dedicated virtualization platform rather than a general-purpose server that happens to run guests.
+
+That changes how I treat it.
+
+I keep the host focused on being the host.
+
+I do not casually pile user services onto it.
+
+I use the web UI and API for the common lifecycle work.
+
+And once it is configured, I mostly leave it alone.
+
+That "set it up and then ignore it" pattern came up in the thread too, and it is underrated. The best infrastructure is often the part that does not keep demanding attention.
+
+## Storage And Networking Are Part Of The Argument
+
+Another reason I stick with Proxmox is that it is not only a VM launcher.
+
+Its storage and network model are strong enough that the platform still makes sense as the lab matures.
+
+On the storage side, Proxmox gives me workable paths with local storage, ZFS, network storage, and if I ever need it, clustered options like Ceph. I do not think every homelab should rush into Ceph, but I do think it matters that Proxmox has a real storage story instead of pretending disks are somebody else's problem.
+
+On the networking side, bridged networking, VLAN-aware setups, firewall integration, and software-defined networking options make it much easier to build guests that behave like real machines on the network instead of awkward applications hiding behind one host.
+
+That matters for learning, for troubleshooting, and for keeping the environment understandable.
+
+## The Open-Source Part Is Not Marketing Fluff
+
+I also like the fact that Proxmox is open source and built on familiar Linux foundations.
+
+That gives me a few things I care about:
+
+- no forced vendor lock-in for the management layer
+- transparent documentation for how the platform actually works
+- an active community that treats the product like infrastructure, not a toy
+- the ability to understand the stack below the UI when I need to
+
+This does not magically make every decision perfect. It does make the platform feel less like a sealed box.
+
+For homelab use especially, that matters. I want something approachable enough to manage and open enough to trust.
+
+## It Is Also Efficient Enough To Be Worth It
+
+There is always a fair question hiding in the background: is all of this overkill for small hardware?
+
+Sometimes, yes.
+
+But usually not in the way people fear.
+
+Proxmox itself is not especially heavy. The real resource cost comes from what I choose to run on top of it. If I create bloated guests, that is my decision, not the platform's fault. If I use LXCs for lighter Linux services and VMs where they actually help, the overhead is usually a very reasonable trade for the control I get back.
+
+And on one box, that control is often the difference between "I can host things" and "I can host things without being nervous every time I change something."
+
+## When I Would Not Use It
+
+I would not pretend Proxmox is the correct answer for every machine.
+
+If I truly wanted one simple box whose job was just to run a handful of Docker containers, and I had no interest in VMs, clustering, snapshots, passthrough, or learning virtualization, then a plain Debian or Ubuntu host would be simpler.
+
+That is a legitimate choice.
+
+Proxmox is not better because it is more layers. It is better when I want the things those layers buy me:
+
+- safer isolation
+- faster recovery
+- cleaner growth
+- mixed VM and container workflows
+- better host-level management for a real homelab
+
+So the honest version is this: I do not use Proxmox because everyone should. I use Proxmox because my lab benefits from virtualization more than it benefits from theoretical simplicity.
+
+## Why I Keep Coming Back To It
+
+If I had to reduce it to one sentence, it would be this:
+
+I use Proxmox because it lets me grow, break, fix, move, and rebuild my homelab without turning every change into a system-wide gamble.
+
+It gives me an "undo" culture.
+
+It gives me separation.
+
+It gives me better recovery.
+
+It gives me VMs and lightweight Linux containers in one place.
+
+And it gives me a platform that still makes sense after the lab stops being a single box with a single job.
+
+That is why I use it.
+
+## Further Reading
+
+- [Why use Proxmox? on r/HomeServer](https://old.reddit.com/r/HomeServer/comments/1ejs0kp/why_use_proxmox/)
+- [Proxmox VE overview](https://www.proxmox.com/en/proxmox-virtual-environment/overview)
+- [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.html)
