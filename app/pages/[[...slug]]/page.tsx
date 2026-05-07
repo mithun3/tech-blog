@@ -9,6 +9,7 @@ import Image, { type ImageProps } from 'next/image'
 import Link from 'next/link'
 import { getAllPageSlugs, getPageContent, getPageMeta } from '@/lib/wiki'
 import { WikiBreadcrumb } from '@/components/wiki/breadcrumb'
+import Comments from '@/components/comments'
 import { Video } from '@/components/mdx/video'
 import { Audio } from '@/components/mdx/audio'
 import { Callout } from '@/components/mdx/callout'
@@ -122,6 +123,7 @@ export default async function WikiPage({ params }: Props) {
   if (!page) notFound()
 
   return (
+    <>
     <article className="min-w-0">
       <WikiBreadcrumb slug={slug} />
 
@@ -161,6 +163,8 @@ export default async function WikiPage({ params }: Props) {
         />
       </div>
     </article>
+    <Comments />
+    </>
   )
 }
 

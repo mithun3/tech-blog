@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAllPostsMeta, getPostBySlug } from "@/lib/posts";
 import type { Metadata } from "next";
+import Comments from "@/components/comments";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -124,6 +125,7 @@ export default async function PostPage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: post.htmlContent }}
       />
     </article>
+    <Comments />
     </>
   );
 }
