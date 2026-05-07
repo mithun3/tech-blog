@@ -1,6 +1,6 @@
 ---
 title: "Proxmox Platform"
-description: "How Proxmox is layered, how storage and snapshots work, how VMs and containers attach to the network, and how to size resources."
+description: "A connected Proxmox guide: why it is useful, what the fundamentals are, how the stack is layered, and how to handle storage, networking, and sizing."
 publishedAt: "2026-05-06"
 order: 2
 status: published
@@ -13,6 +13,7 @@ These pages cover the Proxmox platform itself — how its components fit togethe
 ## In This Section
 
 - [Why I Use Proxmox](/pages/virtualization/proxmox/why-i-use-proxmox) — a practical, first-person explanation of why Proxmox works so well in a homelab and where it may still be overkill.
+- [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) — a reference-style overview of what Proxmox VE is, how Type 1 virtualization works, how VMs differ from LXCs, and where Proxmox fits against common alternatives.
 - [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) — how Proxmox layers QEMU, KVM, LXC, Linux storage, and networking into one workable homelab platform.
 - [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots) — VM disk formats, controller choices, snapshots, templates, and backup boundaries.
 - [Networking Models](/pages/virtualization/proxmox/networking-models) — bridged, NAT, and isolated networking for VMs and containers, with guidance on when to use each.
@@ -20,4 +21,4 @@ These pages cover the Proxmox platform itself — how its components fit togethe
 
 ## How To Use It
 
-Read Proxmox Stack first to understand how the platform hangs together. Then use the storage, networking, and resource pages as reference when configuring individual guests.
+Start with [Why I Use Proxmox](/pages/virtualization/proxmox/why-i-use-proxmox) if you want the subjective case first. Then read [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) and [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) for the structural view. After that, use the storage, networking, and resource pages as practical reference when building guests.

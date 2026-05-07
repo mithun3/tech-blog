@@ -2,7 +2,7 @@
 title: "Resource Allocation"
 description: "Practical sizing for CPU, memory, disk, and headroom across VMs and containers in a homelab."
 publishedAt: "2026-05-06"
-order: 5
+order: 6
 status: published
 ---
 
@@ -25,6 +25,14 @@ Two Proxmox settings matter here:
 
 Use those when one noisy guest keeps trying to behave like it rented the whole server.
 
+## Overcommit Rules Are Not Symmetrical
+
+CPU can usually be oversubscribed with some common sense.
+
+Memory is less forgiving because guests eventually want real RAM, not theoretical RAM.
+
+Disk should be treated like an honest budget. Snapshots, logs, package caches, media files, and "temporary" test guests all have a habit of becoming surprisingly permanent.
+
 ## Memory
 
 Memory needs more respect.
@@ -34,6 +42,14 @@ VMs have a configured ceiling, and that number should not be picked casually. Pr
 Containers behave differently. Because they share the host kernel, they often sit below their configured limit until they actually need it.
 
 That means a mixed lab can feel roomier than the raw numbers suggest, but only if you leave real headroom.
+
+## The Host Is Also A Workload
+
+Proxmox itself needs breathing room.
+
+If you use ZFS, the ARC cache will also make use of memory when it can. That is usually a feature, not a bug, but it does mean the nicest mistake in the world is still a mistake: giving every attractive-looking gigabyte to guests and assuming the host will somehow stay cheerful.
+
+As a practical habit, leave a meaningful RAM buffer and do not budget the host to zero. A calm hypervisor is part of the performance plan.
 
 ## Disk
 
@@ -66,6 +82,8 @@ Leave space for:
 
 As a practical baseline, keeping some CPU slack and a meaningful RAM buffer is more valuable than squeezing one extra guest onto the host.
 
+For storage, a boring policy works well: leave free space on purpose. Once pools get too full, performance gets weird, snapshots become harder to keep, and cleanup turns into emergency work.
+
 ## A Simple Planning Loop
 
 1. Start small but not starved.
@@ -74,3 +92,9 @@ As a practical baseline, keeping some CPU slack and a meaningful RAM buffer is m
 4. Document the new baseline.
 
 That loop beats theoretical sizing almost every time.
+
+## Continue Through The Series
+
+- [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) — the big-picture reference for the concepts underneath these sizing choices.
+- [Why I Use Proxmox](/pages/virtualization/proxmox/why-i-use-proxmox) — the personal case for why this overhead is usually worth it.
+- [Proxmox Platform](/pages/virtualization/proxmox) — the full section index if you want to jump back into the rest of the series.

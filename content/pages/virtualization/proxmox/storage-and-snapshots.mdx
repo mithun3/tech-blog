@@ -2,13 +2,24 @@
 title: "Storage and Snapshots"
 description: "How VM disk formats, controller choices, snapshots, templates, and backup boundaries work in a Proxmox homelab."
 publishedAt: "2026-05-06"
-order: 3
+order: 4
 status: published
 ---
 
 # Storage and Snapshots
 
 Disks are where virtualization stops being abstract. Every clean demo stays easy right up until storage gets slow, full, or inconsistent.
+
+The quiet truth is that most Proxmox opinions are really storage opinions wearing a virtualization hat.
+
+## Pick The Backend Before You Pick The Disk Format
+
+The backend decides what features are native, what tradeoffs are acceptable, and what recovery will feel like later.
+
+- Local storage is the fastest way to get moving on one box. It is also the fastest way to discover that host failure means everything important lived in one place.
+- ZFS is popular in homelabs because it gives you snapshots, checksumming, compression, and a strong local storage story without bolting together extra layers by hand.
+- LVM and LVM-thin are perfectly workable when you want simpler block-backed storage and do not need the full ZFS feature set.
+- Network storage matters once backups, migration, or multi-node growth enter the picture.
 
 ## The First Decision Is The Storage Layer
 
@@ -60,6 +71,8 @@ A backup is for recovery after something genuinely bad happened: storage trouble
 
 If the host disappears and your plan dies with it, that was never a snapshot problem. It was a backup problem.
 
+That is why separate backup storage matters so much. If the copy lives on another pool, another box, or a dedicated backup target, the recovery story stops depending on the same failure domain that just let you down.
+
 ## Copy-On-Write Is Why Snapshots Feel Instant
 
 The reason snapshots are so useful is that they usually avoid copying the whole disk up front.
@@ -81,3 +94,17 @@ The QEMU Guest Agent is not just a convenience feature. It improves the storage 
 - optional guest trim after some move or clone operations
 
 That is especially useful once the lab stops being toy-sized.
+
+## A Storage Layout That Ages Well
+
+I like fast local storage for active guests and separate storage for backups, archives, or bulk data.
+
+Guest disks usually want low latency. Backup repositories and media libraries usually want capacity and separation. Those are different jobs, and giving them different homes keeps the platform easier to reason about.
+
+If there is even a decent chance you will add another node later, it is worth thinking about shared or network-backed storage early. You do not need to build for a cluster on day one, but it helps to avoid painting yourself into a single-host corner by accident.
+
+## Continue Through The Series
+
+- [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) — the higher-level reference on snapshots, templates, nodes, and migration.
+- [Networking Models](/pages/virtualization/proxmox/networking-models) — how those guests should join the LAN once their disks are in order.
+- [Resource Allocation](/pages/virtualization/proxmox/resource-allocation) — how to size CPU, RAM, and disk without starving the host.

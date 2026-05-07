@@ -71,6 +71,8 @@ I use LXCs when I want:
 - lightweight Linux services that still feel like their own machine
 - a cleaner boundary than "just install it on the host"
 
+That last part matters. An LXC is not the same thing as flattening everything into application containers on the host. It still gives me a system boundary, just with far less weight than a full VM.
+
 That mix matters more than people sometimes admit. A good homelab is rarely one technology all the way down. Some services want the weight and clarity of a VM. Some are happier in a lighter container. Proxmox lets me choose based on the workload instead of based on what my host happened to start as.
 
 ## It Grows With The Lab Instead Of Fighting It
@@ -91,6 +93,8 @@ Then a monitoring box, a test VM, a Windows guest, a second node, or a separate 
 
 That is why starting with Proxmox often makes sense even if the first workload is small. It gives the lab room to become more interesting without forcing a migration from "single host with apps on it" to "actually I need a proper platform now."
 
+And that growth is not only about the number of guests. It is also about maturity. A clean VM or LXC can become a template instead of a one-off snowflake. A second host can become a node instead of becoming its own separate universe. Migration, replication, and clustering stop sounding theoretical once the lab contains services you genuinely care about.
+
 This is one of the places where Proxmox feels less like overengineering and more like choosing a stable base layer early.
 
 ## The Host Becomes An Appliance, Which I Like
@@ -100,6 +104,8 @@ One reason I prefer Proxmox over a hand-built KVM plus libvirt plus storage plus
 I want the host to be boring.
 
 Proxmox is still Linux underneath, which I like, but it presents itself as a dedicated virtualization platform rather than a general-purpose server that happens to run guests.
+
+Part of that feeling comes from the fact that it is a real bare-metal hypervisor platform, not a desktop operating system with virtualization bolted on afterward.
 
 That changes how I treat it.
 
@@ -187,6 +193,12 @@ It gives me VMs and lightweight Linux containers in one place.
 And it gives me a platform that still makes sense after the lab stops being a single box with a single job.
 
 That is why I use it.
+
+## Continue Through The Series
+
+- [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) — the reference version of what Proxmox is, how it works, and where it sits against alternatives.
+- [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) — the architectural view of the layers and boundaries underneath the platform.
+- [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots) — the recovery and rollback side of the story in more concrete detail.
 
 ## Further Reading
 

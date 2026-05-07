@@ -1,0 +1,125 @@
+---
+title: "Proxmox Fundamentals"
+description: "A reference-style guide to what Proxmox VE is, how its architecture works, when to use VMs or LXCs, and where it fits against common alternatives."
+publishedAt: "2026-05-07"
+order: 2
+status: published
+---
+
+# Proxmox Fundamentals
+
+If [Why I Use Proxmox](/pages/virtualization/proxmox/why-i-use-proxmox) is the personal answer, this page is the structural one.
+
+This is the reference map: what Proxmox VE is, how it is layered, what kind of problems it solves, and why it keeps showing up in serious homelabs without feeling impossible to learn.
+
+## What Proxmox VE Actually Is
+
+Proxmox Virtual Environment is an open-source virtualization platform built on Debian Linux.
+
+At its core, it combines:
+
+- KVM and QEMU for virtual machines
+- LXC for lightweight Linux system containers
+- a web UI, CLI, and REST API for managing the platform
+- integrated handling for storage, networking, snapshots, backups, and clustering
+
+None of those pieces are magical on their own. The reason Proxmox stands out is that the pieces are presented as one platform instead of as five separate projects you are expected to glue together on a weekend.
+
+## Why The Type 1 Part Matters
+
+Proxmox is a bare-metal, or Type 1, hypervisor platform in the practical sense that matters to a homelab: you install it on the machine itself, and the machine's main job becomes running guests.
+
+That is different from running VirtualBox, Parallels, or VMware Fusion on top of an existing desktop operating system.
+
+The upside is not only performance. It is clarity.
+
+- the host has a narrower and more stable job
+- hardware access is more direct
+- storage, networking, and passthrough features make more sense in one place
+- the box feels like infrastructure instead of a desktop that slowly became critical
+
+## The Architecture In One View
+
+```text
+Browser UI and REST API
+Proxmox management services
+QEMU/KVM for VMs and LXC for containers
+Linux kernel, storage stack, and networking stack
+Physical CPU, RAM, disks, and NICs
+```
+
+That is the useful mental model.
+
+Proxmox does not replace Linux. It organizes the Linux virtualization stack into something you can operate without constantly falling back into raw plumbing.
+
+## Virtual Machines Vs LXCs
+
+Proxmox is attractive partly because it does not force one answer for every workload.
+
+| Question | VM | LXC |
+|---------|----|-----|
+| Isolation | Strongest | Good, but shared kernel |
+| OS flexibility | Broad, including non-Linux guests | Linux only |
+| Overhead | Higher | Lower |
+| Boot speed | Slower | Faster |
+| Best for | Windows, BSD, heavy isolation, passthrough | Lightweight Linux services, utility workloads, dense homelab services |
+
+A VM behaves like a full machine. It gets its own kernel and a cleaner hardware boundary.
+
+An LXC is lighter and faster. It still gives you a system boundary, but it shares the host kernel and usually costs far less in memory and storage overhead.
+
+The right answer in a homelab is usually not "VM everywhere" or "container everywhere." It is a mixed model where each workload gets the level of isolation and overhead it actually deserves.
+
+## Common Homelab Fits
+
+Proxmox earns its reputation in labs because it handles several common patterns well:
+
+- learning environments with throwaway Linux or Windows guests
+- self-hosted services such as DNS, reverse proxies, media tooling, and home automation
+- GPU or PCI passthrough experiments that want a dedicated VM boundary
+- mixed environments where some workloads belong in LXCs and others want full VMs
+- labs that may eventually grow from one node to two without a total rewrite of the platform story
+
+## Key Concepts That Unlock The Rest
+
+You do not need the entire manual in your head. A few concepts carry most of the weight:
+
+- A node is one physical Proxmox host.
+- A cluster is several nodes managed together.
+- A template is a clean base image you clone instead of rebuilding from scratch.
+- A snapshot is a short-term rollback point, not a substitute for backup.
+- A backup is the copy you rely on when the problem is bigger than a bad config edit.
+- Live migration is the ability to move a running VM between nodes when the storage and network design support it.
+
+Once those ideas click, the rest of the platform stops feeling exotic.
+
+## Advantages Over Alternatives
+
+This is the part people usually want simplified.
+
+Proxmox is not "better than everything." It is better than many alternatives when you want a balanced homelab platform instead of a narrow specialist tool.
+
+| Alternative | What It Is Good At | Where Proxmox Usually Wins In A Homelab |
+|------------|--------------------|------------------------------------------|
+| VMware ESXi | Mature enterprise presence and familiar VMware workflows | Lower cost, open-source foundations, LXC support, and far less friction for personal labs |
+| Standalone KVM and libvirt | Maximum flexibility if you enjoy building your own control plane | A cohesive UI, integrated storage and networking workflows, backups, and easier day-to-day management |
+| Hyper-V | A sensible fit in Windows-heavy environments | Better fit for Linux-first labs, built-in LXC support, and a broader open infrastructure story |
+| Kubernetes | Excellent for orchestrating containerized applications at the application layer | Proxmox manages machines and mixed workloads; it is simpler when you need VMs, LXCs, and one sane host platform |
+
+The useful nuance is that some of these are not pure competitors.
+
+Kubernetes can run inside Proxmox VMs. Docker can run inside a purpose-built guest. A Windows-heavy environment may genuinely prefer Hyper-V. Proxmox wins when you want one platform that can host several different styles of workload without becoming hostile to operators.
+
+## A Good First Mental Model
+
+Think of Proxmox as the layer that gives your homelab shape.
+
+It is where you decide what should be a real machine, what should be a lighter container, what storage those guests should trust, how they should join the network, and how much room the host must keep for itself.
+
+That is why it often feels like a cleaner long-term choice than simply piling services onto one general-purpose Linux host.
+
+## Continue Through The Series
+
+- [Why I Use Proxmox](/pages/virtualization/proxmox/why-i-use-proxmox) — the opinionated, first-person case for choosing it in the first place.
+- [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) — the platform layers, boundaries, and operating model.
+- [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots) — the part of the platform that usually decides whether the lab feels safe or fragile.

@@ -2,13 +2,15 @@
 title: "Proxmox Stack"
 description: "How Proxmox layers QEMU, KVM, LXC, Linux storage, and networking into one workable homelab platform."
 publishedAt: "2026-05-06"
-order: 2
+order: 3
 status: published
 ---
 
 # Proxmox Stack
 
 Proxmox is not a mystery box. It is a pragmatic stack with a good control plane.
+
+It is also a real bare-metal virtualization platform, which matters more than the marketing phrase might suggest. Proxmox boots as the host, uses KVM and QEMU for virtual machines, uses LXC for Linux containers, and then wraps the whole thing in a web UI and API that make the platform feel coherent instead of improvised.
 
 ```text
 Web UI and API
@@ -20,6 +22,14 @@ Physical CPU, RAM, disks, and NICs
 
 That layering is why Proxmox feels approachable once you stop treating it like an appliance.
 
+## It Is A Type 1 Hypervisor In The Useful Sense
+
+Some people hear "type 1 hypervisor" and immediately picture enterprise ceremony.
+
+In practice, the important part is simpler than that: Proxmox is the machine you install on the hardware, not an app sitting on top of a desktop operating system.
+
+That gives the host a clearer job description. It exists to run guests, manage storage, and move traffic. That usually means less overhead, fewer weird host-side dependencies, and a box that feels more like infrastructure than a personal workstation that accidentally became important.
+
 ## What Proxmox Actually Gives You
 
 Proxmox does not invent virtualization from scratch. It integrates existing Linux virtualization building blocks and makes them manageable.
@@ -27,10 +37,11 @@ Proxmox does not invent virtualization from scratch. It integrates existing Linu
 In practice that means one place to manage:
 
 - VM and container lifecycle
+- a web UI and REST API over the same platform model
 - storage targets and volumes
 - snapshots, templates, and backups
 - bridges, VLAN-aware interfaces, and guest networking
-- clustering and migration workflows
+- clustering, node-level management, and migration workflows
 
 ## Why It Works Well In A Homelab
 
@@ -55,6 +66,46 @@ You still need:
 
 If the storage is fragile, Proxmox cannot make it reliable with a prettier panel.
 
+## VMs And LXCs Are Different Tools, Not Rival Camps
+
+A VM behaves like a full machine. It gets its own kernel, its own drivers, and the cleanest isolation boundary.
+
+An LXC is lighter. It shares the host kernel and feels more like a small, fast Linux system than an application container glued directly onto the host.
+
+That difference is exactly why Proxmox works so well in a homelab.
+
+Use a VM when you want:
+
+- a different operating system or kernel behavior
+- stronger isolation
+- GPU or PCI passthrough, appliance-style guests, or anything more hardware-sensitive
+- a guest that should behave like a completely separate machine
+
+Use an LXC when you want:
+
+- lightweight Linux services
+- fast provisioning and low memory overhead
+- cleaner boundaries than "just install it on the host"
+- a guest you expect to treat more like an appliance than a snowflake
+
+The useful point is not to pick a side. It is to stop forcing every workload into the same shape.
+
+## A Few Concepts Worth Learning Early
+
+- A node is one physical Proxmox host. A cluster is several nodes managed together.
+- A template is a clean base image you clone instead of rebuilding from scratch every time.
+- Live migration matters later, but it is worth knowing about early: with the right shared storage and network design, a running VM does not have to stay married to one box forever.
+- The API is not only for automation people. It is a sign that the UI is built on a model you can reason about and script later.
+
+## How This Shows Up In A Real Lab
+
+In a small homelab, this often turns into a very practical split:
+
+- utility services such as DNS, reverse proxy, or monitoring in LXCs
+- Windows, BSD, or test Linux systems as full VMs
+- heavier experiments such as AI, media tooling, or passthrough workloads in dedicated guests
+- room to add a second node later without relearning the platform from zero
+
 ## A Reasonable Split In A Mixed Lab
 
 Use Proxmox VMs for workloads that need full machine behavior, different operating systems, or stronger isolation.
@@ -64,3 +115,9 @@ Use LXC containers for lightweight Linux services that benefit from fast start a
 Use OCI tooling inside purpose-built guests when your application workflow really wants Docker or Kubernetes semantics.
 
 That split stays understandable as the lab grows. That is the real win.
+
+## Continue Through The Series
+
+- [Proxmox Fundamentals](/pages/virtualization/proxmox/proxmox-fundamentals) — the reference overview of Type 1 virtualization, VM versus LXC choices, and the main platform concepts.
+- [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots) — where the platform stops being abstract and starts depending on real disk behavior.
+- [Networking Models](/pages/virtualization/proxmox/networking-models) — how guests actually attach to the network once the stack is in place.
