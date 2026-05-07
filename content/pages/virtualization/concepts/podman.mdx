@@ -1,0 +1,113 @@
+---
+title: "Podman"
+description: "What Podman is, why it runs without a root daemon, how it compares to Docker, and when to prefer one over the other."
+publishedAt: "2026-05-07"
+order: 5
+status: published
+---
+
+# Podman
+
+Podman is Docker without the daemon.
+
+That is the one-line summary and it is accurate enough to be useful. The longer version is that Podman is a container engine that speaks Docker's language, ships with a nearly identical CLI, and does almost everything Docker does — without requiring a privileged background service to be running at all times.
+
+## What Problem Podman Solves
+
+The "who owns root?" problem.
+
+Docker solved the "it works on my machine" problem beautifully. But it did so by introducing a daemon that runs as root and acts as the single gatekeeper for every container, volume, and network bridge on the system. If something escapes a container, it has a direct path to a process that owns everything else.
+
+Podman solves the security gap Docker left behind. You get the same containerisation workflow — same images, same compose files, same CLI shape — but without a persistent root process sitting in the middle of it all. Each container runs as the user who started it. A misbehaving container has nowhere privileged to escape to.
+
+For most homelab use it is a subtle difference. For anything where security posture matters, it is the difference between a defensible architecture and one that requires trusting the daemon forever.
+
+## Why The Daemon Matters
+
+The Docker daemon (`dockerd`) runs as root. Every container you start goes through it. Every volume, every network bridge, every port binding — all of it passes through a single root-owned process.
+
+That is a wide attack surface. If something goes wrong inside a container and it can break out, it has a direct path to a root process that owns the rest of your containers.
+
+Podman's answer is to remove that process entirely. Each container is a direct child of whatever process started it, running under the user that started it.
+
+```text
+Docker model:
+  dockerd (root) → container A
+                 → container B
+                 → container C
+
+Podman model:
+  your shell → container A
+  your shell → container B
+  your shell → container C
+```
+
+In practice this means: rootless containers by default, no single point of failure, and a smaller blast radius if something misbehaves.
+
+## The CLI Is Intentionally Familiar
+
+Podman's command structure is close enough to Docker that most muscle memory transfers:
+
+```bash
+podman pull nginx:latest
+podman run -d -p 8080:80 --name web nginx:latest
+podman ps
+podman logs web
+podman exec -it web bash
+podman stop web && podman rm web
+```
+
+Many people alias `docker` to `podman` and forget the difference.
+
+The main CLI gap worth knowing: `podman` has no `context` subcommand and no `swarm` support. Neither matters for a single-node homelab.
+
+## Compose Still Works
+
+Podman ships with `podman compose`, and it handles standard `compose.yaml` files. If you have a working Docker Compose setup, it will likely run as-is under Podman.
+
+The main difference is that `podman compose` wraps the upstream `docker-compose` tool rather than reimplementing it natively. This means you may need the `docker-compose` Python package installed alongside Podman, depending on your distribution.
+
+```bash
+podman compose up -d
+podman compose logs -f
+podman compose down
+```
+
+## Systemd Integration
+
+Because Podman containers are normal processes, they integrate naturally with systemd.
+
+`podman generate systemd` produces a unit file for any running container. Drop it in `~/.config/systemd/user/` for a rootless service that starts on login, or `/etc/systemd/system/` for a system-level service.
+
+This is different from Docker, where you typically rely on the daemon's own restart policies. With Podman, the container lifecycle is just a systemd unit — something that already knows how to start, stop, log, and recover.
+
+## Where Podman Makes Sense In A Homelab
+
+Podman is a good fit when:
+
+- you want rootless containers as the default, not an opt-in
+- you are running services on a host where you want tight control over privilege
+- you are already comfortable with systemd and want container lifecycle managed the same way
+
+It is less obviously useful when:
+
+- you are running Docker inside a dedicated VM already (the security argument is weaker when the whole VM is the boundary)
+- your team already knows Docker and the migration cost outweighs the benefit
+
+Neither is wrong. They are different points on the same tradeoff.
+
+## Podman vs Docker At A Glance
+
+| | Podman | Docker |
+|---|---|---|
+| Daemon | None | Required (runs as root) |
+| Default user | Rootless | Root |
+| CLI compatibility | High | — |
+| Compose support | Via `podman compose` | Native |
+| Systemd integration | Native | Via restart policies |
+| Proxmox native | No | No |
+
+## Read This Alongside
+
+- [Docker](/pages/virtualization/concepts/docker) — the tool Podman is designed to replace, with the tradeoffs laid out.
+- [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci) — the OCI standards both Docker and Podman are built on.

@@ -1,0 +1,92 @@
+---
+title: "VMware ESXi"
+description: "What ESXi is, why it mattered for enterprise virtualisation, what Broadcom did to it in 2024, and why many homelabbers moved to Proxmox."
+publishedAt: "2026-05-07"
+order: 8
+status: published
+---
+
+# VMware ESXi
+
+ESXi is a bare-metal hypervisor from VMware, now owned by Broadcom.
+
+For a long time it was the hypervisor that enterprise data centres ran on. vSphere, vCenter, vMotion, vSAN — the whole VMware stack was the dominant answer to "how do large organisations run virtual infrastructure." If you worked in IT before 2020, you have almost certainly operated ESXi in some form.
+
+It is also the reason a lot of people learned what a hypervisor was in the first place, and understanding it adds useful context when you encounter references to it in homelab guides and job postings.
+
+## What Problem ESXi Solves
+
+The "we bought expensive hardware and it is sitting at ten percent utilisation" problem.
+
+Enterprise servers are not cheap, and workloads are rarely constant. Before virtualisation, the standard model was one application per physical server — partly for isolation, partly because mixing workloads on one machine created unpredictable interference. The result was racks full of underused hardware.
+
+ESXi let organisations pack many VMs onto one machine with predictable resource allocation, strong isolation, and the management tooling to treat the whole estate as a single controllable thing. Live migration meant a physical host could be drained and taken offline without touching the workloads. Snapshots meant rollback before a risky change. vCenter meant one interface for hundreds of hosts.
+
+For homelabbers, the problem it solved was simpler: one box that could pretend to be many. ESXi did that with a level of polish and ecosystem support that nothing else matched for a long time.
+
+## What ESXi Actually Is
+
+ESXi is a Type 1 bare-metal hypervisor. It installs directly onto hardware with no host operating system underneath.
+
+```text
+Hardware
+└── ESXi (the hypervisor)
+    ├── VM 1
+    ├── VM 2
+    └── VM 3
+```
+
+The ESXi kernel is small and purpose-built. It manages hardware access, CPU scheduling, memory allocation, and I/O for every VM running on it.
+
+At larger scale, ESXi nodes are managed through vCenter Server, which adds clustering, live migration (vMotion), shared storage coordination, and centralised configuration. A single ESXi node is useful. An ESXi cluster with vCenter is an enterprise-grade platform.
+
+## Why It Was The Default
+
+ESXi had two things going for it for a long time: a free tier and a mature ecosystem.
+
+The free tier (the "vSphere Hypervisor" licence) let individuals and small businesses run ESXi without paying anything. It had limitations — no vCenter management, no advanced features — but it was a real hypervisor on real hardware for free.
+
+The ecosystem meant that every major vendor qualified their software to run on ESXi. Every certification used ESXi as the reference platform. Every enterprise monitoring, backup, and DR tool had an ESXi integration. Choosing ESXi meant choosing compatibility.
+
+## What Broadcom Did In 2024
+
+Broadcom acquired VMware in late 2023 and restructured the product line in early 2024.
+
+The free ESXi licence was discontinued. The product line was consolidated into expensive subscription bundles targeted at large enterprises. The perpetual licence model was replaced with annual subscriptions with minimum seat requirements.
+
+For homelabbers and small organisations, this was a hard stop. A hypervisor that cost nothing to run now had no affordable path forward.
+
+## Why This Matters For Proxmox Users
+
+The Broadcom changes sent a significant portion of the homelab and small business VMware community looking for alternatives. Proxmox — which was already a capable, free, and open-source platform — absorbed a large portion of that migration.
+
+If you read homelab forums from 2024 onward, you will encounter a lot of "I moved from ESXi to Proxmox" threads. Many of the comparison questions, migration guides, and "is this equivalent" posts come from people who understood ESXi well and were mapping its concepts onto Proxmox.
+
+Understanding what ESXi was helps you read those resources with more context.
+
+## ESXi Concepts And Their Proxmox Equivalents
+
+| ESXi / VMware | Proxmox equivalent |
+|---|---|
+| ESXi host | Proxmox node |
+| vCenter Server | Proxmox cluster + web UI |
+| vMotion (live migration) | Proxmox live migration |
+| vSAN | Ceph storage in Proxmox |
+| VMFS datastore | Proxmox storage (dir, LVM, ZFS) |
+| Snapshots | Snapshots (QEMU / storage-level) |
+| VMware Tools | QEMU Guest Agent |
+| Distributed vSwitch | Linux bridge / OVS in Proxmox |
+
+The concepts are not one-to-one, but they are close enough that someone with ESXi experience can map across without starting from scratch.
+
+## Is It Worth Running ESXi Today?
+
+For a new homelab build: no. The free path is gone, and the alternatives — Proxmox in particular — have narrowed the capability gap considerably.
+
+If you already have ESXi running under a licence that still works, there is no urgency to move. But any new deployment on hardware you own should probably start with Proxmox or a similar open alternative.
+
+## Read This Alongside
+
+- [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) — the platform most people are using instead.
+- [VM Architecture](/pages/virtualization/concepts/vm-architecture) — the QEMU and KVM model that Proxmox is built on.
+- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals) — the Type 1 vs Type 2 distinction that explains where ESXi sits.

@@ -1,0 +1,22 @@
+---
+title: "Proxmox Platform"
+description: "How Proxmox is layered, how storage and snapshots work, how VMs and containers attach to the network, and how to size resources."
+publishedAt: "2026-05-06"
+order: 2
+status: published
+---
+
+# Proxmox Platform
+
+These pages cover the Proxmox platform itself — how its components fit together and how to configure the pieces that every VM and container depends on.
+
+## In This Section
+
+- [Proxmox Stack](/pages/virtualization/proxmox/proxmox-stack) — how Proxmox layers QEMU, KVM, LXC, Linux storage, and networking into one workable homelab platform.
+- [Storage and Snapshots](/pages/virtualization/proxmox/storage-and-snapshots) — VM disk formats, controller choices, snapshots, templates, and backup boundaries.
+- [Networking Models](/pages/virtualization/proxmox/networking-models) — bridged, NAT, and isolated networking for VMs and containers, with guidance on when to use each.
+- [Resource Allocation](/pages/virtualization/proxmox/resource-allocation) — practical sizing for CPU, memory, disk, and headroom across VMs and containers.
+
+## How To Use It
+
+Read Proxmox Stack first to understand how the platform hangs together. Then use the storage, networking, and resource pages as reference when configuring individual guests.

@@ -1,0 +1,26 @@
+---
+title: "Virtualization Concepts"
+description: "Core theory: what virtualization is, how VMs work under the hood, and where containers fit alongside them."
+publishedAt: "2026-05-06"
+order: 1
+status: published
+---
+
+# Virtualization Concepts
+
+These pages cover the foundational ideas behind virtualization. They explain the models, the tradeoffs, and what is actually happening inside a running VM or container — before getting into platform-specific setup.
+
+## In This Section
+
+- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals) — the core models, the differences between full virtualization and containers, and how to choose between them.
+- [VM Architecture](/pages/virtualization/concepts/vm-architecture) — how QEMU and KVM divide the work, what a guest really sees, and which defaults are worth keeping.
+- [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci) — what LXC system containers are, how OCI containers differ, and where each fits in a Proxmox-based homelab.
+- [Docker](/pages/virtualization/concepts/docker) — what Docker actually is, how images and layers work, how to run it sensibly in a homelab, and when it earns its place over LXC.
+- [Podman](/pages/virtualization/concepts/podman) — Docker without the root daemon: rootless containers, systemd integration, and when the security tradeoff matters.
+- [VirtualBox](/pages/virtualization/concepts/virtualbox) — Oracle's desktop hypervisor, where most homelab journeys start, and why most people eventually move on.
+- [systemd-nspawn](/pages/virtualization/concepts/systemd-nspawn) — the container runtime that ships with systemd: no daemon, no image layers, tight host integration.
+- [VMware ESXi](/pages/virtualization/concepts/vmware-esxi) — the enterprise hypervisor that dominated data centres, what Broadcom did to it in 2024, and why many people moved to Proxmox.
+
+## Suggested Reading Order
+
+Start with Fundamentals for the mental model, then VM Architecture for QEMU/KVM mechanics, then LXC and OCI for the container standards picture. Read Docker and Podman back to back — they make more sense as a pair. VirtualBox, systemd-nspawn, and ESXi can be read in any order as standalone reference pages.

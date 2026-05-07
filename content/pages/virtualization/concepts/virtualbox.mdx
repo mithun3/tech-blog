@@ -1,0 +1,87 @@
+---
+title: "VirtualBox"
+description: "Oracle's desktop hypervisor, where most homelab journeys start, and why most people eventually move on from it."
+publishedAt: "2026-05-07"
+order: 6
+status: published
+---
+
+# VirtualBox
+
+VirtualBox is where most people first ran a virtual machine.
+
+It is free, it runs on Windows, macOS, and Linux, and it has a graphical interface that does not require knowing what a hypervisor actually is before you can use it. For a decade it was the obvious answer to "I want to try Linux without wiping my machine."
+
+That context matters when you are reading homelab guides that reference it, and when you are deciding whether it still belongs in your setup.
+
+## What Problem VirtualBox Solves
+
+The "I don't want to wipe my machine" problem.
+
+Before VirtualBox, trying a different operating system meant partitioning your drive, setting up a dual-boot, or buying a second machine. All of those options carried real cost and real risk. VirtualBox made it free, reversible, and possible to do on a Wednesday evening without committing to anything.
+
+You got an isolated environment that could be paused, snapshotted, rolled back, and deleted. The host machine stayed exactly as it was. That was a genuinely new kind of freedom for anyone learning Linux, testing software, or following a tutorial that assumed an environment you did not want to build permanently.
+
+The problem it does not solve well is running VMs as persistent infrastructure. It was designed for a desktop sitting in front of you, not a server running unattended. That is where the journey from VirtualBox to Proxmox usually starts.
+
+## What VirtualBox Is
+
+VirtualBox is a Type 2 hypervisor. It runs on top of a host operating system rather than directly on hardware.
+
+```text
+Type 1 (bare-metal):    Hardware → Hypervisor → VMs
+                        Examples: Proxmox, ESXi, Hyper-V (server)
+
+Type 2 (hosted):        Hardware → Host OS → Hypervisor → VMs
+                        Examples: VirtualBox, VMware Workstation/Fusion
+```
+
+The Type 2 model means VirtualBox competes with your host OS for resources. Every VM you run shares CPU and memory with whatever else is running on your desktop. That is fine for occasional use and it is a real constraint for anything heavier.
+
+## Why It Was So Popular
+
+Before cloud providers made throwaway Linux environments cheap, VirtualBox was the practical way to run something safely isolated.
+
+- no partitioning required
+- snapshots that actually worked
+- a GUI that showed you the machine state without reading any documentation
+- shared folders between host and guest without setting up a file server
+
+For learning, testing, and development, that was enough.
+
+## Where It Still Makes Sense
+
+VirtualBox is still a reasonable choice when:
+
+- you need a quick VM on a laptop without a full homelab setup
+- you are following a guide or course that uses it and switching would add friction
+- you are on macOS and want something with a familiar GUI for occasional use
+- you are using it as the backend for Vagrant (covered in [Vagrant](/pages/virtualization/operations/vagrant))
+
+It is the wrong tool for:
+
+- anything that should run reliably as infrastructure
+- high-performance workloads that need low-overhead virtualisation
+- a server that is on all the time
+
+## The Honest Comparison With Proxmox
+
+Proxmox uses QEMU and KVM. Both use hardware virtualisation extensions (VT-x, AMD-V). Both can run similar guests.
+
+The practical differences come down to where they run and what they are built for.
+
+VirtualBox is desktop software. Proxmox is server infrastructure. They are designed for different contexts, not for the same job at different quality levels.
+
+If you are building a homelab that stays on and does real work, Proxmox or a similar bare-metal hypervisor is the right foundation. VirtualBox is the thing many people used before they got there.
+
+## Guest Additions
+
+VirtualBox installs "Guest Additions" into the guest OS to enable shared folders, clipboard sharing, drag and drop, and better display integration.
+
+This is a meaningful feature for desktop VMs where you interact with the guest directly. It is less relevant for headless server VMs where you connect via SSH.
+
+## Read This Alongside
+
+- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals) — the mental model that explains why Type 1 and Type 2 behave differently.
+- [VM Architecture](/pages/virtualization/concepts/vm-architecture) — the QEMU and KVM mechanics used by Proxmox, for comparison.
+- [Vagrant](/pages/virtualization/operations/vagrant) — the provisioning layer that often sits on top of VirtualBox for development workflows.

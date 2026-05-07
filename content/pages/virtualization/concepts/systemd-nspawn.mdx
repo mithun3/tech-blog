@@ -1,0 +1,86 @@
+---
+title: "systemd-nspawn"
+description: "systemd's own container runtime, what makes it different from Docker and LXC, and when it is the quietest tool for the job."
+publishedAt: "2026-05-07"
+order: 7
+status: published
+---
+
+# systemd-nspawn
+
+If you are already running a Linux system managed by systemd, you have a container runtime installed. You probably have not used it.
+
+`systemd-nspawn` is the container tool that ships with systemd. It has no daemon, no registry, no image layers, and no CLI to learn beyond the subcommands of `machinectl`. It starts a container the way systemd starts a service: quietly, reliably, and with the rest of the system's logging and supervision machinery already attached.
+
+## What Problem systemd-nspawn Solves
+
+The "I want real isolation without installing a container daemon" problem.
+
+A plain `chroot` isolates the filesystem but nothing else. Processes inside can still see the host process table. There are no resource limits. Security controls are minimal. It is better than nothing and not much more.
+
+`systemd-nspawn` gives you the isolation that a chroot implies but does not actually deliver: separate process namespace, separate mount namespace, cgroup resource limits, and tighter security boundaries — all without pulling in Docker, configuring LXC, or running any additional daemon.
+
+If you already have systemd managing your system, you already have this. The problem it solves is the gap between "I just need something isolated" and the overhead of setting up a full container platform to get there.
+
+## What It Is
+
+`systemd-nspawn` creates a lightweight namespace container around a directory tree. That directory becomes the root of the container. Whatever Linux userland is in that directory is what the container runs.
+
+```bash
+# Boot a Debian container from a local root directory
+systemd-nspawn -b -D /var/lib/machines/my-debian
+```
+
+The `-b` flag boots the container's init system. Without it, you get a shell. Either way, the container is isolated from the host by the same namespace and cgroup machinery that Docker and LXC use — just without a layer of tooling in between.
+
+## The machinectl Interface
+
+`machinectl` is the management layer on top of `systemd-nspawn`. It handles starting, stopping, and listing containers that have been registered as systemd machine units.
+
+```bash
+machinectl list             # running containers
+machinectl start my-debian  # start a registered container
+machinectl login my-debian  # attach a shell
+machinectl stop my-debian   # clean shutdown
+machinectl enable my-debian # start on boot
+```
+
+Because these are systemd units underneath, `journalctl -M my-debian` gives you the container's logs directly. No separate log driver to configure.
+
+## How Isolation Works
+
+`systemd-nspawn` gives each container:
+
+- its own PID namespace (the container's init is PID 1 inside)
+- its own mount namespace (separate filesystem view)
+- its own network namespace if you ask for it
+- resource limits via cgroups, enforced by the host systemd
+
+What it does not give you by default is strong network isolation or a separate user namespace. For a homelab workload where you control everything, that is usually fine. For a multi-tenant environment, it is worth thinking about.
+
+## Where It Fits In A Homelab
+
+`systemd-nspawn` is a good fit for:
+
+- running a complete Linux distribution inside a directory for testing or development
+- quick chroot-style environments with more isolation than a plain chroot
+- situations where you want containers managed entirely through systemd with no additional tooling
+- hosts where you want to avoid installing Docker or any container daemon
+
+It is not a good fit for:
+
+- OCI image workflows — it does not speak Docker's image format
+- multi-service application stacks with compose-style orchestration
+- anything where you want portable images that travel between machines
+
+## The Telling Comparison
+
+LXC and Docker both run on top of the same kernel primitives. `systemd-nspawn` also runs on those primitives, but it stays closer to the metal and integrates more tightly with the host's init system.
+
+The result is a container that feels more like a managed Linux subtree than a packaged runtime. That is either elegant simplicity or an unfamiliar abstraction, depending on how you already think about systemd.
+
+## Read This Alongside
+
+- [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci) — the more common container model in Proxmox, for comparison.
+- [Docker](/pages/virtualization/concepts/docker) — the packaging-oriented alternative that most people reach for first.
+- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals) — the OS-level virtualization model that all three tools are built on.

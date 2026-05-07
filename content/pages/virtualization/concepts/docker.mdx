@@ -1,0 +1,171 @@
+---
+title: "Docker"
+description: "What Docker actually is, how images and layers work, how to run it sensibly in a homelab, and when it earns its place over LXC."
+publishedAt: "2026-05-07"
+order: 4
+status: published
+---
+
+# Docker
+
+Docker did not invent containers. It made them feel obvious.
+
+Before Docker, getting a container running involved a fair amount of low-level Linux knowledge. After Docker, you typed one command and got a working process. That is not a small thing, and it is worth understanding before deciding when Docker belongs in your homelab and when it does not.
+
+## What Problem Docker Solves
+
+The "it works on my machine" problem.
+
+Before Docker, deploying software meant carefully matching library versions, config files, system dependencies, and environment variables between a developer's laptop, a test server, and production. Every environment was slightly different. Deployments broke for reasons that had nothing to do with the code.
+
+Docker solves this by packaging the application and everything it needs to run into a single image. The image is the unit of deployment. It runs the same way on a MacBook, a CI server, or a Linux VM in your homelab because the environment travels with it.
+
+The other problem it solves is cleanup. Before containers, installing a service meant scattering files across `/usr`, `/etc`, `/var`, and the init system. Removing it cleanly was often a guess. With Docker, `docker rm` removes the container. `docker rmi` removes the image. Nothing is left behind.
+
+## What Docker Actually Is
+
+Docker is a set of tools built on top of the Linux container primitives covered in [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci).
+
+The main pieces:
+
+```text
+Docker CLI      ← the command you type
+Docker daemon   ← the service running in the background
+containerd      ← the runtime that actually manages containers
+runc            ← the low-level process that starts each container
+OCI image       ← the layered filesystem that becomes the container
+Registry        ← where images are stored and pulled from
+```
+
+The daemon and CLI talk to each other. The rest runs underneath, mostly invisibly.
+
+## How Images Work
+
+A Docker image is a stack of read-only layers.
+
+Each instruction in a Dockerfile adds a layer. When you run a container, Docker adds one thin writable layer on top. The layers underneath stay shared and unchanged.
+
+```text
+Your application layer       ← changes with every build
+Your dependencies layer      ← changes when you update packages
+Base OS layer (e.g. Debian)  ← rarely changes
+```
+
+This is why Docker pulls are fast when you already have the base layer. It is also why keeping images small matters: every layer you add is carried everywhere the image goes.
+
+## Docker Compose
+
+Most useful homelab setups involve more than one container. A database, an application, a reverse proxy. Docker Compose lets you describe all of them in one file and start the whole stack with a single command.
+
+```yaml
+services:
+  app:
+    image: myapp:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: secret
+
+volumes:
+  pgdata:
+```
+
+`docker compose up -d` starts everything. `docker compose down` stops and removes it. The state in named volumes survives restarts.
+
+That workflow — define once, run anywhere, tear down cleanly — is why Docker Compose became the default for small multi-service deployments.
+
+## Running Docker In A Homelab
+
+Docker is not a Proxmox-native tool the way LXC is. The clean approach is to run Docker inside a VM or a prepared LXC guest rather than on the Proxmox host itself.
+
+The reasons are practical:
+
+- the Docker daemon runs as root and has broad access to the host system
+- Proxmox needs to stay stable; a misbehaving container daemon is a bad neighbor
+- keeping Docker isolated gives you a clean boundary for updates and recovery
+
+A Debian or Ubuntu VM works well. A privileged LXC container with the right kernel modules exposed also works, though it requires some care at setup time.
+
+## The Commands Worth Knowing
+
+You do not need to memorise the whole CLI. These cover most situations:
+
+```bash
+# Pull and run
+docker pull nginx:latest
+docker run -d -p 8080:80 --name web nginx:latest
+
+# Inspect
+docker ps           # running containers
+docker ps -a        # all containers including stopped
+docker logs web     # stdout/stderr from a container
+docker exec -it web bash   # shell inside a running container
+
+# Clean up
+docker stop web && docker rm web
+docker image prune  # remove unused images
+docker system prune # remove everything unused (careful)
+
+# Compose
+docker compose up -d
+docker compose logs -f
+docker compose down
+```
+
+## Docker vs LXC
+
+They solve different problems, and a homelab can use both without contradiction.
+
+| | Docker | LXC |
+|---|---|---|
+| Unit | Application or process | Linux environment |
+| Startup | Seconds | Seconds |
+| Image format | OCI layers, portable | Proxmox template, local |
+| Proxmox native | No | Yes |
+| Typical use | App stacks, dev workflows | Service hosts, network tools |
+
+If you want to run Nginx as a quick test, Docker is fast and clean.
+
+If you want to run a small DNS resolver as a permanent piece of infrastructure, an LXC container is easier to manage inside Proxmox.
+
+If you are unsure, start with the thing that is simpler to explain to yourself six months from now.
+
+## Volumes And Persistence
+
+Containers are designed to be disposable. Everything written inside a container that is not in a volume disappears when the container is removed.
+
+```bash
+# Named volume (Docker manages the location)
+docker run -v pgdata:/var/lib/postgresql/data postgres:16
+
+# Bind mount (you control the location)
+docker run -v /srv/myapp/data:/app/data myapp:latest
+```
+
+Named volumes are portable and easy to back up with `docker volume inspect`. Bind mounts are predictable because the path is yours to control. Either works; pick the one you will remember.
+
+## What Docker Is Not Great At
+
+Docker is an application packaging and delivery tool. It is not a system management tool and it is not a hypervisor.
+
+It is not the right home for:
+
+- things that need a separate kernel
+- workloads that need full init system behaviour
+- anything that needs to look like a whole machine to the outside world
+- persistent infrastructure that does not change much and benefits from Proxmox backup integration
+
+For those, a VM or a native LXC container will give you fewer surprises.
+
+## Read This Alongside
+
+- [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci) — the standard that Docker is built on, and how LXC differs.
+- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals) — the broader model that puts Docker in context.
+- [VM Lifecycle](/pages/virtualization/operations/vm-lifecycle) — if you decide to run Docker inside a dedicated VM.

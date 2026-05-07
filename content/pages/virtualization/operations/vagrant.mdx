@@ -1,0 +1,101 @@
+---
+title: "Vagrant"
+description: "What Vagrant is, how it turns VM provisioning into a repeatable script, and when it fits into a homelab workflow."
+publishedAt: "2026-05-07"
+order: 4
+status: published
+---
+
+# Vagrant
+
+Vagrant solves the same setup-every-time problem that Docker solves, but for whole virtual machines instead of application containers.
+
+The idea is simple: describe a VM in a file, run one command, and get a running machine. Run another command and destroy it completely. Do it again tomorrow and get exactly the same machine. No clicking through GUI wizards, no half-remembered configuration steps, no "I think I installed this but I am not sure."
+
+## What Problem Vagrant Solves
+
+The "it worked on my machine — the whole machine" problem.
+
+Docker packages applications and their dependencies. But some projects need more than that. They need a specific Linux version, specific kernel parameters, specific system services running, or a specific network configuration that Docker cannot easily replicate. When the environment is the problem, you need to package the environment.
+
+Vagrant does that for whole virtual machines. One Vagrantfile in version control means every developer on the team gets the same OS, the same packages, the same configuration, provisioned the same way from scratch. The machine is not a shared resource that accumulates state — it is a recipe that anyone can execute and anyone can throw away.
+
+It also solves the cleanup problem for exploratory work. Instead of leaving half-configured VMs scattered across your hypervisor, you run `vagrant destroy` and the machine is gone. The Vagrantfile is the only artefact worth keeping.
+
+## What Vagrant Is
+
+Vagrant is a provisioning wrapper. It does not create VMs itself — it talks to a provider (VirtualBox, libvirt, VMware, and others) and tells it what to do.
+
+```text
+Vagrantfile → Vagrant → Provider (VirtualBox / libvirt)
+                            └── VM
+```
+
+The Vagrantfile is a Ruby file, but you do not need to know Ruby to use it. Most Vagrantfiles are short configuration declarations.
+
+```ruby
+Vagrant.configure("2") do |config|
+  config.vm.box = "debian/bookworm64"
+  config.vm.network "private_network", ip: "192.168.56.10"
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get install -y nginx
+  SHELL
+end
+```
+
+`vagrant up` reads that file, downloads the base image if needed, creates the VM, and runs the shell provisioner. The result is a running Debian machine with Nginx installed, at a predictable IP address, every time.
+
+## The Commands Worth Knowing
+
+```bash
+vagrant up          # create and start the VM
+vagrant ssh         # open a shell inside the running VM
+vagrant halt        # shut the VM down (keeps the disk)
+vagrant destroy     # stop and delete everything
+vagrant reload      # restart the VM and reapply provisioning
+vagrant status      # check what is running
+```
+
+`vagrant up` and `vagrant destroy` are the core loop. Build it, use it, destroy it. The Vagrantfile is the only thing that matters between sessions.
+
+## When Vagrant Is Useful
+
+Vagrant earns its place when you need a VM that is:
+
+- **reproducible** — the same machine every time, regardless of who runs it or on what machine
+- **ephemeral** — created for a task and destroyed when it is done
+- **portable** — the Vagrantfile lives in version control alongside the code it supports
+
+It is particularly common in development workflows where a team needs everyone running the same environment. Check in the Vagrantfile, run `vagrant up`, get the same Linux machine your colleague is using.
+
+It is also useful for personal lab tasks where you want a throwaway VM for a specific experiment without cluttering your main lab.
+
+## Vagrant In A Proxmox Homelab
+
+Vagrant is most commonly used with VirtualBox on a development machine, not on a Proxmox server. The typical pattern is:
+
+- **laptop / workstation**: Vagrant + VirtualBox for quick dev VMs
+- **Proxmox homelab**: QEMU VMs for persistent infrastructure
+
+There is a Proxmox provider for Vagrant (`vagrant-proxmox`) but it is less maintained than the VirtualBox and libvirt providers. Using Vagrant with libvirt on a Linux host is a cleaner path if you want Vagrant-managed VMs without VirtualBox.
+
+## What It Does Not Replace
+
+Vagrant is a workflow tool, not infrastructure management.
+
+It is not a replacement for Proxmox, Ansible, or Terraform. It does not manage persistent services, handle networking at scale, or replace proper infrastructure-as-code for anything that needs to stay running.
+
+Think of it as the fast path for development and experimentation, not as the foundation for production.
+
+## Read This Alongside
+
+- [VirtualBox](/pages/virtualization/concepts/virtualbox) — the provider Vagrant uses most commonly.
+- [VM Lifecycle](/pages/virtualization/operations/vm-lifecycle) — the Proxmox-native way to manage VMs that are meant to stick around.
+- [Best Practices](/pages/virtualization/operations/best-practices) — the habits that keep the lab clean when ephemeral and persistent VMs coexist.
