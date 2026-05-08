@@ -1,0 +1,199 @@
+---
+title: "OpenClaw Workforce, Delegation, And Review Patterns"
+description: "Read the old Mission Control workforce guide as history, then use this page for the current model: commander-led delegation, specialist agents, review loops, research fan-out, and the guardrails that keep the system useful instead of theatrical."
+publishedAt: "2026-05-08"
+updatedAt: "2026-05-08"
+order: 3
+status: published
+---
+
+# OpenClaw Workforce, Delegation, And Review Patterns
+
+The old OpenClaw workforce guide is still a useful fossil.
+
+You can see the bones of the current system in it: an orchestrator, specialist agents, parallel work, research fan-out, code review loops, and the instinct to let models complement each other instead of pretending one of them should do everything.
+
+But it is still a fossil.
+
+If you read it as a live runbook, you inherit stale names, stale command patterns, and more confidence than the current system deserves in a few areas that are still evolving. This page is the up-to-date version of that idea.
+
+## What The Old Guide Still Gets Right
+
+Several core ideas survived intact:
+
+- specialization is better than one giant all-purpose assistant,
+- parallel work matters when tasks are genuinely independent,
+- coding quality improves when one model critiques another,
+- research works better when it is decomposed into smaller questions,
+- and long-running systems need memory, queues, and observability rather than just better prompting.
+
+Those are still the right instincts.
+
+## What Changed
+
+The important corrections are not cosmetic.
+
+| Older workforce guide | Current understanding |
+|---|---|
+| `mission_control` is the orchestrator | `commander` is the orchestrator name to use going forward |
+| `sessions_send` is the core delegation path | use `sessions_spawn` to start a new sub-agent run and `sessions_yield` to wait for the result; treat `sessions_send` as follow-up messaging to an existing session |
+| the workforce is mainly coder, researcher, executor, analyst | the live system is broader: commander, coder, coder2, researcher, analyst, executor, reviewer, household, weather, with Hermes discussed as a separate external gate |
+| exact model assignments are the main thing to memorize | role boundaries matter more than frozen model IDs, because model inventory changes faster than the orchestration pattern |
+| the web task board is background detail | Command Center is now part of the operating model itself, especially for board tasks and agent liveness |
+
+That last point matters more than it looks. Once the system has a board, heartbeats, and explicit task ownership, it stops behaving like a smart chat wrapper and starts behaving like a small operations stack.
+
+## The Current Workforce Shape
+
+```text
+User / schedule / webhook
+        |
+        v
+  household or main
+        |
+        v
+    commander
+        |
+  +-----+-----+-----+------+------+
+  |     |     |     |      |      |
+analyst researcher coder coder2 reviewer executor
+        |
+        +----> Command Center task board
+```
+
+The practical split is simple:
+
+- `household` handles the human-facing daily flows.
+- `commander` plans, routes, and keeps work coherent.
+- `analyst` sharpens the brief and helps turn vague requests into something testable.
+- `researcher` gathers and structures external information.
+- `coder` and `coder2` form the main implementation and critique pair.
+- `reviewer` is the fast internal quality gate.
+- `executor` does the mechanical work that should not live as prompt fiction.
+
+The weather agent sits slightly off to the side as a good example of narrow, scheduled autonomy rather than general workforce behavior.
+
+## The Most Important Command Correction
+
+If you only carry one correction forward from the old guide, make it this one.
+
+### Use `sessions_spawn` For New Work
+
+When commander wants a fresh specialist run, the current mental model is:
+
+1. spawn the worker,
+2. wait for the worker,
+3. aggregate the result.
+
+That means the clean delegation pair is:
+
+- `sessions_spawn` to create the new run,
+- `sessions_yield` to wait for completion.
+
+### Do Not Treat `sessions_send` As The Default Workforce Dispatcher
+
+The older guide overuses `sessions_send` as though it were the universal work queue. The attached correction note is explicit: that is wrong.
+
+That older pattern matters historically because it explains why some notes and examples drifted. It should not be treated as the current contract.
+
+## Patterns That Still Hold Up
+
+The old guide is most useful when you strip away the stale names and keep the workflow shapes.
+
+### 1. Parallel Specialists For Independent Work
+
+If research, code analysis, and data extraction do not depend on one another, run them independently and merge later.
+
+This is where the workforce actually saves time. If the subtasks are not independent, parallelism becomes theater.
+
+### 2. Reflexion For Code
+
+One agent drafts. Another agent critiques. The first agent refines.
+
+That loop remains one of the highest-value patterns in the whole OpenClaw system because it raises the floor without requiring every task to become an expensive multi-way debate.
+
+### 3. Merge Two Different Strengths
+
+When the task is large enough, letting two coding agents approach the same problem from different instincts is still a strong pattern.
+
+The valuable part is not "two agents" by itself. The valuable part is that their failure modes are different.
+
+### 4. Research Fan-Out, Then Synthesis
+
+The STORM-shaped research idea in the old workforce guide has aged well.
+
+Break the question into smaller typed sub-questions, retrieve in parallel, then give the structured findings to analyst for synthesis. That is still more robust than asking one model to improvise an entire literature review in one shot.
+
+## A Better Way To Think About Models
+
+The old guide spends a lot of time on exact model assignments and VRAM arithmetic. That was understandable, but it ages badly.
+
+What stays useful is the tiering logic:
+
+- keep a light, reliable baseline for routing and everyday work,
+- load heavier reasoning models only when the task earns the cost,
+- and avoid overlapping heavyweight workflows unless the hardware headroom is genuinely there.
+
+The stable rule is not "always use model X for role Y". The stable rule is "keep cheap work cheap, and spend your best reasoning where it changes the outcome".
+
+## Where The Board Changes The Workflow
+
+The older workforce material imagined orchestration mainly as agent-to-agent conversation. The newer system has a stronger operational center of gravity because Command Center now matters.
+
+That means:
+
+- board tasks are first-class state, not just chat history,
+- heartbeats and queue visibility matter,
+- agent identity has operational consequences,
+- and naming drift like `mission_control` versus `commander` is no longer harmless documentation trivia.
+
+Once tasks live on the board, the workforce becomes easier to observe and harder to fake.
+
+## The Guardrails That Matter In Practice
+
+The old guide is full of ambitious patterns. The useful part is knowing when not to use them.
+
+### Do Not Use The Full Workforce For Tiny Jobs
+
+If one agent can do it clearly in a short turn, let one agent do it.
+
+### Do Not Confuse Prompting With Execution
+
+If the task touches files, external APIs, cron, voice tooling, heartbeats, deployment state, or queues, move the exact mechanics into scripts or system configuration.
+
+### Do Not Freeze Fast-Moving Internals Into Permanent Lore
+
+Commands, model IDs, and agent wiring change. Role boundaries and workflow discipline change more slowly. Write docs accordingly.
+
+### Do Not Pretend Planned Systems Are Already Running
+
+The older guide mixes live behavior, experiments, and aspirations. The newer wiki should keep those separated. Hermes as an external blind reviewer, for example, is compelling, but it should be described as a deliberate quality-gate plan unless the actual deployment proves otherwise.
+
+## A Current Rule Of Thumb For Delegation
+
+Use the workforce when at least one of these is true:
+
+- the task splits cleanly into independent subtasks,
+- a second model materially improves correctness,
+- a board-backed workflow or long-lived task state matters,
+- the result needs review, synthesis, or operational follow-through,
+- or the work should continue after the initial human message ends.
+
+Do not use the workforce just because delegation looks sophisticated in a diagram.
+
+## What To Keep From The Old Guide
+
+Keep the orchestration patterns.
+
+Keep the instinct to validate with real checks.
+
+Keep the idea that memory, review, and observability are part of the product.
+
+Drop the stale naming, the stale delegation primitive, and any model table that pretends the fleet is frozen in time.
+
+## Related Pages
+
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows)
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting)
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
