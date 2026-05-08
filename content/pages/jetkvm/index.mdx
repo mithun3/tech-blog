@@ -1,0 +1,93 @@
+---
+title: "JetKVM"
+description: "Use JetKVM as the out-of-band console around a Proxmox host, with a local-first setup path and clear boundaries between the base device, Wake-on-LAN, and add-on power control." 
+publishedAt: "2025-01-13"
+order: 7
+status: published
+---
+
+# JetKVM
+
+This section owns the JetKVM side of the recovery story.
+
+It is not the Raspberry Pi client build, and it is not the host-side Wake-on-LAN configuration. Those already have cleaner homes.
+
+- For the small browser terminal path, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal).
+- For remote power-on on the Proxmox host, use [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox).
+
+What this page covers is the base-device workflow: how JetKVM fits around a Proxmox node, what the base hardware actually gives you, and how to make it dependable before you start depending on it during a bad day.
+
+## What The Base Device Actually Covers
+
+JetKVM belongs below Proxmox, not beside it.
+
+The official project presents the base device as a high-performance, open-source KVM over IP with low-latency 1080p60 video and optional remote access. Power-control and serial workflows are separate add-on boards, which is the right mental model to keep from the start.[^1][^2]
+
+That boundary keeps the design honest:
+
+- use the base device for video, keyboard, and mouse access when BIOS, boot, or the host OS is the problem
+- use Wake-on-LAN when the motherboard and NIC can still wake from standby power
+- use add-on boards only when you specifically need remote power or serial control beyond the base console
+
+## Hardware And Cabling
+
+### Hardware Required
+
+```text
+✅ JetKVM base device
+✅ Stable power for the JetKVM itself
+✅ Wired Ethernet on the same LAN you administer from
+✅ Video cable or adapter that matches the host output and the JetKVM video input on your unit
+✅ USB control link between JetKVM and the host
+✅ One known-good admin machine or browser for first setup
+```
+
+The source setup uses the simple path for good reason: one host, one JetKVM, one wired network, and no extra cleverness until the local console works every time.
+
+## First Access
+
+Start local first. Fancy remote paths can come later.
+
+1. Power the JetKVM from a stable source that does not vanish when the Proxmox host shuts down.
+2. Connect JetKVM to the wired LAN you actually manage from.
+3. Attach the video and USB control links to the host.
+4. Boot the host and confirm that you can see firmware or boot output from the JetKVM browser session.
+5. Reserve the JetKVM IP in DHCP once the local path is stable.
+
+If the only workflow you have tested is the more complicated one, you do not really have a recovery path yet.
+
+## Local-First Best Practice
+
+JetKVM can do optional remote access, but the recovery model should start on the LAN.[^1]
+
+That usually means:
+
+- prove the local browser workflow before you add cloud or VPN layers
+- update JetKVM firmware before you treat it as production recovery tooling
+- keep one browser and one admin machine as the known-good path
+- avoid daisy-chaining extra adapters, flaky USB hubs, or unstable power during initial setup
+
+The goal is not elegance. The goal is predictable access when the hypervisor itself is no longer helping you.
+
+## Where It Fits Around Proxmox
+
+JetKVM earns its place when normal management access is gone.
+
+It is most useful when:
+
+- a kernel or network change cut off SSH and the web UI
+- you need to change BIOS or boot settings without standing in front of the machine
+- you are watching installer or recovery media do real work
+- the host needs a second path that still exists when Proxmox is the broken thing
+
+## In This Section
+
+- [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox) - arm the host NIC properly so JetKVM can wake the box instead of only watching it stay off.
+
+## Related Topics
+
+- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal) - use a small dedicated Pi as the client-side console terminal.
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) - line up firmware and power-management settings with the recovery path from day one.
+
+[^1]: JetKVM describes the base device as a high-performance, open-source KVM over IP with low-latency 1080p60 video and optional remote access in the project README: https://github.com/jetkvm/kvm
+[^2]: JetKVM lists ATX, DC power-control, and serial boards as separate products, which is the practical boundary between the base console and add-on recovery controls: https://jetkvm.com/products

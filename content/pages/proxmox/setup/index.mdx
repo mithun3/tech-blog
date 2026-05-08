@@ -21,6 +21,7 @@ Use this section when the question is not "what is Proxmox?" but "how do I stand
 - pre-deployment drive validation when reused disks are part of the plan
 - BIOS and virtualization settings
 - first-pass storage and network choices
+- power-management choices that affect how the host can be recovered later
 - hardware-specific setup that shapes the platform before workloads land on it
 
 ## In This Section
@@ -33,5 +34,7 @@ Use this section when the question is not "what is Proxmox?" but "how do I stand
 Start here when you are building or rebuilding the Proxmox host itself.
 
 If used disks are part of the storage plan, read [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you let those drives near a production pool. Then move into [Homelab Installation](/pages/proxmox/setup/homelab-installation) for the host bring-up itself.
+
+If remote recovery matters, pair that bring-up with [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox) before you lock down the final firmware and power settings.
 
 If you are still deciding whether Proxmox is the right base at all, go back to [Proxmox Basics](/pages/proxmox/basics) first. If the host already exists and you are trying to operate or extend it, continue into [Proxmox Operations](/pages/proxmox/operations) or [Proxmox Workloads](/pages/proxmox/workloads).

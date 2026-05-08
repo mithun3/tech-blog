@@ -1,0 +1,115 @@
+---
+title: "JetKVM Admin Terminal On Raspberry Pi 3"
+description: "Turn a Raspberry Pi 3 into a small JetKVM admin terminal with Raspberry Pi OS Desktop, wired networking, and a browser-first workflow that stays focused enough to remain dependable." 
+publishedAt: "2025-01-14"
+order: 2
+status: published
+---
+
+# JetKVM Admin Terminal On Raspberry Pi 3
+
+This page owns the Raspberry Pi side of the JetKVM story.
+
+It does not explain the JetKVM hardware itself, and it does not cover Wake-on-LAN on the Proxmox host. Those already have better homes.
+
+- For the base JetKVM device and its recovery role, start with [JetKVM](/pages/jetkvm).
+- For the host-side remote power-on path, use [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox).
+
+What this page covers is the client-side path: imaging the Pi cleanly, choosing the right Raspberry Pi OS variant, and turning a Raspberry Pi 3 into a small dependable browser terminal for JetKVM.
+
+## Why A Pi 3 Still Works
+
+A Raspberry Pi 3 is not a luxury admin workstation. That is exactly why it works here.
+
+JetKVM mostly needs one stable browser session, reliable networking, and a device you can leave near the rack without turning it into another full desktop project. A Pi 3 has enough CPU and RAM for that job as long as the scope stays narrow.
+
+## Hardware And Image Choice
+
+### Hardware Required
+
+```text
+✅ Raspberry Pi 3 Model B or B+
+✅ 32 GB or larger microSD card
+✅ Wired Ethernet connection
+✅ Micro USB power supply for the Pi
+✅ HDMI cable, keyboard, and mouse for first setup
+✅ Another computer to prepare the microSD card
+```
+
+Raspberry Pi's official setup guidance puts desktop images on at least 32 GB of storage, and the Pi 3 family wants a real power supply rather than a random spare phone charger.[^1][^2]
+
+### Use Raspberry Pi OS Desktop, Not Lite
+
+For Pi-hole or a headless utility node, Lite is often the right answer. For JetKVM, the browser is the workload.
+
+Raspberry Pi's own setup guidance separates desktop and headless roles for that reason: desktop use expects a graphical environment, while headless use is better suited to SSH-only jobs.[^1] When the point of the box is "open JetKVM and work from the console," Desktop is the simpler and more honest choice.
+
+## Prepare The Image
+
+### Use Raspberry Pi Imager
+
+Download Raspberry Pi Imager from the official software page and use it to select the device, the operating system, and the boot media.[^1][^3]
+
+In Imager:
+
+1. Choose device: Raspberry Pi 3.
+2. Choose OS: Raspberry Pi OS Desktop.
+3. Choose storage: the microSD card you actually want to keep in the Pi.
+
+Then open the customisation flow before writing. Imager can preconfigure hostname, user credentials, Wi-Fi, and SSH at install time, which is much cleaner than improvising on first boot.[^1]
+
+### Recommended Imager Settings
+
+- Hostname: `jetkvm-pi`
+- Username: choose the admin user you will actually keep
+- Remote access: enable SSH so the Pi stays manageable without a spare monitor later
+- Authentication: prefer SSH keys if you already use them
+- Wi-Fi: configure it only if Ethernet is impossible
+- Browser choice: pick one default browser and keep the box focused
+
+Ethernet is the better admin path. The Pi 3 supports both wired networking and Wi-Fi, but a JetKVM terminal is easier to trust when the client is not competing with wireless noise.[^1][^2]
+
+## First Boot
+
+Boot the Pi, complete the desktop setup, and let it settle into one boring job.
+
+The first useful pass is simple:
+
+1. Confirm the Pi has a stable IP on the LAN.
+2. Apply system updates once.
+3. Make sure SSH works from your main workstation.
+4. Open JetKVM in the browser and prove the local workflow before you add anything else.
+
+If you skipped Imager customisation, Raspberry Pi OS will walk you through hostname, browser choice, user creation, and software updates on first boot.[^1]
+
+Update the box once before you trust it as an admin terminal:
+
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+sudo reboot
+```
+
+## Daily-Use Best Practices
+
+- Keep JetKVM as the primary browser job on this Pi.
+- Use wired Ethernet whenever the Pi can live near the switch.
+- Leave SSH enabled so you can repair the Pi without borrowing a keyboard and monitor again.
+- Avoid turning the device into a general browsing or download machine.
+- If it starts feeling slow, close background tabs before you blame JetKVM.
+
+The Pi 3 is fine as a focused terminal. It only becomes frustrating when you ask it to be five machines at once.
+
+## When To Outgrow It
+
+Move up to a newer Pi or a thin client when the job changes from "dedicated JetKVM terminal" to "general admin workstation." The moment you want several heavy dashboards, multiple browsers, video calls, and the JetKVM console all at once, the Pi 3 stops being the right tool.
+
+## Related Topics
+
+- [JetKVM](/pages/jetkvm) - the base device workflow, cabling, first access, and recovery role.
+- [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox) - the host-side power-on path when JetKVM should wake the machine instead of only watching it stay off.
+- [Raspberry Pi](/pages/raspberry-pi) - the rest of the Pi-specific infrastructure guides.
+
+[^1]: Raspberry Pi's getting started guide documents Raspberry Pi Imager, image customisation, desktop versus headless setup paths, wired Ethernet setup, and the recommended minimum 32 GB storage for Raspberry Pi OS desktop images: https://www.raspberrypi.com/documentation/computers/getting-started.html
+[^2]: The Raspberry Pi 3 Model B product page lists the platform characteristics relevant here, including Ethernet, 1 GB RAM, full-size HDMI, and the upgraded power guidance for the model: https://www.raspberrypi.com/products/raspberry-pi-3-model-b/
+[^3]: Raspberry Pi distributes Imager as the standard install path on the official software page: https://www.raspberrypi.com/software/

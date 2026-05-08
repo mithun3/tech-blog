@@ -1,0 +1,137 @@
+---
+title: "Wake-on-LAN For Proxmox"
+description: "Enable a Proxmox host to wake cleanly over the network, with JetKVM as the practical sender and ethtool plus /etc/network/interfaces handling the host-side configuration." 
+publishedAt: "2025-01-15"
+order: 1
+status: published
+---
+
+# Wake-on-LAN For Proxmox
+
+This page owns the host-side Wake-on-LAN path.
+
+It does not cover the Raspberry Pi admin terminal and it does not repeat the base JetKVM cabling. Those already have their own pages.
+
+- For the JetKVM hardware and browser-console workflow, start with [JetKVM](/pages/jetkvm).
+- For the Raspberry Pi client build, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal).
+
+What this page covers is the practical part that makes remote power-on real: firmware settings, NIC checks, the Linux commands that arm Wake-on-LAN, and the Proxmox persistence step that keeps it from quietly resetting after the next reboot.
+
+## When Wake-on-LAN Is The Right Tool
+
+Wake-on-LAN is the clean path when the host is powered down but the motherboard still leaves standby power on the NIC.
+
+It is not a replacement for physical power control, and it is not magic if the platform cuts power completely in the off state.
+
+That boundary matters:
+
+- use Wake-on-LAN when the board and NIC can wake from standby with a magic packet
+- use a physical button or the ATX extension path when the platform refuses to keep the NIC alive
+- keep the sender on the same broadcast domain unless you already know your network relays Wake-on-LAN traffic correctly
+
+## Firmware Preflight
+
+Before Linux matters, the board has to cooperate.
+
+Common setting names vary by vendor, but the intent stays the same.
+
+| Setting | Recommended Value | Why |
+|---------|-------------------|-----|
+| Wake on LAN / Resume by PCI-E / Power On By PCI-E | **Enabled** | Lets the NIC wake the board |
+| ErP / EuP | **Disabled** | Prevents the board from cutting standby power |
+| Deep Sleep / S5 power saving | **Disabled** if present | Keeps the NIC electrically alive enough to wake |
+| Fast Boot | Optional | Fine if it does not hide the settings above |
+
+If the NIC link LEDs die completely after shutdown, the board is usually removing the standby power Wake-on-LAN needs.
+
+## Step 1: Identify The Right Interface
+
+Work against the physical uplink, not `vmbr0`, not a bridge MAC, and not a guest interface.
+
+```bash
+ip -br link
+ip route
+cat /sys/class/net/<iface>/address
+```
+
+Replace `<iface>` with the actual physical uplink, such as `eno1` or `enp3s0`.
+
+For a quick capability check:
+
+```bash
+ethtool <iface> | grep -i 'Wake-on'
+```
+
+The `Supports Wake-on` line tells you what the NIC can do. The `Wake-on` line tells you what is currently armed.[^1]
+
+## Step 2: Install `ethtool`
+
+```bash
+apt update
+apt install -y ethtool
+```
+
+## Step 3: Arm Wake-on-LAN Now
+
+`g` means wake on MagicPacket, which is the Wake-on-LAN mode most homelab recovery flows actually want.[^1]
+
+```bash
+ethtool <iface> | grep -i 'Wake-on'
+ethtool -s <iface> wol g
+ethtool <iface> | grep -i 'Wake-on'
+```
+
+After the middle command, the second check should show `Wake-on: g`.
+
+## Step 4: Make It Persistent On Proxmox
+
+Proxmox keeps host networking in `/etc/network/interfaces`, and with the recommended `ifupdown2` flow you can apply manual changes with `ifreload -a`.[^2]
+
+Add the `post-up` line to the physical NIC stanza that backs the management bridge:
+
+```bash
+auto lo
+iface lo inet loopback
+
+iface enp3s0 inet manual
+        post-up /sbin/ethtool -s enp3s0 wol g
+
+auto vmbr0
+iface vmbr0 inet static
+        address 192.168.50.10/24
+        gateway 192.168.50.1
+        bridge-ports enp3s0
+        bridge-stp off
+        bridge-fd 0
+```
+
+Then reload the network configuration:
+
+```bash
+ifreload -a
+```
+
+If your host uses a different physical NIC, bond, or VLAN layout, keep the same idea but apply the `post-up` line to the underlying interface that actually receives link and standby power.
+
+## Step 5: Send The Magic Packet
+
+With the host shut down cleanly and standby power still present, send the Wake-on-LAN packet to the physical NIC MAC you confirmed earlier.
+
+If your JetKVM firmware exposes Wake-on-LAN in the UI, use that as the sender. If not, any sender on the same LAN works. The critical bit is the target MAC and the electrical state of the NIC, not which tool happened to send the packet.
+
+## Troubleshooting
+
+- If `Supports Wake-on` does not include `g`, the NIC or driver is the blocker.
+- If `Wake-on` falls back to `d` after reboot, the host-side setting is not persisting yet.
+- If the NIC link lights go dark after shutdown, disable ErP or deep-sleep style power saving in firmware.
+- If the packet is sent to the bridge MAC instead of the physical NIC MAC, nothing useful happens.
+- If Wake-on-LAN works after reboot but not after full shutdown, test the exact shutdown state you plan to depend on. Some boards treat them differently.
+
+## Related Topics
+
+- [JetKVM](/pages/jetkvm) - the out-of-band console layer that becomes useful again as soon as the host wakes.
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) - the firmware and bring-up guide that should align with your remote-recovery model.
+- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal) - the small dedicated client if you want the console and the sender close to the rack.
+
+[^1]: The Debian `ethtool` manual documents `ethtool -s DEVNAME wol g`, where `g` enables wake on MagicPacket: https://manpages.debian.org/bookworm/ethtool/ethtool.8.en.html
+[^2]: Proxmox documents host networking in `/etc/network/interfaces` and recommends `ifreload -a` with ifupdown2 when manual edits are made: https://pve.proxmox.com/wiki/Network_Configuration

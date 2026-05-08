@@ -107,7 +107,11 @@ Before you install Proxmox, get the firmware side into a sane state.
 | Package C-State | **C0 (Disabled)** | No deep sleep states |
 | APM (Advanced Power Management) | **DISABLED** | Disables suspend/hibernation |
 | ErP (Energy-Related Products) | **DISABLED** | Can interfere with boot |
-| Wake on LAN | **DISABLED** | Not needed for server mode |
+| Wake on LAN | **DISABLED** by default | Enable only when remote power-on is part of the recovery plan |
+
+If the host is meant to stay on all the time and you do not care about waking it remotely, leaving Wake-on-LAN off is still the clean default.
+
+If remote recovery is part of the design, do not treat that row as a universal rule. Read [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox) and enable it on purpose instead of by habit.
 
 ### Storage Controller Configuration
 

@@ -1,6 +1,6 @@
 ---
 title: "Raspberry Pi"
-description: "Platform-specific Raspberry Pi guides for homelab infrastructure, starting with Pi-hole on a dedicated Pi node."
+description: "Platform-specific Raspberry Pi guides for homelab infrastructure, including dedicated services and lightweight admin terminals."
 publishedAt: "2026-05-08"
 order: 6
 status: published
@@ -19,9 +19,10 @@ What belongs here is the Raspberry Pi execution layer: imaging the OS, hardening
 ## In This Section
 
 - [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) - build a dedicated Pi-hole node on Raspberry Pi OS Lite and handle the Pi-side backup, hardening, and HA tasks without duplicating the Proxmox deployment guide.
+- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal) - turn a Raspberry Pi 3 into a small browser-first admin terminal for JetKVM without turning it into another full workstation.
 
 ## How To Use It
 
-Read the page below when the answer to "where should this DNS node live?" is "on a small dedicated Pi" instead of inside the Proxmox host.
+Read the pages below when the answer is either "this service belongs on a small dedicated Pi" or "this admin job is easier if a Pi lives near the rack and stays ready." 
 
-If you are still deciding where Pi-hole belongs in the network, start with [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) first.
+If you are still deciding where Pi-hole belongs in the network, start with [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) first. If the page is really about the JetKVM device itself rather than the Pi client, start in [JetKVM](/pages/jetkvm) instead.
