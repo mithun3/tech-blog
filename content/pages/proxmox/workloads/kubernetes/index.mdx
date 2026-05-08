@@ -1,0 +1,59 @@
+---
+title: "Kubernetes On Proxmox With k3s"
+description: "Run a small k3s VM cluster on Proxmox when Docker-on-one-guest stops being enough and the lab actually wants Kubernetes scheduling, storage, and ingress primitives."
+publishedAt: "2025-01-18"
+updatedAt: "2025-01-31"
+order: 3
+status: published
+---
+
+# Kubernetes On Proxmox With k3s
+
+This path exists for the moment a Proxmox lab stops being a handful of hand-managed guests and starts wanting Kubernetes semantics on purpose.
+
+The point is not to turn Proxmox into Kubernetes. The point is to keep Proxmox as the infrastructure layer, then run k3s inside purpose-built Debian VMs so the cluster stays disposable, snapshot-friendly, and easier to reason about than a host-side pile of container tooling.
+
+If the workload is still one app, one guest, and a short list of containers, stay with the simpler guest model in [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci), [Proxmox Stack](/pages/proxmox/basics/proxmox-stack), or a dedicated Docker VM. Use this cluster when you actually want scheduling, Services, PVCs, Helm charts, ingress, and a cleaner path to growth.
+
+## Recommended Starter Shape
+
+This cluster shape mirrors the validated source layout.
+
+| Node | Role | vCPU | RAM | Disk | IP |
+|------|------|------|-----|------|----|
+| `k3s-cp` | Control Plane | 2 | 4096 MB | 20 GB | `192.168.50.60` |
+| `k3s-w1` | Worker | 2 | 4096 MB | 30 GB | `192.168.50.61` |
+| `k3s-w2` | Worker | 2 | 4096 MB | 30 GB | `192.168.50.62` |
+| **Total** | — | **6 vCPU** | **12 GB** | **80 GB** | — |
+
+That is enough to build a real cluster without pretending the homelab suddenly needs enterprise ceremony. k3s keeps the control plane compact while still exposing the normal Kubernetes API and packaging the defaults most small labs actually need.[^1]
+
+## What This Cluster Adds
+
+| Component | Purpose |
+|-----------|---------|
+| **k3s** | compact Kubernetes distribution for the cluster control plane and agents |
+| **Traefik** | in-cluster ingress for HTTP and HTTPS routing |
+| **CoreDNS** | cluster DNS |
+| **local-path provisioner** | simple built-in PVC path before Longhorn takes over |
+| **Longhorn** | replicated persistent storage across worker nodes |
+| **MetalLB** | LAN-facing IP assignment for `LoadBalancer` services |
+| **cert-manager** | internal or public TLS certificate automation |
+
+The starter build here uses one control-plane VM and two workers. That is a sane homelab shape. If the cluster later needs a control plane that survives the loss of one VM, expand to a three-server embedded-etcd layout and put a stable VIP in front of it.[^2]
+
+## How This Cluster Is Split
+
+- [Kubernetes VM Build And k3s Bootstrap](/pages/proxmox/workloads/kubernetes/vm-build-and-k3s-bootstrap) - create the VMs, prepare Debian, install the control plane, join workers, and bring `kubectl` and Helm onto the workstation.
+- [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure) - install Longhorn, shape Traefik, advertise service IPs with MetalLB, and add cert-manager.
+- [Kubernetes Verification, Upgrades, And HA](/pages/proxmox/workloads/kubernetes/verification-upgrades-and-ha) - test the cluster end to end, define day-two guardrails, back it up, troubleshoot it, and expand to HA control plane when that is justified.
+
+## Continuity With The Rest Of The Lab
+
+- [Resource Allocation](/pages/proxmox/basics/resource-allocation) - the sizing baseline for deciding whether the host can absorb three more VMs without starving everything else.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the cleaner edge pattern when cluster services eventually need to leave the LAN without raw port forwarding.
+- [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/operations/monitoring-and-alerts/prometheus-grafana-stack) - the external monitoring runbook if cluster metrics should flow into the existing homelab dashboards.
+- [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - the storage-side follow-up if Longhorn backups or cluster exports should land on the NAS tier already running elsewhere in the lab.
+
+[^1]: K3s documents itself as a fully compliant Kubernetes distribution shipped as a single binary or minimal container image, and lists packaged defaults including containerd, Flannel, CoreDNS, Traefik, ServiceLB, and the local-path provisioner: [What is K3s?](https://docs.k3s.io/).
+[^2]: K3s documents embedded-etcd HA as a three-or-more server-node layout, initialized with `--cluster-init`, with an optional fixed registration address in front of the control plane: [High Availability Embedded etcd](https://docs.k3s.io/datastore/ha-embedded).

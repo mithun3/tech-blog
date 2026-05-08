@@ -26,6 +26,7 @@ If the workload is common and the immediate question is just "what is the fastes
 - [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
 - [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
 - [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) - the path for moving a host-side `naspool` into a managed NAS VM with SMB, NFS, alerting, and a mirror-plus-spare layout.
+- [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) - the path when a single Docker-style guest stops being enough and the lab actually wants a small Kubernetes cluster with storage, ingress, and LAN-facing service IPs.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - NVIDIA host setup, LXC passthrough, and the single- or dual-GPU layouts that make local AI workloads practical on Proxmox.
 - [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management) - persistence mode, boot-time reapplication, and the 250 W tradeoffs that keep dual-GPU hosts inside saner thermal and PSU limits.
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the fastest path to a usable local AI stack when you want the interface and the inference engine online without overthinking the separation.
@@ -57,6 +58,17 @@ If the host is still using a direct `naspool`, start with [Storage And ZFS](/pag
 - [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) - resource reallocation, VM creation, passthrough, and the mirror-plus-spare pool layout.
 - [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - NFS, SMB, Proxmox storage integration, shared model mounts, and boot ordering.
 - [TrueNAS Protection, Verification, And Failure Handling](/pages/proxmox/workloads/truenas-scale/protection-verification-and-failure-handling) - snapshots, SMART checks, UPS integration, hot-spare behavior, and recovery drills.
+
+## Kubernetes And Container Orchestration
+
+Sometimes the workload really does want Kubernetes semantics, but that still does not mean the Proxmox host should become the cluster.
+
+If the plan is to keep Proxmox as the infrastructure layer and run orchestration inside dedicated VMs, start with the k3s cluster below. If the job is still one application guest and a simpler container stack, stay with the lighter VM or LXC paths instead.
+
+- [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) - the overview for when the lab wants a real cluster boundary instead of one more handcrafted guest.
+- [Kubernetes VM Build And k3s Bootstrap](/pages/proxmox/workloads/kubernetes/vm-build-and-k3s-bootstrap) - VM creation, Debian preparation, control-plane install, worker joins, and workstation access.
+- [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure) - Longhorn, Traefik, MetalLB, and cert-manager.
+- [Kubernetes Verification, Upgrades, And HA](/pages/proxmox/workloads/kubernetes/verification-upgrades-and-ha) - end-to-end testing, upgrade discipline, troubleshooting, and the optional HA control-plane path.
 
 ## Secure Service Exposure
 

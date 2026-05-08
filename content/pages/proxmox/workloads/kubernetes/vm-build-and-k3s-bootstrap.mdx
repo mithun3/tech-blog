@@ -1,0 +1,488 @@
+---
+title: "Kubernetes VM Build And k3s Bootstrap"
+description: "Provision the Debian VMs on Proxmox, prepare each node, install the first k3s server, join worker nodes, and bring kubectl access back to the workstation."
+publishedAt: "2025-01-19"
+updatedAt: "2025-01-31"
+order: 1
+status: published
+---
+
+# Kubernetes VM Build And k3s Bootstrap
+
+This is the provisioning half of the cluster.
+
+By the time this page is done, the Proxmox host has three Debian 12 VMs, every node has the kernel and package prerequisites k3s expects, the first server is online, both workers have joined, and the workstation can manage the cluster without living over SSH.
+
+If you have not decided whether Kubernetes belongs here yet, start with [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes). If the host still feels tight, re-check [Resource Allocation](/pages/proxmox/basics/resource-allocation) before creating anything.
+
+## Cluster Shape
+
+```text
+  ┌──────────────────────────────────────────────────────┐
+  │                    Proxmox VE Host                   │
+  │                   192.168.50.20                      │
+  │                                                      │
+  │  ┌─────────────────┐  ┌────────────┐ ┌────────────┐ │
+  │  │   k3s-cp VM     │  │ k3s-w1 VM  │ │ k3s-w2 VM  │ │
+  │  │ 192.168.50.60   │  │ .61        │ │ .62        │ │
+  │  │                 │  │            │ │            │ │
+  │  │ Control Plane   │  │  Worker    │ │  Worker    │ │
+  │  │  - API Server   │  │  - Pods    │ │  - Pods    │ │
+  │  │  - etcd         │  │  - Longhorn│ │  - Longhorn│ │
+  │  │  - Scheduler    │  │            │ │            │ │
+  │  │  - CoreDNS      │  │            │ │            │ │
+  │  │  - Traefik      │  │            │ │            │ │
+  │  └─────────────────┘  └────────────┘ └────────────┘ │
+  └──────────────────────────────────────────────────────┘
+                          │
+                    vmbr0 (LAN)
+                          │
+               ┌──────────┴──────────┐
+               │   ASUS RT-AX88U     │
+               │   192.168.50.1      │
+               └─────────────────────┘
+```
+
+## VM Provisioning
+
+Create all three VMs on the Proxmox host. Run the following script once. It loops over the three nodes and keeps the VM creation flow consistent.
+
+### SSH Into The Proxmox Host
+
+```bash
+ssh root@192.168.50.20
+```
+
+### Provision Script
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================================
+# CONFIGURATION — Edit to match your environment
+# ==============================================================================
+STORAGE="local-zfs"          # Storage pool: local-zfs, local-lvm, local, etc.
+BRG="vmbr0"                  # Network bridge
+OS_VERSION="12"              # Debian 12 (Bookworm) — stable, wide k3s compatibility
+
+# Node definitions: "VMID:HOSTNAME:IP:ROLE:VCPU:RAM_MiB:DISK"
+NODES=(
+  "200:k3s-cp:192.168.50.60:control-plane:2:4096:20G"
+  "201:k3s-w1:192.168.50.61:worker:2:4096:30G"
+  "202:k3s-w2:192.168.50.62:worker:2:4096:30G"
+)
+
+GATEWAY="192.168.50.1"
+DNS="192.168.50.10"          # Your Pi-hole or router IP
+
+# ==============================================================================
+# PREREQUISITES
+# ==============================================================================
+if ! command -v virt-customize &>/dev/null; then
+  echo ">>> Installing libguestfs-tools..."
+  apt-get -qq update >/dev/null
+  apt-get -qq install libguestfs-tools -y >/dev/null
+fi
+
+# Download Debian 12 cloud image (cached)
+CACHE_DIR="/var/lib/vz/template/cache"
+URL="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+CACHE_FILE="$CACHE_DIR/$(basename "$URL")"
+mkdir -p "$CACHE_DIR"
+
+if [[ ! -s "$CACHE_FILE" ]]; then
+  echo ">>> Downloading Debian 12 cloud image..."
+  curl -f#SL -o "$CACHE_FILE" "$URL"
+else
+  echo ">>> Using cached image: $(basename "$CACHE_FILE")"
+fi
+
+# ==============================================================================
+# CREATE EACH NODE
+# ==============================================================================
+for NODE in "${NODES[@]}"; do
+  IFS=':' read -r VMID HN IP ROLE CORES RAM DISK <<< "$NODE"
+
+  echo ""
+  echo "============================================"
+  echo "  Creating ${ROLE}: ${HN} (VM ${VMID})"
+  echo "  IP: ${IP} | CPU: ${CORES} | RAM: ${RAM} MiB | Disk: ${DISK}"
+  echo "============================================"
+
+  # Detect storage type
+  STORAGE_TYPE=$(pvesm status -storage "$STORAGE" | awk 'NR>1 {print $2}')
+  case $STORAGE_TYPE in
+    nfs|dir)  DISK_IMPORT="--format qcow2"; THIN="" ;;
+    btrfs)    DISK_IMPORT="--format raw";   THIN="" ;;
+    *)        DISK_IMPORT="--format raw";   THIN="discard=on,ssd=1," ;;
+  esac
+
+  GEN_MAC="02:$(openssl rand -hex 5 | awk '{print toupper($0)}' | sed 's/\(..\)/\1:/g; s/.$//')"
+
+  # Customise image
+  WORK_FILE=$(mktemp --suffix=.qcow2)
+  cp "$CACHE_FILE" "$WORK_FILE"
+
+  echo ">>> Installing base packages in image..."
+  export LIBGUESTFS_BACKEND_SETTINGS=dns=8.8.8.8,1.1.1.1
+  virt-customize -q -a "$WORK_FILE" \
+    --install qemu-guest-agent,curl,ca-certificates,apt-transport-https,gnupg,open-iscsi,nfs-common \
+    --hostname "${HN}" \
+    --run-command "truncate -s 0 /etc/machine-id" \
+    --run-command "rm -f /var/lib/dbus/machine-id" \
+    --run-command "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
+    --run-command "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
+    >/dev/null 2>&1
+
+  echo ">>> Resizing disk to ${DISK}..."
+  qemu-img resize "$WORK_FILE" "${DISK}" >/dev/null 2>&1
+
+  # Create VM
+  echo ">>> Creating VM ${VMID}..."
+  qm create "$VMID" \
+    -agent 1 -machine q35 -tablet 0 -localtime 1 -bios ovmf \
+    -cpu host -cores "$CORES" -memory "$RAM" \
+    -name "$HN" -tags "k3s,${ROLE}" \
+    -net0 "virtio,bridge=${BRG},macaddr=${GEN_MAC}" \
+    -onboot 1 -ostype l26 -scsihw virtio-scsi-pci \
+    >/dev/null
+
+  # Import disk
+  echo ">>> Importing disk..."
+  if qm disk import --help >/dev/null 2>&1; then
+    IMPORT_CMD=(qm disk import)
+  else
+    IMPORT_CMD=(qm importdisk)
+  fi
+
+  IMPORT_OUT="$(${IMPORT_CMD[@]} "$VMID" "$WORK_FILE" "$STORAGE" ${DISK_IMPORT:-} 2>&1 || true)"
+  DISK_REF="$(printf '%s\n' "$IMPORT_OUT" | sed -n "s/.*successfully imported disk '\([^']\+\)'.*/\1/p" | tr -d "\r\"'")"
+  [[ -z "$DISK_REF" ]] && DISK_REF="$(pvesm list "$STORAGE" | awk -v id="$VMID" '$5 ~ ("vm-"id"-disk-") {print $1":"$5}' | sort | tail -n1)"
+  [[ -z "$DISK_REF" ]] && { echo "ERROR: Could not determine disk reference for VM ${VMID}"; exit 1; }
+
+  rm -f "$WORK_FILE"
+
+  # Configure VM
+  qm set "$VMID" \
+    --efidisk0 "${STORAGE}:0,efitype=4m" \
+    --scsi0 "${DISK_REF},${THIN%,}" \
+    --boot order=scsi0 \
+    --serial0 socket \
+    --ide2 "${STORAGE}:cloudinit" \
+    >/dev/null
+
+  # Cloud-Init networking
+  qm set "$VMID" \
+    --ciuser root \
+    --ipconfig0 "ip=${IP}/24,gw=${GATEWAY}" \
+    --nameserver "${DNS}" \
+    --searchdomain "local" \
+    >/dev/null
+
+  echo ">>> Starting VM ${VMID}..."
+  qm start "$VMID" >/dev/null 2>&1
+  echo ">>> Done: ${HN} (${IP})"
+done
+
+echo ""
+echo "============================================"
+echo "  All k3s VMs created and started"
+echo "============================================"
+echo "  k3s-cp  (control plane): 192.168.50.60"
+echo "  k3s-w1  (worker):        192.168.50.61"
+echo "  k3s-w2  (worker):        192.168.50.62"
+echo ""
+echo "Next: Set root passwords, then proceed with OS preparation."
+echo "  qm guest passwd 200 root"
+echo "  qm guest passwd 201 root"
+echo "  qm guest passwd 202 root"
+echo "============================================"
+```
+
+### Set Root Passwords
+
+After the VMs start, set a root password for each:
+
+```bash
+qm guest passwd 200 root
+qm guest passwd 201 root
+qm guest passwd 202 root
+```
+
+### Verify SSH Access
+
+From your workstation:
+
+```bash
+ssh root@192.168.50.60
+ssh root@192.168.50.61
+ssh root@192.168.50.62
+```
+
+## OS Preparation (All Nodes)
+
+Run the following on every node before installing k3s.
+
+Connect to each VM and run:
+
+```bash
+ssh root@192.168.50.60   # Repeat for .61 and .62
+```
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================================
+# System updates
+# ==============================================================================
+echo ">>> Updating system packages..."
+apt-get update -qq
+apt-get upgrade -y -qq
+
+# ==============================================================================
+# Required packages
+# ==============================================================================
+echo ">>> Installing required packages..."
+apt-get install -y -qq \
+  curl \
+  ca-certificates \
+  apt-transport-https \
+  gnupg \
+  open-iscsi \
+  nfs-common \
+  jq \
+  htop \
+  vim
+
+# ==============================================================================
+# Kernel modules — required for Kubernetes networking and storage
+# ==============================================================================
+echo ">>> Loading required kernel modules..."
+cat >> /etc/modules-load.d/k3s.conf << 'EOF'
+overlay
+br_netfilter
+iscsi_tcp
+EOF
+
+modprobe overlay
+modprobe br_netfilter
+modprobe iscsi_tcp
+
+# ==============================================================================
+# Kernel networking parameters — required for Kubernetes networking
+# ==============================================================================
+echo ">>> Configuring kernel networking parameters..."
+cat > /etc/sysctl.d/99-k3s.conf << 'EOF'
+# Enable IPv4 forwarding (required for Kubernetes networking)
+net.ipv4.ip_forward = 1
+
+# Enable bridge netfilter (required for iptables to see bridged traffic)
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+
+# Increase contrack table (avoids issues under load)
+net.netfilter.nf_conntrack_max = 131072
+
+# Disable swap-related settings
+vm.swappiness = 0
+EOF
+
+sysctl --system >/dev/null 2>&1
+
+# ==============================================================================
+# Disable swap — Kubernetes requires swap to be off
+# ==============================================================================
+echo ">>> Disabling swap..."
+swapoff -a
+sed -i '/\sswap\s/d' /etc/fstab
+
+# ==============================================================================
+# Enable open-iscsi — required by Longhorn distributed storage
+# ==============================================================================
+echo ">>> Enabling open-iscsi..."
+systemctl enable --now iscsid >/dev/null 2>&1
+
+echo ""
+echo ">>> OS preparation complete. Ready for k3s installation."
+echo ">>> Hostname: $(hostname) | IP: $(hostname -I | awk '{print $1}')"
+```
+
+## Install k3s On The Control Plane
+
+Run on the control-plane node only.
+
+### Install k3s Server
+
+```bash
+ssh root@192.168.50.60
+```
+
+```bash
+# Install k3s with recommended settings for Proxmox VMs
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
+  --cluster-init \
+  --tls-san 192.168.50.60 \
+  --disable=servicelb \
+  --flannel-backend=vxlan \
+  --write-kubeconfig-mode=644 \
+  --node-ip=192.168.50.60 \
+  --advertise-address=192.168.50.60" \
+  sh -
+```
+
+### Flag Explanation
+
+| Flag | Purpose |
+|------|---------|
+| `--cluster-init` | initialises embedded etcd so the control plane can expand later |
+| `--tls-san` | adds the control-plane IP to the certificate SANs for external `kubectl` |
+| `--disable=servicelb` | turns off k3s ServiceLB so MetalLB can own LAN-facing service IPs |
+| `--flannel-backend=vxlan` | keeps the overlay network predictable across Proxmox VM reboots |
+| `--write-kubeconfig-mode=644` | allows non-root users to read the kubeconfig on the node |
+| `--node-ip` | forces k3s to use the right interface address |
+| `--advertise-address` | tells other nodes where the API server lives |
+
+Those install-script arguments are kept as CLI flags here on purpose. k3s persists `INSTALL_K3S_EXEC` and `K3S_` environment variables into the service configuration, which makes this pattern easy to re-run later without inventing a second setup style.[^1]
+
+### Wait For k3s To Start
+
+```bash
+systemctl status k3s --no-pager
+kubectl get nodes
+```
+
+Expected output:
+
+```text
+NAME     STATUS   ROLES                       AGE   VERSION
+k3s-cp   Ready    control-plane,etcd,master   30s   v1.32.x+k3s1
+```
+
+### Retrieve The Node Join Token
+
+```bash
+# Save this — needed for worker nodes
+cat /var/lib/rancher/k3s/server/node-token
+```
+
+Copy the full token string. It looks like:
+
+```text
+K10abc123...::server:xyz456...
+```
+
+## Join Worker Nodes
+
+Run on each worker node. Replace `<TOKEN>` with the value from the previous step.
+
+```bash
+ssh root@192.168.50.61   # Then repeat for 192.168.50.62
+```
+
+```bash
+# Set your control plane IP and join token
+K3S_SERVER="https://192.168.50.60:6443"
+K3S_TOKEN="<your-node-token-here>"
+
+# Install k3s agent
+curl -sfL https://get.k3s.io | \
+  K3S_URL="$K3S_SERVER" \
+  K3S_TOKEN="$K3S_TOKEN" \
+  INSTALL_K3S_EXEC="agent --node-ip=$(hostname -I | awk '{print $1}')" \
+  sh -
+```
+
+### Verify On The Control Plane
+
+Back on `k3s-cp`:
+
+```bash
+kubectl get nodes -o wide
+```
+
+Expected output:
+
+```text
+NAME     STATUS   ROLES                       AGE    VERSION         INTERNAL-IP      OS-IMAGE
+k3s-cp   Ready    control-plane,etcd,master   5m     v1.32.x+k3s1   192.168.50.60    Debian GNU/Linux 12
+k3s-w1   Ready    <none>                      2m     v1.32.x+k3s1   192.168.50.61    Debian GNU/Linux 12
+k3s-w2   Ready    <none>                      90s    v1.32.x+k3s1   192.168.50.62    Debian GNU/Linux 12
+```
+
+All nodes should show `Ready` within 60-90 seconds of joining.
+
+### Label Worker Nodes
+
+```bash
+kubectl label node k3s-w1 node-role.kubernetes.io/worker=worker
+kubectl label node k3s-w2 node-role.kubernetes.io/worker=worker
+```
+
+## kubectl Access From The Workstation
+
+Configure `kubectl` on your local Mac or Linux workstation so you can manage the cluster without SSH.
+
+### Install kubectl (macOS)
+
+```bash
+brew install kubectl
+```
+
+### Copy The Kubeconfig
+
+```bash
+# Create local kube config directory
+mkdir -p ~/.kube
+
+# Copy kubeconfig from the control plane
+scp root@192.168.50.60:/etc/rancher/k3s/k3s.yaml ~/.kube/config-k3s
+
+# Replace the loopback address with the actual control plane IP
+sed -i '' 's/127.0.0.1/192.168.50.60/g' ~/.kube/config-k3s
+```
+
+### Merge With Existing Kubeconfig
+
+```bash
+# Merge into your default kubeconfig
+KUBECONFIG=~/.kube/config:~/.kube/config-k3s kubectl config view --flatten > ~/.kube/config-merged
+mv ~/.kube/config-merged ~/.kube/config
+
+# List available contexts
+kubectl config get-contexts
+
+# Switch to the k3s cluster
+kubectl config use-context default    # k3s uses 'default' as the context name
+```
+
+### Rename The Context
+
+```bash
+kubectl config rename-context default k3s-proxmox
+kubectl config use-context k3s-proxmox
+```
+
+### Verify Remote Access
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+```
+
+## Install Helm
+
+```bash
+brew install helm
+```
+
+Verify:
+
+```bash
+helm version
+```
+
+At this point the cluster exists, but it is still missing the pieces that make it useful in a homelab: durable storage, LAN-facing service IPs, and a certificate path. Continue with [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure).
+
+[^1]: K3s documents install-script configuration through `INSTALL_K3S_EXEC`, `K3S_URL`, `K3S_TOKEN`, other `K3S_` variables, and CLI flags, and notes that those values are persisted into the service configuration: [Configuration Options](https://docs.k3s.io/installation/configuration).

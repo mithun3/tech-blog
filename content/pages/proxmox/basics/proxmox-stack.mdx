@@ -114,6 +114,8 @@ Use LXC containers for lightweight Linux services that benefit from fast start a
 
 Use OCI tooling inside purpose-built guests when your application workflow really wants Docker or Kubernetes semantics.
 
+That is exactly where the k3s cluster in [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) fits: Proxmox stays the machine layer, and Kubernetes lives inside guests that can be snapshotted, rebuilt, and upgraded without turning the host into the experiment.
+
 That split stays understandable as the lab grows. That is the real win.
 
 ## Continue Through The Series

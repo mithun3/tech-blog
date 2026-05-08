@@ -1,0 +1,468 @@
+---
+title: "Kubernetes Verification, Upgrades, And HA"
+description: "Verify the cluster end to end, define day-two operational guardrails, back up the control plane, troubleshoot common failures, and expand to HA control plane when the lab actually needs it."
+publishedAt: "2025-01-21"
+updatedAt: "2025-01-31"
+order: 3
+status: published
+---
+
+# Kubernetes Verification, Upgrades, And HA
+
+This is the day-two half of the cluster.
+
+The build is not done when `kubectl get nodes` returns `Ready`. It is done when you can prove workloads schedule cleanly, storage binds, service IPs appear on the LAN, upgrades have a recovery path, and a bad node stops being an existential event.
+
+## Verification And Testing
+
+Run a complete end-to-end test to confirm every layer works.
+
+### Cluster Health Check
+
+```bash
+# All nodes Ready
+kubectl get nodes -o wide
+
+# All system pods Running
+kubectl get pods -A
+
+# Check events for any warnings
+kubectl get events -A --field-selector type=Warning
+```
+
+### Deploy A Test Application
+
+```bash
+cat > /tmp/test-app.yaml << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+        - name: hello-world
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  selector:
+    app: hello-world
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-world
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: hello.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-world
+                port:
+                  number: 80
+EOF
+
+kubectl apply -f /tmp/test-app.yaml
+```
+
+### Verify Test App
+
+```bash
+# Wait for pods to be Running
+kubectl rollout status deploy/hello-world
+
+# Check pods are spread across worker nodes
+kubectl get pods -o wide
+
+# Get the LoadBalancer IP
+kubectl get svc hello-world
+
+# Test via LoadBalancer IP
+LB_IP=$(kubectl get svc hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s http://$LB_IP | grep -q "Welcome to nginx" && echo "✅ LoadBalancer OK" || echo "❌ LoadBalancer FAILED"
+
+# Test via Ingress (requires /etc/hosts or DNS entry)
+echo "192.168.50.200 hello.local" >> /etc/hosts   # Adjust IP to your Traefik LB IP
+curl -s http://hello.local | grep -q "Welcome to nginx" && echo "✅ Ingress OK" || echo "❌ Ingress FAILED"
+```
+
+### Test Persistent Storage
+
+```bash
+cat > /tmp/test-pvc.yaml << 'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-storage
+  namespace: default
+spec:
+  containers:
+    - name: test
+      image: alpine
+      command: ["/bin/sh", "-c", "echo 'storage works' > /data/test.txt && cat /data/test.txt && sleep 30"]
+      volumeMounts:
+        - mountPath: /data
+          name: test-vol
+  volumes:
+    - name: test-vol
+      persistentVolumeClaim:
+        claimName: test-pvc
+  restartPolicy: Never
+EOF
+
+kubectl apply -f /tmp/test-pvc.yaml
+kubectl wait --for=condition=ready pod/test-storage --timeout=120s
+kubectl logs test-storage
+# Expected: "storage works"
+```
+
+### Cleanup
+
+```bash
+kubectl delete -f /tmp/test-app.yaml
+kubectl delete -f /tmp/test-pvc.yaml
+```
+
+## Best Practices And Day-Two Operations
+
+### Resource Limits And Requests
+
+Always define resource requests and limits on deployments to prevent noisy-neighbour issues:
+
+```yaml
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+```
+
+### Namespace Organisation
+
+Use namespaces to isolate workloads:
+
+```bash
+kubectl create namespace monitoring
+kubectl create namespace apps
+kubectl create namespace infra
+```
+
+### Role-Based Access Control (RBAC)
+
+For multi-user clusters, create restricted kubeconfigs:
+
+```bash
+# Create a service account with limited access
+kubectl create serviceaccount developer -n apps
+kubectl create rolebinding developer-binding \
+  --clusterrole=edit \
+  --serviceaccount=apps:developer \
+  --namespace=apps
+```
+
+### Node Taints And Tolerations
+
+Prevent workloads from running on the control plane:
+
+```bash
+# Taint the control plane (k3s applies this automatically)
+kubectl taint nodes k3s-cp node-role.kubernetes.io/control-plane:NoSchedule
+
+# Verify
+kubectl describe node k3s-cp | grep Taint
+```
+
+### Regular Backups
+
+Back up etcd and the cluster state:
+
+```bash
+# On k3s-cp: backup embedded etcd snapshot
+k3s etcd-snapshot save --name "$(date +%Y%m%d-%H%M%S)"
+
+# List snapshots
+k3s etcd-snapshot list
+```
+
+Back up Longhorn volumes via the Longhorn UI and point them at an NFS share or S3-compatible store. If the NFS target is the internal NAS tier already documented in the lab, keep the export layout aligned with [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration).
+
+### Proxmox VM Snapshots
+
+Before k3s upgrades or major changes, snapshot all VMs from the Proxmox host:
+
+```bash
+# On Proxmox host
+for VMID in 200 201 202; do
+  qm snapshot $VMID "pre-upgrade-$(date +%Y%m%d)" --description "Pre k3s upgrade snapshot"
+done
+```
+
+### Upgrade k3s
+
+```bash
+# Control plane first
+ssh root@192.168.50.60
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.32.x+k3s1" sh -
+
+# Then workers, one at a time
+# Drain worker before upgrading
+kubectl drain k3s-w1 --ignore-daemonsets --delete-emptydir-data
+ssh root@192.168.50.61 "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.x+k3s1' K3S_URL='https://192.168.50.60:6443' K3S_TOKEN='<token>' sh -"
+kubectl uncordon k3s-w1
+# Repeat for k3s-w2
+```
+
+### Monitoring Integration
+
+Deploy the kube-prometheus-stack into the cluster to emit metrics to your Prometheus instance:
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm install kube-prom-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --set grafana.enabled=false \
+  --set prometheus.prometheusSpec.remoteWrite[0].url="http://192.168.50.80:9090/api/v1/write"
+```
+
+If you want those metrics to land in the homelab-wide monitoring guest rather than a second parallel dashboard stack, continue with [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/operations/monitoring-and-alerts/prometheus-grafana-stack).
+
+## Troubleshooting
+
+### Node Not Joining Cluster
+
+```bash
+# On the worker node — check k3s-agent logs
+journalctl -u k3s-agent -f -n 50
+
+# Verify the token matches
+ssh root@192.168.50.60 "cat /var/lib/rancher/k3s/server/node-token"
+ssh root@192.168.50.61 "cat /etc/rancher/k3s/k3s.env | grep TOKEN"
+
+# Verify connectivity to the API server from the worker
+ssh root@192.168.50.61 "curl -k https://192.168.50.60:6443/readyz"
+# Expected: "ok"
+```
+
+### Node Shows NotReady
+
+```bash
+# Describe the node for conditions
+kubectl describe node k3s-w1
+
+# Check kubelet / k3s logs on the node
+ssh root@192.168.50.61 "journalctl -u k3s-agent -n 100 --no-pager"
+
+# Common fix — reload kernel modules
+ssh root@192.168.50.61 "modprobe br_netfilter overlay && sysctl --system"
+```
+
+### Pod Stuck In Pending
+
+```bash
+# Check why the pod isn't scheduled
+kubectl describe pod <pod-name>
+
+# Common causes:
+# 1. Insufficient resources — check node capacity
+kubectl describe nodes | grep -A5 "Allocated resources"
+
+# 2. Toleration missing — if control plane taint is present
+kubectl describe node k3s-cp | grep Taint
+
+# 3. PVC not bound
+kubectl get pvc
+kubectl describe pvc <pvc-name>
+```
+
+### Longhorn Volume Not Mounting
+
+```bash
+# Check Longhorn manager logs
+kubectl -n longhorn-system logs -l app=longhorn-manager --tail=50
+
+# Check node storage availability
+kubectl -n longhorn-system get nodes.longhorn.io -o yaml | grep -A5 "storageAvailable"
+
+# Verify iscsi is running on all nodes
+kubectl -n longhorn-system get pods -l app=longhorn-iscsi-installation
+```
+
+### MetalLB Not Assigning IP
+
+```bash
+# Check MetalLB speaker logs
+kubectl -n metallb-system logs -l component=speaker --tail=30
+
+# Verify IP pool config
+kubectl -n metallb-system get ipaddresspools
+
+# Ensure the IP range is not in use on your LAN
+# Verify no static IP conflicts exist for 192.168.50.200-220
+```
+
+### cert-manager Certificate Not Issuing
+
+```bash
+# Check certificate status
+kubectl describe certificate <cert-name>
+
+# Check CertificateRequest
+kubectl get certificaterequest -A
+
+# Check cert-manager logs
+kubectl -n cert-manager logs -l app=cert-manager --tail=50
+
+# Common fix for Let's Encrypt — verify port 80 is accessible externally
+```
+
+### k3s API Server Unreachable
+
+```bash
+# On the control plane node
+systemctl status k3s
+journalctl -u k3s -n 100 --no-pager
+
+# Check etcd health
+k3s etcd-snapshot list
+ETCDCTL_API=3 k3s kubectl get --raw=/healthz
+```
+
+### Reset A Node (Last Resort)
+
+```bash
+# To cleanly remove a worker and re-join
+ssh root@192.168.50.61
+
+# Uninstall k3s-agent
+/usr/local/bin/k3s-agent-uninstall.sh
+
+# Re-join (same command as initial install)
+curl -sfL https://get.k3s.io | \
+  K3S_URL="https://192.168.50.60:6443" \
+  K3S_TOKEN="<token>" \
+  INSTALL_K3S_EXEC="agent --node-ip=192.168.50.61" \
+  sh -
+```
+
+## HA Control Plane (Optional)
+
+Do not reach for HA control plane just because the phrase sounds respectable. Use it when the lab genuinely needs the API server to survive losing one control-plane VM.
+
+### Architecture
+
+```text
+  Control Plane HA Pool (embedded etcd)
+  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  │   k3s-cp1    │  │   k3s-cp2    │  │   k3s-cp3    │
+  │  .60         │  │  .63         │  │  .64         │
+  │  (initial)   │  │  (join)      │  │  (join)      │
+  └──────────────┘  └──────────────┘  └──────────────┘
+          │                │                 │
+          └────────────────┼─────────────────┘
+                           │
+                     Virtual IP (kube-vip)
+                     192.168.50.59
+```
+
+### kube-vip For Virtual IP
+
+Provide a single stable VIP for the control plane. All worker nodes and workstations use this IP:
+
+```bash
+# On the FIRST control plane node only — create the kube-vip manifest
+ssh root@192.168.50.60
+
+export VIP="192.168.50.59"
+export INTERFACE="eth0"
+KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")
+
+mkdir -p /var/lib/rancher/k3s/server/manifests
+
+ctr image pull "ghcr.io/kube-vip/kube-vip:${KVVERSION}"
+ctr run --rm --net-host \
+  "ghcr.io/kube-vip/kube-vip:${KVVERSION}" \
+  vip /kube-vip manifest daemonset \
+    --interface "$INTERFACE" \
+    --address "$VIP" \
+    --inCluster \
+    --taint \
+    --controlplane \
+    --services \
+    --arp \
+    --leaderElection \
+  > /var/lib/rancher/k3s/server/manifests/kube-vip.yaml
+```
+
+### Install Additional Control Plane Nodes
+
+```bash
+# On k3s-cp2 and k3s-cp3
+K3S_TOKEN=$(ssh root@192.168.50.60 "cat /var/lib/rancher/k3s/server/node-token")
+
+curl -sfL https://get.k3s.io | \
+  K3S_TOKEN="$K3S_TOKEN" \
+  INSTALL_K3S_EXEC="server \
+    --server https://192.168.50.60:6443 \
+    --tls-san 192.168.50.59 \
+    --disable=servicelb \
+    --flannel-backend=vxlan \
+    --node-ip=$(hostname -I | awk '{print $1}')" \
+  sh -
+```
+
+### Update Workstation Kubeconfig
+
+Point `kubectl` to the VIP instead of the original control-plane IP:
+
+```bash
+sed -i '' 's/192.168.50.60/192.168.50.59/g' ~/.kube/config
+```
+
+[^1]: K3s documents embedded-etcd HA as a three-or-more server-node control plane and describes the role of a fixed registration address in front of it: [High Availability Embedded etcd](https://docs.k3s.io/datastore/ha-embedded).
+[^2]: kube-vip documents its role in simplifying HA Kubernetes clusters and includes K3s-specific usage patterns for a virtual IP in front of the control plane: [kube-vip documentation](https://kube-vip.io/docs/).

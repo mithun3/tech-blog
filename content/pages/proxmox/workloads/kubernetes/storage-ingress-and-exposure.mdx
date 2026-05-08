@@ -1,0 +1,376 @@
+---
+title: "Kubernetes Storage, Ingress, And Exposure"
+description: "Add Longhorn for persistent volumes, keep Traefik under control, advertise service IPs with MetalLB, and issue internal or public certificates with cert-manager."
+publishedAt: "2025-01-20"
+updatedAt: "2025-01-31"
+order: 2
+status: published
+---
+
+# Kubernetes Storage, Ingress, And Exposure
+
+Once the nodes are `Ready`, the cluster still needs three things before it feels like infrastructure instead of a demo:
+
+- storage that survives pod movement
+- a way to hand real LAN IPs to services
+- a certificate story that does not collapse into one-off YAML and wishful thinking
+
+This page keeps those concerns together because they are tightly coupled in a small homelab cluster.
+
+## Storage - Longhorn
+
+Longhorn replaces the built-in `local-path` storage class with a more serious replicated storage layer.
+
+### Why Longhorn?
+
+| Feature | local-path (built-in) | Longhorn |
+|---------|----------------------|---------|
+| Replication | ❌ Single node | ✅ Configurable replicas |
+| Web GUI | ❌ None | ✅ Full dashboard |
+| Snapshots | ❌ None | ✅ Scheduled snapshots |
+| Backup | ❌ None | ✅ NFS/S3 backup targets |
+| Live migration | ❌ Node-bound | ✅ Volumes move with pods |
+
+### Prerequisites Check
+
+Verify `open-iscsi` and `nfs-common` are running on all nodes:
+
+```bash
+for NODE_IP in 192.168.50.60 192.168.50.61 192.168.50.62; do
+  echo "=== $NODE_IP ==="
+  ssh root@$NODE_IP "systemctl is-active iscsid && echo 'iscsi OK' || echo 'iscsi FAILED'"
+done
+```
+
+### Install Longhorn Via Helm
+
+Run from your workstation:
+
+```bash
+# Add the Longhorn Helm repository
+helm repo add longhorn https://charts.longhorn.io
+helm repo update
+
+# Create the namespace
+kubectl create namespace longhorn-system
+
+# Install Longhorn
+helm install longhorn longhorn/longhorn \
+  --namespace longhorn-system \
+  --set defaultSettings.defaultReplicaCount=2 \
+  --set defaultSettings.storageMinimalAvailablePercentage=15 \
+  --set service.ui.type=ClusterIP
+```
+
+### Wait For Longhorn To Be Ready
+
+```bash
+kubectl -n longhorn-system rollout status deploy/longhorn-manager
+kubectl -n longhorn-system get pods
+```
+
+All pods should be `Running` within 3-5 minutes.
+
+### Set Longhorn As The Default StorageClass
+
+```bash
+# Remove default flag from local-path
+kubectl patch storageclass local-path \
+  -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+
+# Set Longhorn as default
+kubectl patch storageclass longhorn \
+  -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+# Verify
+kubectl get storageclass
+```
+
+Expected output:
+
+```text
+NAME                 PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE        ALLOWVOLUMEEXPANSION   AGE
+local-path           rancher.io/local-path   Delete          WaitForFirstConsumer     false                  20m
+longhorn (default)   driver.longhorn.io      Delete          Immediate                true                   5m
+```
+
+### Access Longhorn Dashboard
+
+```bash
+# Port-forward to access the Longhorn UI
+kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80
+```
+
+Open `http://localhost:8080` in your browser to view volumes and storage health.
+
+## Ingress - Traefik
+
+k3s already bundles Traefik. The goal here is not to install another ingress controller. It is to verify the one already present and shape it into a more predictable HTTPS posture.[^1]
+
+### Verify Traefik Is Running
+
+```bash
+kubectl -n kube-system get pods -l app.kubernetes.io/name=traefik
+kubectl -n kube-system get svc traefik
+```
+
+### Configure Traefik For HTTP To HTTPS Redirect
+
+```bash
+cat > /tmp/traefik-values.yaml << 'EOF'
+globalArguments:
+  - "--global.sendanonymoususage=false"
+
+additionalArguments:
+  - "--serversTransport.insecureSkipVerify=true"
+  - "--log.level=INFO"
+
+ports:
+  web:
+    redirectTo:
+      port: websecure
+  websecure:
+    tls:
+      enabled: true
+
+ingressRoute:
+  dashboard:
+    enabled: true
+    matchRule: Host(`traefik.local`)
+    entryPoints: ["websecure"]
+EOF
+
+helm upgrade traefik traefik/traefik \
+  --namespace kube-system \
+  --values /tmp/traefik-values.yaml
+```
+
+### Example Ingress Resource
+
+```yaml
+# example-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app-svc
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - myapp.example.com
+      secretName: myapp-tls
+```
+
+## Load Balancer - MetalLB
+
+MetalLB is the piece that makes `LoadBalancer` services feel native on the LAN instead of cloud-only.
+
+### Reserve An IP Range
+
+Choose a range of IPs on your LAN that is outside your DHCP range and not in use. Example: `192.168.50.200-192.168.50.220`.
+
+In the router, make sure that range is excluded from dynamic allocation.
+
+### Install MetalLB Via Helm
+
+```bash
+helm repo add metallb https://metallb.github.io/metallb
+helm repo update
+
+kubectl create namespace metallb-system
+
+helm install metallb metallb/metallb \
+  --namespace metallb-system \
+  --wait
+```
+
+### Configure The IP Address Pool
+
+```bash
+cat > /tmp/metallb-config.yaml << 'EOF'
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: homelab-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.50.200-192.168.50.220
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: homelab-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - homelab-pool
+EOF
+
+kubectl apply -f /tmp/metallb-config.yaml
+```
+
+### Verify MetalLB
+
+```bash
+kubectl -n metallb-system get pods
+kubectl -n metallb-system get ipaddresspools
+```
+
+### Test: Expose A Service With A Real IP
+
+```bash
+kubectl create deployment nginx-test --image=nginx:alpine
+kubectl expose deployment nginx-test --port=80 --type=LoadBalancer
+
+# Watch for an EXTERNAL-IP to be assigned
+kubectl get svc nginx-test --watch
+```
+
+Expected output (after 10-30 seconds):
+
+```text
+NAME         TYPE           CLUSTER-IP     EXTERNAL-IP       PORT(S)        AGE
+nginx-test   LoadBalancer   10.43.12.34    192.168.50.200    80:31234/TCP   30s
+```
+
+Test from your workstation:
+
+```bash
+curl http://192.168.50.200
+# Should return the nginx welcome page
+```
+
+Cleanup:
+
+```bash
+kubectl delete deploy nginx-test
+kubectl delete svc nginx-test
+```
+
+## Certificate Management - cert-manager
+
+cert-manager gives the cluster a certificate lifecycle instead of a pile of handwritten secrets.
+
+### Install cert-manager Via Helm
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+kubectl create namespace cert-manager
+
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --set crds.enabled=true \
+  --wait
+```
+
+### Verify Installation
+
+```bash
+kubectl -n cert-manager get pods
+```
+
+All pods should be `Running`.
+
+### Option A: Self-Signed Certificates
+
+Suitable for internal homelab services.
+
+```bash
+cat > /tmp/selfsigned-issuer.yaml << 'EOF'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# Homelab CA — issue a CA cert, then sign with it for trusted certs across devices
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: homelab-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: homelab-ca
+  secretName: homelab-ca-secret
+  duration: 87600h   # 10 years
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: homelab-ca-issuer
+spec:
+  ca:
+    secretName: homelab-ca-secret
+EOF
+
+kubectl apply -f /tmp/selfsigned-issuer.yaml
+```
+
+### Option B: Let's Encrypt
+
+```bash
+# Replace email and ensure your domain points to your cluster's external IP
+cat > /tmp/letsencrypt-issuer.yaml << 'EOF'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your-email@example.com        # ← Replace
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+EOF
+
+kubectl apply -f /tmp/letsencrypt-issuer.yaml
+```
+
+### Using A Certificate In An Ingress
+
+Add the `cert-manager.io/cluster-issuer` annotation to your Ingress:
+
+```yaml
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: "homelab-ca-issuer"   # or letsencrypt-prod
+```
+
+cert-manager will automatically issue and renew the certificate referenced by `tls.secretName`.
+
+## How This Fits The Rest Of The Lab
+
+If a service should stay private and only cross the internet through one controlled edge, pair the cluster with [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead of improvising raw port forwards. If Longhorn backups should land on the existing NAS tier, use [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) as the storage-side target layout.
+
+Continue with [Kubernetes Verification, Upgrades, And HA](/pages/proxmox/workloads/kubernetes/verification-upgrades-and-ha) for end-to-end tests, upgrade guardrails, troubleshooting, and the HA control-plane path.
+
+[^1]: K3s documents bundled defaults including Traefik and the local-path provisioner. Longhorn documents `open-iscsi` as a requirement on all nodes and requires an NFS client for backup or RWX-related features: [What is K3s?](https://docs.k3s.io/), [Longhorn installation requirements](https://longhorn.io/docs/latest/deploy/install/).
+[^2]: MetalLB documents `IPAddressPool` for assignable service IPs and `L2Advertisement` for advertising those IPs on the local network in Layer 2 mode: [MetalLB configuration](https://metallb.universe.tf/configuration/).
+[^3]: cert-manager documents `Issuer` and `ClusterIssuer` resources, along with built-in self-signed, CA, and ACME issuer types: [Issuer configuration](https://cert-manager.io/docs/configuration/).
