@@ -1,7 +1,8 @@
 ---
 title: "Proxmox Alternatives"
-description: "A tighter, homelab-only view of the alternatives to Proxmox from mid-2024 to May 2026, with XCP-ng as the closest direct substitute."
-publishedAt: "2026-05-08"
+description: "A tighter, homelab-only view of the alternatives to Proxmox in late 2024, with XCP-ng as the closest direct substitute."
+publishedAt: "2024-12-12"
+updatedAt: "2025-01-23"
 order: 3
 status: published
 ---
@@ -14,7 +15,7 @@ My short version is simple: if you want the closest direct alternative to Proxmo
 
 ## The Shortlist That Actually Matters
 
-For a homelab in 2026, I would spend real time on only these options:
+For a homelab in late 2024, I would spend real time on only these options:
 
 - [XCP-ng](/pages/proxmox/basics/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.[^1]
 - Incus if you are Linux-first, API-first, and happy closer to the CLI than a polished appliance UI.[^2]
@@ -24,13 +25,13 @@ For a homelab in 2026, I would spend real time on only these options:
 
 That is the real list.
 
-VMware still matters as historical context, because its 2024 pricing and licensing shock pushed a lot of people toward Proxmox. But for a new personal lab in May 2026, it is no longer the normal starting point I would recommend.
+VMware still matters as historical context, because its 2024 pricing and licensing shock pushed a lot of people toward Proxmox. But for a new personal lab by the end of 2024, it was already no longer the normal starting point I would recommend.
 
-## What Changed From Mid-2024 To May 2026
+## What Changed During 2024
 
 ### XCP-ng Became The Clearest Direct Alternative
 
-In mid-2024, XCP-ng was already the strongest open-source VM-first alternative. By May 2026, that is even clearer.
+In mid-2024, XCP-ng was already the strongest open-source VM-first alternative. By the end of 2024, that was even clearer.
 
 The project now presents a very coherent story around XCP-ng 8.3 LTS, Xen Orchestra, live migration, centralized management, backup, and scale. If you want a real appliance-like hypervisor platform rather than a DIY Linux virtualization stack, XCP-ng is the first thing to test.[^1]
 
@@ -38,11 +39,11 @@ That is why it gets its own page here: [XCP-ng](/pages/proxmox/basics/xcp-ng).
 
 ### Incus Became Much More Credible
 
-Incus in mid-2024 was interesting. Incus in 2026 is a serious choice for the right operator.
+Incus in mid-2024 was interesting. Incus by late 2024 was already a serious choice for the right operator.
 
 Its documented LTS track, clustering support, backup and migration features, and continued VM plus container story make it far easier to take seriously than it was early on.[^2]
 
-It is still not a one-to-one Proxmox replacement. It feels more like infrastructure you shape through APIs and CLI tools than an all-in-one homelab appliance. But if that is your style, its value went up materially between 2024 and 2026.
+It is still not a one-to-one Proxmox replacement. It feels more like infrastructure you shape through APIs and CLI tools than an all-in-one homelab appliance. But if that is your style, its value went up materially through 2024.
 
 ### Hyper-V Stayed The Same Kind Of Answer
 
@@ -52,7 +53,7 @@ If the lab is built around Windows Server, Active Directory, PowerShell, and Mic
 
 ### Harvester Matured, But Stayed Specialized
 
-Harvester is clearly more mature in 2026 than it was in mid-2024. The problem is not capability. The problem is fit.[^4]
+Harvester was already meaningfully more mature by late 2024 than it had been in mid-2024. The problem is not capability. The problem is fit.[^4]
 
 It is still better understood as a Kubernetes and HCI platform that can run VMs well, not as the default replacement for a straightforward mixed homelab.
 
@@ -62,7 +63,7 @@ If you already want Rancher, KubeVirt, and a cloud-native operating model, it is
 
 In mid-2024, VMware was already becoming hard to recommend for small operators because the commercial story had changed.
 
-By May 2026, the VMware conversation is even more Cloud Foundation-shaped and even less aligned with the kind of small, personal lab where Proxmox usually shines.
+By the end of 2024, the VMware conversation was already more Cloud Foundation-shaped and less aligned with the kind of small, personal lab where Proxmox usually shines.
 
 So VMware still belongs in the history of why this comparison exists. It just no longer deserves much of your evaluation time for a new homelab unless you are specifically practicing for enterprise work.
 

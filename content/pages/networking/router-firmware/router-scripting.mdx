@@ -94,6 +94,8 @@ find $BACKUP_DIR -type f -mtime +30 -delete
 logger "Backup complete: $TIMESTAMP"
 ```
 
+If that `.30` target is the Proxmox-backed NAS tier rather than a separate box, keep the destination aligned with the share layout in [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) instead of treating it like an unstructured dump path.
+
 ```bash
 chmod +x /jffs/scripts/backup-daily.sh
 crontab -e

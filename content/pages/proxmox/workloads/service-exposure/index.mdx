@@ -14,12 +14,15 @@ Your Open WebUI stack works. Pi-hole is doing its job. Grafana is useful enough 
 
 This section exists to keep that part boring.
 
+If the goal is secure exposure while the service itself stays on plain HTTP inside your network, Cloudflare Tunnel is the default answer in this subsection. Cloudflare handles the public HTTPS edge, the internal service can stay HTTP-only, and you do not need to turn every app into its own certificate project just to make remote access sane.
+
 If the question is purely about DNS theory, routing, or network design, stay in [Networking](/pages/networking). If the question is specifically "how do I expose this Proxmox-hosted thing cleanly?" this is the right layer.
 
 ## What This Section Covers
 
 - comparing the practical HTTPS paths for Proxmox-hosted services
 - deciding when Cloudflare Tunnel is the better fit than a self-hosted reverse proxy
+- deciding when Traefik is worth using for container-native routing and certificate automation
 - deciding when wildcard certificates are enough and when individual certificates are worth the extra work
 - keeping internet-facing components in dedicated guests instead of on the Proxmox host itself[^1]
 
@@ -31,7 +34,9 @@ There are three real choices here.
 |------|-----------|----------------|
 | [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) | you want outbound-only exposure, no port forwarding, and Cloudflare Access in front of sensitive services | Cloudflare becomes part of the trust boundary[^2] |
 | [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) | you want a self-hosted reverse proxy, wildcard certificates, and one place to front multiple services | more moving parts, plus certificate renewal discipline[^3] |
-| Traefik | you already live in a container-native world and want service discovery plus label-driven routing | a steeper operational model than most small Proxmox labs actually need[^4] |
+| [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) | you already live in a container-native world and want service discovery, label-driven routing, and built-in certificate issuance | a steeper operational model than most small Proxmox labs actually need[^4] |
+
+If you want the shortest secure answer, start with Cloudflare Tunnel. Public HTTPS terminates at Cloudflare, the origin can stay on HTTP inside the LAN, and certificate management stops being part of every workload discussion.
 
 The important thing is not which tool wins a theoretical comparison. The important thing is that one exposure pattern becomes the standard shape of the lab.
 
@@ -60,6 +65,8 @@ The goal is simple: if the service-exposure layer breaks, you want to repair a g
 Start with [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) if you want the shortest secure path and would rather avoid opening inbound firewall ports.
 
 Start with [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) if you want to keep the reverse proxy on your own infrastructure and you are comfortable managing DNS, certificates, and port forwarding.
+
+Choose [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) if your services already live in a container-native stack and you want the reverse proxy to issue certificates and discover routes from labels instead of static site files.
 
 Move to [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) when wildcard certificates stop feeling like the right blast radius for the lab.
 

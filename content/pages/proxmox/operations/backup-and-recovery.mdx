@@ -1,8 +1,8 @@
 ---
 title: "Backup And Recovery"
 description: "How to layer ZFS snapshots, vzdump jobs, and restore practice so Proxmox recovery is routine instead of improvised."
-publishedAt: "2026-02-05"
-updatedAt: "2026-02-06"
+publishedAt: "2024-11-14"
+updatedAt: "2025-01-19"
 order: 2
 status: published
 ---
@@ -81,7 +81,9 @@ This is the clean crontab block from the operations guide. It intentionally comb
 0 2 * * 0 /usr/sbin/zpool scrub naspool
 ```
 
-The `--mailnotification` flag is legacy, but these are the validated lines from the original host. If you are building fresh today, pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) and decide whether you want to keep the legacy mail flag or move fully to the notification system.
+The `--mailnotification` flag is legacy, but these are the validated lines from the original host. If you are building fresh today, pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) and decide whether you want to keep the legacy mail flag or move fully to the notification system.[^1]
+
+If backups have already moved onto the NAS VM, swap the storage target to `truenas-vzdump` using [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration).
 
 ## Manual Backup And Restore
 
@@ -110,9 +112,9 @@ Before changing packages, kernels, or major workload components, snapshot first.
 
 ```bash
 # Create snapshots for rollback
-pct snapshot 100 pre-update-2026-02-09
-pct snapshot 101 pre-update-2026-02-09
-pct snapshot 103 pre-update-2026-02-09
+pct snapshot 100 pre-update-2025-01-09
+pct snapshot 101 pre-update-2025-01-09
+pct snapshot 103 pre-update-2025-01-09
 
 # Or backup to external storage
 vzdump 100 --storage backup --compress zstd
@@ -126,7 +128,7 @@ If the lab matters, at least one copy should leave the host.
 
 ```bash
 # Send ZFS snapshots to remote system
-# zfs send rpool@backup-20260205 | ssh backup-server zfs receive backup/proxmox-daily
+# zfs send rpool@backup-20250119 | ssh backup-server zfs receive backup/proxmox-daily
 
 # Or use rsync for files
 # rsync -avz --delete /naspool/documents/ backup-server:/backups/documents/
@@ -144,6 +146,8 @@ That means occasionally verifying:
 - workload-specific exports are kept when they matter
 
 For example, Pi-hole still benefits from Teleporter exports even when the container itself is backed up. Proxmox protects the guest. The application may still need its own clean export format.
+
+[^1]: Proxmox documents `mailnotification` as deprecated and `notification-mode` as the newer backup notification path, while also documenting prune-based retention and snapshot-mode behavior in the same guide: https://pve.proxmox.com/pve-docs/chapter-vzdump.html
 
 ## Related Topics
 

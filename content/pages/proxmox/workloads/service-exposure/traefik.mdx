@@ -1,0 +1,107 @@
+---
+title: "Traefik On Proxmox"
+description: "Use Traefik for container-native routing on Proxmox when you want label-driven service discovery and automatic certificate issuance."
+publishedAt: "2025-01-16"
+order: 4
+status: published
+---
+
+# Traefik On Proxmox
+
+This is the container-native certificate path.
+
+If your exposed services already live in Docker or another container runtime, Traefik can become the edge layer that discovers routes from labels and issues certificates without hand-editing one site file per service. That is what makes it attractive in labs that have already standardized on containers.[^1]
+
+If you want the shortest secure path while the origin stays on plain HTTP inside the LAN, use [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead. If you want a simpler self-hosted reverse proxy with explicit site files and a wildcard certificate, use [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc).
+
+## Why This Path Exists
+
+- automatic discovery from container labels
+- dynamic routing changes without rebuilding one static config per service
+- built-in certificate issuance through Let's Encrypt
+- a stronger fit for Docker-heavy estates than for mixed VM-and-LXC labs
+
+## What Changes Compared With Cloudflare
+
+Traefik can still proxy plain HTTP services on the inside, but it does not remove certificate management from the conversation. It automates it.
+
+That is the key distinction in this subsection. Cloudflare Tunnel is the go-to option when you want secure exposure without owning the public certificates yourself. Traefik is the path for the lab that does want its own HTTPS edge, but wants the certificate and routing model to follow container metadata instead of hand-maintained reverse-proxy files.
+
+## Quick Setup
+
+This assumes Docker or a compatible container runtime already exists in the guest that will host Traefik.
+
+```bash
+mkdir -p /opt/traefik && cd /opt/traefik
+
+cat > docker-compose.yml << 'EOF'
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=true"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@sysya.org"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openwebui.rule=Host(`openwebui.sysya.org`)"
+      - "traefik.http.routers.openwebui.entrypoints=web,websecure"
+      - "traefik.http.routers.openwebui.tls.certresolver=letsencrypt"
+      - "traefik.http.services.openwebui.loadbalancer.server.port=8080"
+
+  pihole:
+    image: pihole/pihole:latest
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pihole.rule=Host(`pihole.sysya.org`)"
+      - "traefik.http.routers.pihole.entrypoints=web,websecure"
+      - "traefik.http.routers.pihole.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pihole.loadbalancer.server.port=80"
+EOF
+
+docker-compose up -d
+```
+
+This is the appeal in one block: the proxy, the certificate resolver, and the service routing all live in the same container-native control surface.
+
+## When This Path Is Worth It
+
+Traefik is worth the extra moving parts when the lab already has a real container platform shape. If adding a service means adding labels rather than opening a text editor for a new proxy file, the operational model starts to pay for itself.
+
+If the lab is mostly LXCs and VMs, Traefik usually adds abstraction faster than it adds value.
+
+## Related Topics
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the subsection overview and decision hub.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the default path when you want secure exposure without managing certificates yourself.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the simpler self-hosted reverse-proxy alternative with explicit config files.
+- [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path once one wildcard or one shared resolver stops feeling right.
+
+[^1]: Traefik's documentation covers the provider-driven routing model, Docker label discovery, and ACME certificate automation that make this path work: [Traefik documentation](https://doc.traefik.io/traefik/), [Traefik ACME reference](https://doc.traefik.io/traefik/https/acme/).

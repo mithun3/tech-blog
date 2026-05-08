@@ -1,0 +1,47 @@
+---
+title: "TrueNAS SCALE On Proxmox"
+description: "Run TrueNAS SCALE as a Proxmox VM when you want a managed NAS tier, NFS and SMB shares, and hot-spare-backed ZFS without adding separate hardware yet."
+publishedAt: "2024-12-18"
+updatedAt: "2025-01-31"
+order: 1
+status: published
+---
+
+# TrueNAS SCALE On Proxmox
+
+This cluster is for the point where a host-side `naspool` stops feeling like a clever shortcut and starts feeling like two jobs mixed together.
+
+The Proxmox host still needs to be the hypervisor. The NAS layer still needs snapshots, alerts, SMB and NFS exports, and a cleaner place to live. Running TrueNAS SCALE as a VM is the compromise that gives you that split without forcing new hardware into the plan first.
+
+## When This Path Fits
+
+- you already have a stable Proxmox host and the storage role is growing beyond a simple host export
+- you want managed SMB and NFS shares, snapshot schedules, SMART monitoring, and alerting from a dedicated NAS UI
+- you have three NAS drives and want a mirror plus hot spare layout rather than a bigger but slower-to-recover parity layout
+
+## Why Move Beyond Host-Side `naspool`
+
+The host can absolutely export storage directly. That is a valid first stage, and [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) still documents it.
+
+The reason to move is not because host-side ZFS is wrong. It is because once the lab wants shared model storage, Time Machine, clearer alerting, and a more dedicated storage control plane, separating the NAS role starts simplifying the rest of the stack.
+
+| Question | Host-side `naspool` | TrueNAS SCALE VM |
+|----------|---------------------|------------------|
+| Where do you manage shares? | shell-first | dedicated web UI |
+| Snapshot scheduling | cron and scripts | built-in tasks |
+| SMART checks and alerting | manual wiring | built-in workflows |
+| Time Machine target | manual SMB work | first-class share purpose |
+| Shared models and backup exports | possible | cleaner long-term layout |
+
+## In This Cluster
+
+- [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) - reallocate RAM, retire the old `naspool`, create the VM, pass drives through by stable ID, and build `tank` as a mirror plus hot spare.
+- [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - create child datasets, publish NFS and SMB shares, mount them on the Proxmox host, wire them into containers, and move `vzdump` jobs over.
+- [TrueNAS Protection, Verification, And Failure Handling](/pages/proxmox/workloads/truenas-scale/protection-verification-and-failure-handling) - set snapshot schedules, SMART tests, scrubs, alerting, UPS integration, and rehearse what actually happens when a mirror leg fails.
+
+## Read This With
+
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) if the hardware is still being assembled or those WD RED bays are not committed yet.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) if the host is still exporting storage directly and you need the current baseline before migrating.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) once `truenas-vzdump` becomes part of the backup story.
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) if the TrueNAS UI is going to sit behind the existing reverse proxy layer.

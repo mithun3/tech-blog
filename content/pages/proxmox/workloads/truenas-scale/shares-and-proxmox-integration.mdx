@@ -1,0 +1,236 @@
+---
+title: "TrueNAS Shares And Proxmox Integration"
+description: "Publish NFS and SMB shares from the TrueNAS VM, mount them back into Proxmox cleanly, and move shared model storage and backup jobs onto the new NAS tier."
+publishedAt: "2024-12-21"
+updatedAt: "2025-01-31"
+order: 2
+status: published
+---
+
+# TrueNAS Shares And Proxmox Integration
+
+Once `tank` exists, the next job is to turn it into something the rest of the lab can actually consume.
+
+That means child datasets, NFS exports, SMB for Time Machine, Proxmox mounts, container bind mounts, and an updated backup target.
+
+## Start With Child Datasets, Not The Pool Root
+
+Keep the pool root as an administrative boundary. Share the child datasets created for each purpose instead of exporting `/mnt/tank` directly.[^truenas-shares]
+
+## Phase 5: NFS And SMB Shares
+
+### Enable NFS and create exports
+
+Turn on NFS in the TrueNAS UI with NFSv4 enabled, then create exports for the datasets below.
+
+| Share Path | Allowed Networks | maproot User | maproot Group | Options |
+|------------|------------------|--------------|---------------|---------|
+| `/mnt/tank/media` | `192.168.50.0/24` | `root` | `wheel` | Read/Write |
+| `/mnt/tank/documents` | `192.168.50.0/24` | `root` | `wheel` | Read/Write |
+| `/mnt/tank/models` | `192.168.50.20`, `192.168.50.40`, `192.168.50.45` | `root` | `wheel` | Read Only |
+| `/mnt/tank/backups/vzdump` | `192.168.50.20` | `root` | `wheel` | Read/Write |
+| `/mnt/tank/docker` | `192.168.50.0/24` | `root` | `wheel` | Read/Write |
+
+The important part is scope. Restrict `models` and `vzdump` to the Proxmox surfaces that actually need them.
+
+### Enable SMB for Time Machine
+
+Create a dedicated local user for the Time Machine share and publish `tank/backups/timemachine` as an SMB share with the Time Machine purpose selected.
+
+On macOS:
+
+1. Open System Settings -> General -> Time Machine.
+2. Click Add Backup Disk.
+3. Select `TimeMachine`.
+4. Authenticate with the `timemachine` account.
+
+## Phase 6: Proxmox Integration
+
+### Mount NFS shares on the Proxmox host
+
+```bash
+# SSH into Proxmox host
+ssh root@192.168.50.20
+
+# Install NFS client (if not already installed)
+apt install -y nfs-common
+
+# Verify TrueNAS NFS exports are visible
+showmount -e 192.168.50.50
+
+# Create mount points
+mkdir -p /mnt/truenas-models
+mkdir -p /mnt/truenas-media
+```
+
+```bash
+# Add to /etc/fstab for auto-mount at boot
+cat >> /etc/fstab << 'EOF'
+
+# TrueNAS NFS Mounts (VM 300 - 192.168.50.50)
+# Requires TrueNAS VM to be running (boot order=1, up=120)
+192.168.50.50:/mnt/tank/models   /mnt/truenas-models   nfs4  rw,hard,intr,rsize=1048576,wsize=1048576,_netdev  0  0
+192.168.50.50:/mnt/tank/media    /mnt/truenas-media     nfs4  ro,hard,intr,_netdev  0  0
+EOF
+
+# Mount all
+mount -a
+
+# Verify mounts
+df -h | grep truenas
+```
+
+### Add the NFS backup target to Proxmox
+
+```bash
+pvesm add nfs truenas-vzdump \
+  --server 192.168.50.50 \
+  --export /mnt/tank/backups/vzdump \
+  --content backup \
+  --options vers=4
+
+# Verify
+pvesm status
+```
+
+That uses Proxmox's NFS storage backend directly, which is the right fit when the NAS export is meant to behave like a managed backup target inside the platform rather than just a manual mount.[^pve-storage]
+
+### Bind-mount shared models into the GPU containers
+
+```bash
+# Stop GPU containers first
+pct stop 100
+pct stop 102
+
+# Add NFS model mount point to Ollama container
+# Edit /etc/pve/lxc/100.conf - add at the end:
+cat >> /etc/pve/lxc/100.conf << 'EOF'
+mp0: /mnt/truenas-models,mp=/models,ro=1
+EOF
+
+# Add NFS model mount point to llama-cpp container
+# Edit /etc/pve/lxc/102.conf - add at the end:
+cat >> /etc/pve/lxc/102.conf << 'EOF'
+mp0: /mnt/truenas-models,mp=/models,ro=1
+EOF
+
+# Start containers
+pct start 100
+pct start 102
+
+# Verify models are accessible inside containers
+pct exec 100 -- ls -la /models/
+pct exec 102 -- ls -la /models/
+```
+
+```bash
+# From Proxmox host, copy models from container storage to NFS
+# Ollama models are typically stored in /root/.ollama/models inside CT 100
+
+# Mount the NFS share as read-write (it's rw on host, ro on containers)
+# Copy Ollama model blobs
+rsync -avP /mnt/truenas-models/ 192.168.50.50:/mnt/tank/models/ 2>/dev/null
+
+# Or from inside the Ollama container, copy to the host mount:
+pct exec 100 -- ls -la /root/.ollama/models/
+# Then rsync from host to TrueNAS
+```
+
+### Move `vzdump` jobs onto `truenas-vzdump`
+
+```bash
+crontab -e
+```
+
+```bash
+# ============================================
+# Automated Backup & Snapshot Strategy (Updated for TrueNAS)
+# ============================================
+
+# --- vzdump backups to TrueNAS (weekly, 14-day retention) ---
+# Sunday 3 AM - full backup of all critical containers to TrueNAS NFS
+0 3 * * 0 /usr/sbin/vzdump 100 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+0 3 * * 0 /usr/sbin/vzdump 102 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+0 3 * * 0 /usr/sbin/vzdump 103 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+0 3 * * 0 /usr/sbin/vzdump 105 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+0 3 * * 0 /usr/sbin/vzdump 200 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+0 3 * * 0 /usr/sbin/vzdump 201 --storage truenas-vzdump --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+
+# --- ZFS snapshots on host pools (daily, 14-day retention) ---
+# (naspool snapshots removed - TrueNAS manages tank snapshots internally)
+0 2 * * * /usr/sbin/zfs snapshot rpool@auto-$(date +\%Y\%m\%d)
+
+# --- Cleanup: delete ZFS snapshots older than 14 days ---
+30 2 * * * /usr/local/bin/zfs-snapshot-cleanup.sh
+
+# --- Weekly ZFS scrubs for host-managed pools ---
+# (naspool scrubs removed - TrueNAS manages tank scrubs internally)
+0 2 * * 0 /usr/sbin/zpool scrub rpool
+0 2 * * 0 /usr/sbin/zpool scrub backup
+```
+
+Those are the original validated lines, including the legacy `--mailnotification failure` flag. That is deliberate. If you want to modernize later, Proxmox documents `notification-mode` as the newer path while leaving these flags as deprecated compatibility options.[^pve-vzdump]
+
+### Make TrueNAS boot before the containers that depend on it
+
+```bash
+# TrueNAS VM: boot first, 2-minute startup delay
+qm set 300 --startup order=1,up=120
+
+# All LXC containers: boot second, 30-second delay between each
+pct set 100 --startup order=2,up=30
+pct set 102 --startup order=2,up=30
+pct set 103 --startup order=2,up=30
+pct set 105 --startup order=2,up=30
+pct set 200 --startup order=2,up=30
+pct set 201 --startup order=2,up=30
+
+# Verify
+qm config 300 | grep startup
+for ct in 100 102 103 105 200 201; do
+  echo "CT $ct: $(pct config $ct | grep startup)"
+done
+```
+
+### Optional: publish the TrueNAS UI through the existing reverse proxy
+
+If the NAS UI is meant to live behind the same LXC reverse proxy used elsewhere, keep the config in the shared exposure layer and add the original server block there.
+
+```bash
+# SSH into Nginx container
+pct exec 200 bash
+
+# Add TrueNAS upstream
+cat >> /etc/nginx/conf.d/truenas.conf << 'EOF'
+server {
+    listen 443 ssl http2;
+    server_name nas.sysya.org;
+
+    ssl_certificate     /etc/letsencrypt/live/sysya.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sysya.org/privkey.pem;
+
+    location / {
+        proxy_pass http://192.168.50.50;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (TrueNAS uses WebSocket for shell/console)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+# Test and reload Nginx
+nginx -t && nginx -s reload
+exit
+```
+
+Use [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) if that reverse proxy path still needs to be built first.
+
+[^truenas-shares]: TrueNAS recommends creating child datasets for shares instead of sharing the pool root directly: https://www.truenas.com/docs/scale/24.10/scaletutorials/shares/
+[^pve-storage]: Proxmox documents NFS as a first-class storage backend and exposes it through `pvesm add nfs`: https://pve.proxmox.com/pve-docs/chapter-pvesm.html
+[^pve-vzdump]: Proxmox documents `mailnotification` as deprecated and `notification-mode` as the newer backup notification path: https://pve.proxmox.com/pve-docs/chapter-vzdump.html

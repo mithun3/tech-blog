@@ -1,8 +1,8 @@
 ---
 title: "Storage And ZFS"
 description: "Day-two storage work on Proxmox: understanding rpool, secondary pools, compression, scrubs, and the risky-but-sometimes-necessary pool expansion tasks that happen after the install." 
-publishedAt: "2026-02-05"
-updatedAt: "2026-02-06"
+publishedAt: "2024-11-28"
+updatedAt: "2025-01-30"
 order: 1
 status: published
 ---
@@ -70,6 +70,8 @@ zfs create backup/proxmox-backups
 ### NAS-Style Pool
 
 The original notes use a host-side `naspool`, even though a later TrueNAS VM may replace it.
+
+If the lab is moving in that direction, treat this section as the host-side baseline and use [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) for the actual migration path, NFS and SMB layout, and hot-spare workflow.
 
 ```bash
 # Create RAID-Z1 pool from two 8TB SATA drives

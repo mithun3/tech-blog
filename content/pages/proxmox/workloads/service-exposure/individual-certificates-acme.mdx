@@ -2,7 +2,7 @@
 title: "Individual Certificates On Proxmox With acme.sh"
 description: "Issue and install one certificate per service with acme.sh when a wildcard certificate no longer feels like the right blast radius for the lab."
 publishedAt: "2025-01-09"
-order: 4
+order: 5
 status: published
 ---
 
@@ -112,8 +112,8 @@ chmod +x /root/issue-individual-certs.sh
 
 # Output:
 # === Issuing certificate for openwebui.sysya.org ===
-# [Sun Feb 11 10:30:45 UTC 2026] Issuing certificate for openwebui.sysya.org
-# [Sun Feb 11 10:30:52 UTC 2026] Certificate successfully issued!
+# [Sun Jan 12 10:30:45 UTC 2025] Issuing certificate for openwebui.sysya.org
+# [Sun Jan 12 10:30:52 UTC 2025] Certificate successfully issued!
 # ✓ Certificate issued for openwebui.sysya.org
 # ... (repeats for each service)
 ```
@@ -355,6 +355,7 @@ done
 
 - [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the subsection overview and decision hub.
 - [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the wildcard-certificate path that usually comes first.
+- [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) - the container-native alternative when certificate automation should follow container metadata.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the no-port-forwarding alternative.
 
 [^1]: `acme.sh` is the project's documented shell-based ACME client, and its native multi-certificate workflow is the reason it fits this pattern well: [acme.sh](https://github.com/acmesh-official/acme.sh).

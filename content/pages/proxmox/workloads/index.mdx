@@ -1,8 +1,8 @@
 ---
 title: "Proxmox Workloads"
 description: "Service and workload guides that depend on Proxmox mechanics: LXC deployments, passthrough, and application setups that live on top of the host."
-publishedAt: "2025-05-12"
-updatedAt: "2025-06-20"
+publishedAt: "2024-12-05"
+updatedAt: "2025-01-31"
 order: 4
 status: published
 ---
@@ -25,12 +25,13 @@ If the workload is common and the immediate question is just "what is the fastes
 
 - [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
 - [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
+- [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) - the path for moving a host-side `naspool` into a managed NAS VM with SMB, NFS, alerting, and a mirror-plus-spare layout.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - NVIDIA host setup, LXC passthrough, and the single- or dual-GPU layouts that make local AI workloads practical on Proxmox.
 - [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management) - persistence mode, boot-time reapplication, and the 250 W tradeoffs that keep dual-GPU hosts inside saner thermal and PSU limits.
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the fastest path to a usable local AI stack when you want the interface and the inference engine online without overthinking the separation.
 - [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level single-model path when control over GGUF models, build flags, and server behavior matters more than convenience.
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the multi-model path for one Open WebUI connection, on-demand loading, and a cleaner long-term inference setup.
-- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) - the concrete February 2026 walkthrough for the dual-RTX-3090 Router Mode deployment.
+- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) - the concrete deployment walkthrough for the dual-RTX-3090 Router Mode layout.
 
 ## AI Workloads
 
@@ -43,6 +44,19 @@ One is for getting something working quickly. One is for taking direct control o
 | [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) | you want the shortest route to a usable chat stack | less control over the serving layer |
 | [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) | you want direct control over GGUF models and runtime tuning | more manual setup and maintenance |
 | [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) | you want multiple models behind one endpoint and one UI connection | more planning around VRAM, presets, and lifecycle |
+
+## NAS And Shared Storage
+
+This is the other workload shape that eventually stops feeling optional.
+
+At first it looks like a storage detail. In practice it becomes the point where Proxmox guests, backup jobs, Time Machine, media storage, and shared model directories either stay loosely coordinated or finally get a dedicated home.
+
+If the host is still using a direct `naspool`, start with [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs). If the plan is to move that role into a managed NAS VM without buying separate hardware first, use this cluster:
+
+- [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) - the overview for when the host-side pool should become a managed NAS tier.
+- [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) - resource reallocation, VM creation, passthrough, and the mirror-plus-spare pool layout.
+- [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - NFS, SMB, Proxmox storage integration, shared model mounts, and boot ordering.
+- [TrueNAS Protection, Verification, And Failure Handling](/pages/proxmox/workloads/truenas-scale/protection-verification-and-failure-handling) - snapshots, SMART checks, UPS integration, hot-spare behavior, and recovery drills.
 
 ## Secure Service Exposure
 

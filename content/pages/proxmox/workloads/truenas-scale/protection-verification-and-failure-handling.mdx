@@ -1,0 +1,474 @@
+---
+title: "TrueNAS Protection, Verification, And Failure Handling"
+description: "Protect the new NAS tier with snapshots, SMART tests, scrubs, UPS integration, and failure drills so the mirror-plus-spare design behaves the way it was chosen to behave."
+publishedAt: "2024-12-23"
+updatedAt: "2025-01-31"
+order: 3
+status: published
+---
+
+# TrueNAS Protection, Verification, And Failure Handling
+
+The point of moving storage into a dedicated NAS VM is not just prettier management. It is getting a storage layer that can explain itself, warn early, and recover in a controlled way.
+
+This page is the day-two part of that work.
+
+## Automated Protection
+
+### Snapshot schedules
+
+Create these periodic snapshot tasks in TrueNAS under Data Protection -> Periodic Snapshot Tasks.
+
+| Dataset | Frequency | Begin | End | Retention | Recursive |
+|---------|-----------|-------|-----|-----------|-----------|
+| `tank/media` | Daily | 00:00 | 23:59 | 30 days | No |
+| `tank/documents` | Hourly | 08:00 | 20:00 | 90 days | No |
+| `tank/models` | Weekly (Sunday) | 02:00 | - | 4 weeks | No |
+| `tank/backups/timemachine` | Daily | 01:00 | - | 14 days | No |
+| `tank/docker` | Daily | 01:00 | - | 14 days | No |
+| `tank/scratch` | none | - | - | - | - |
+
+Do not snapshot `tank/scratch`. Do not snapshot `tank/backups/vzdump` either. Those backups are already versioned by `vzdump` retention.
+
+### SMART monitoring
+
+Create these SMART test schedules in TrueNAS.
+
+| Test Type | Drives | Schedule | Purpose |
+|-----------|--------|----------|---------|
+| SHORT | All 3 WD RED | Daily, 04:00 | Quick health check |
+| LONG | All 3 WD RED | Weekly, Sunday 03:00 | Full surface scan |
+
+### Scrub schedule
+
+| Pool | Frequency | Day | Time | Threshold |
+|------|-----------|-----|------|-----------|
+| `tank` | Every 2 weeks | Sunday | 02:00 | 35 days |
+
+### Alert settings
+
+Wire TrueNAS alert email to the same inbox used for the Proxmox host and treat these as email-worthy:
+
+- WARNING: pool degraded, high temperature, SMART warning
+- CRITICAL: drive failure, spare activated, scrub errors, pool full
+
+## Production Hardening
+
+### UPS protection with NUT
+
+On the Proxmox host:
+
+```bash
+# Install Network UPS Tools
+apt install -y nut nut-client
+
+# Configure UPS (CyberPower example)
+cat > /etc/nut/ups.conf << 'EOF'
+[myups]
+  driver = usbhid-ups
+  port = auto
+  desc = "CyberPower UPS"
+EOF
+
+# Configure NUT mode
+cat > /etc/nut/nut.conf << 'EOF'
+MODE=netserver
+EOF
+
+# Configure monitoring
+cat > /etc/nut/upsmon.conf << 'EOF'
+MONITOR myups@localhost 1 admin secret master
+SHUTDOWNCMD "/sbin/shutdown -h now"
+POLLFREQ 5
+POLLFREQALERT 2
+HOSTSYNC 15
+DEADTIME 15
+FINALDELAY 5
+EOF
+
+# Start NUT
+systemctl enable nut-server nut-monitor
+systemctl start nut-server nut-monitor
+```
+
+In the TrueNAS UI, set UPS mode to Slave, point it at `192.168.50.20:3493`, and keep the shutdown mode on low battery.
+
+### Optional ZFS encryption for sensitive datasets
+
+```bash
+# In TrueNAS shell - create encrypted dataset
+zfs create -o encryption=aes-256-gcm -o keylocation=file:///root/tank-documents.key -o keyformat=raw -o recordsize=128K -o quota=500G tank/documents-encrypted
+
+# Or via TrueNAS UI: Storage -> tank -> Add Dataset -> Encryption Options -> Enable
+# Key type: Passphrase or Auto-generated key
+# Auto-unlock: Yes (key stored on TrueNAS boot disk - unlocks at boot)
+```
+
+### Verify NFSv4 and keep the firewall surface small
+
+```bash
+# On Proxmox host, verify NFSv4 is in use
+mount | grep nfs
+# Should show: type nfs4
+
+# On TrueNAS, verify NFSv4 is active
+nfsstat -s | head -5
+```
+
+| Port | Protocol | Source | Purpose |
+|------|----------|--------|---------|
+| 2049 | TCP | `192.168.50.0/24` | NFS |
+| 111 | TCP/UDP | `192.168.50.0/24` | RPC (NFS v3 compat) |
+| 445 | TCP | `192.168.50.0/24` | SMB |
+| 80/443 | TCP | `192.168.50.0/24` | TrueNAS Web UI |
+
+## Hot Spare Failure Scenarios
+
+### Scenario 1: Normal operation
+
+```text
+  pool: tank
+ state: ONLINE
+
+        NAME                                    STATE     READ WRITE CKSUM
+        tank                                    ONLINE       0     0     0
+          mirror-0                              ONLINE       0     0     0
+            ata-WDC_WD80EFAX_<SERIAL1>          ONLINE       0     0     0    <- SATA3
+            ata-WDC_WD80EFAX_<SERIAL2>          ONLINE       0     0     0    <- SATA4
+        spares
+          ata-WDC_WD80EFAX_<SERIAL3>            AVAIL                         <- SATA5 (idle)
+```
+
+### Scenario 2: A mirror leg fails and the spare auto-activates
+
+```text
+  pool: tank
+ state: DEGRADED
+status: One or more devices has been removed by the FMA.
+
+        NAME                                    STATE     READ WRITE CKSUM
+        tank                                    DEGRADED     0     0     0
+          mirror-0                              DEGRADED     0     0     0
+            spare-0                             DEGRADED     0     0     0
+              ata-WDC_WD80EFAX_<SERIAL1>        FAULTED      0     0     0    <- SATA3 (failed)
+              ata-WDC_WD80EFAX_<SERIAL3>        ONLINE       0     0     0    <- SATA5 (resilvering)
+            ata-WDC_WD80EFAX_<SERIAL2>          ONLINE       0     0     0    <- SATA4
+        spares
+          ata-WDC_WD80EFAX_<SERIAL3>            INUSE     currently in use    <- SATA5 (auto-activated)
+```
+
+What happens automatically:
+
+1. ZFS detects the failed leg.
+2. The hot spare activates.
+3. Resilver starts immediately.
+4. TrueNAS emits the pool alert.
+
+### Scenario 3: Replace the failed drive and restore a spare
+
+```bash
+# Option A: Replace the failed drive in-place (detaches spare automatically)
+zpool replace tank ata-WDC_WD80EFAX_<SERIAL1_OLD> ata-WDC_WD80EFAX_<SERIAL_NEW>
+
+# Wait for resilver to complete
+zpool status tank
+
+# The spare auto-detaches and returns to AVAIL status
+
+# Option B: Detach the failed drive, add new drive as spare
+zpool detach tank ata-WDC_WD80EFAX_<SERIAL1_OLD>
+zpool add tank spare ata-WDC_WD80EFAX_<SERIAL_NEW>
+```
+
+## Verification Checklist
+
+### Storage verification
+
+```bash
+# 1. Pool health - must show ONLINE, mirror-0 + spare AVAIL
+ssh root@192.168.50.50
+zpool status tank
+zpool list tank
+
+# 2. All datasets exist
+zfs list -r tank
+
+# 3. Compression enabled
+zfs get compression tank
+```
+
+### NFS verification
+
+```bash
+# From Proxmox host (192.168.50.20):
+
+# 4. NFS exports visible
+showmount -e 192.168.50.50
+
+# 5. NFS mounts working
+df -h | grep truenas
+ls -la /mnt/truenas-models/
+ls -la /mnt/truenas-media/
+```
+
+### Container integration verification
+
+```bash
+# 6. Models accessible inside GPU containers
+pct exec 100 -- ls -la /models/
+pct exec 102 -- ls -la /models/
+
+# 7. vzdump backup works - test with a small container
+vzdump 105 --storage truenas-vzdump --mode snapshot --compress zstd
+ls -la /mnt/truenas-vzdump/  # or check in Proxmox UI
+```
+
+### Backup and protection verification
+
+```bash
+# 8. Snapshot schedules - check in TrueNAS UI: Data Protection -> Periodic Snapshots
+# Verify at least one snapshot exists after scheduled time:
+zfs list -t snapshot -r tank | head -20
+
+# 9. SMART tests running - check in TrueNAS UI: Storage -> Disks -> each disk -> S.M.A.R.T. Results
+
+# 10. Email alerts working - send test alert from TrueNAS UI: System -> Alert Services -> test
+```
+
+### Optional destructive spare test
+
+```bash
+# Simulate drive failure by offlining one mirror leg
+# From TrueNAS shell:
+zpool offline tank ata-WDC_WD80EFAX_<SERIAL1>
+
+# Watch spare auto-activate
+watch -n 5 'zpool status tank'
+# Expected: spare-0 appears, resilver begins
+
+# After confirming spare activated, bring the drive back
+zpool online tank ata-WDC_WD80EFAX_<SERIAL1>
+
+# Detach the spare and re-add it (this reverses the test)
+zpool detach tank ata-WDC_WD80EFAX_<SERIAL3>
+zpool add tank spare ata-WDC_WD80EFAX_<SERIAL3>
+
+# Verify clean state
+zpool status tank
+# Should show: mirror-0 (SERIAL1 + SERIAL2 ONLINE), spare (SERIAL3 AVAIL)
+```
+
+### Boot-order verification
+
+```bash
+# 11. Full reboot test
+# Reboot Proxmox host:
+reboot
+
+# After boot, verify:
+# a) TrueNAS VM starts first (check VM 300 uptime in Proxmox UI)
+# b) NFS mounts auto-recover:
+df -h | grep truenas
+# c) All containers are running:
+pct list
+# d) Models still accessible:
+pct exec 100 -- ls /models/
+```
+
+## Troubleshooting
+
+### TrueNAS VM won't start
+
+```bash
+# Check VM status
+qm status 300
+
+# Check for errors in VM log
+tail -50 /var/log/pve/qemu-server/300.log
+
+# Common issue: EFI disk missing
+qm config 300 | grep efidisk
+
+# If missing, re-add:
+qm set 300 --efidisk0 local-zfs:1,efitype=4m,pre-enrolled-keys=0
+```
+
+### NFS mount fails or times out
+
+```bash
+# From Proxmox host:
+
+# Check if TrueNAS is reachable
+ping 192.168.50.50
+
+# Check if NFS service is running on TrueNAS
+ssh root@192.168.50.50 systemctl status nfs-server
+
+# Check exports
+showmount -e 192.168.50.50
+
+# If mount hangs, try mounting manually with verbose output
+mount -v -t nfs4 192.168.50.50:/mnt/tank/models /mnt/truenas-models
+
+# If boot fails due to NFS not ready, add 'nofail' to fstab:
+# 192.168.50.50:/mnt/tank/models /mnt/truenas-models nfs4 rw,hard,intr,_netdev,nofail 0 0
+```
+
+### Pool shows DEGRADED after reboot
+
+```bash
+# Check pool status inside TrueNAS
+zpool status tank
+
+# If a drive went offline during reboot:
+zpool online tank ata-WDC_WD80EFAX_<SERIAL>
+
+# If drive passthrough changed (wrong /dev/sdX mapping):
+# Check Proxmox host - verify by-id paths are still valid
+ls -la /dev/disk/by-id/ | grep WD
+
+# If disk was removed or moved, re-add passthrough:
+qm set 300 -scsiN /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL>
+```
+
+### SMART data not visible in TrueNAS
+
+```bash
+# Verify SMART passthrough is working
+ssh root@192.168.50.50 smartctl -a /dev/sdX  # for each data drive
+
+# If SMART fails: the issue is likely virtio abstraction
+# Verify drives were passed through as SCSI (not virtio):
+qm config 300 | grep scsi
+
+# Re-add with explicit SCSI if needed
+qm set 300 -scsi1 /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL>
+```
+
+### Containers can't access `/models` after reboot
+
+```bash
+# Check if NFS is mounted on host
+df -h | grep truenas
+
+# If not, manually mount
+mount -a
+
+# If TrueNAS wasn't ready yet (boot timing issue):
+# Increase TrueNAS startup delay
+qm set 300 --startup order=1,up=180  # 3 minutes instead of 2
+
+# Or add a systemd mount dependency for containers
+```
+
+### High RAM usage or OOM kills
+
+```bash
+# Check which process is consuming RAM
+ps aux --sort=-%mem | head -20
+
+# Check ZFS ARC sizes
+# On Proxmox host:
+grep "^size" /proc/spl/kstat/zfs/arcstats
+
+# On TrueNAS:
+ssh root@192.168.50.50 arc_summary | head -30
+
+# If host ARC is too high:
+echo 4294967296 > /sys/module/zfs/parameters/zfs_arc_max
+
+# If TrueNAS ARC is too aggressive:
+# TrueNAS UI -> System -> Advanced -> Sysctl -> add:
+# vfs.zfs.arc_max = 12884901888  (12GB, leaving 4GB for OS)
+```
+
+## Future Directions
+
+### 3-2-1 offsite copy with `rclone`
+
+```bash
+# Install rclone on TrueNAS
+apt install rclone  # or download from rclone.io
+
+# Configure Backblaze B2 (cheapest cloud storage - about $6/TB/month)
+rclone config
+# Follow prompts to add B2 remote
+
+# Sync critical datasets
+rclone sync /mnt/tank/documents b2:my-bucket/documents --transfers 8 --progress
+rclone sync /mnt/tank/backups/vzdump b2:my-bucket/vzdump --transfers 4 --progress
+
+# Schedule via crontab (weekly offsite sync)
+0 4 * * 0 /usr/local/bin/rclone sync /mnt/tank/documents b2:my-bucket/documents --log-file /var/log/rclone.log
+```
+
+### VLAN-separate the storage path
+
+```bash
+# On Proxmox host - create VLAN-aware bridge
+# /etc/network/interfaces:
+auto vmbr0.100
+iface vmbr0.100 inet static
+  address 10.100.0.1/24
+  vlan-raw-device vmbr0
+
+# Add second NIC to TrueNAS VM on VLAN 100
+qm set 300 --net1 virtio,bridge=vmbr0,tag=100
+
+# Configure TrueNAS: second NIC with IP 10.100.0.50
+# NFS traffic goes over VLAN 100 (isolated from general LAN)
+```
+
+### Add a Jellyfin workload later
+
+```bash
+# Option B: Proxmox LXC (CT 106)
+pct create 106 local:vztmpl/debian-12-standard_12.1-1_amd64.tar.zst \
+  --hostname jellyfin \
+  --memory 4096 \
+  --cores 2 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.55/24,gw=192.168.50.1 \
+  --onboot 1 \
+  --startup order=2,up=30
+
+# Mount TrueNAS media via NFS inside container
+# Add to /etc/pve/lxc/106.conf:
+# mp0: /mnt/truenas-media,mp=/media,ro=1
+```
+
+### Expand the pool when a fourth 8 TB drive arrives
+
+```bash
+# Add second mirror vdev - doubles capacity with full redundancy
+zpool add tank mirror ata-WDC_WD80EFAX_<SERIAL4> ata-WDC_WD80EFAX_<SERIAL3>
+# Converts former spare (SERIAL3) to active + new drive (SERIAL4) as mirror partner
+# Result: 2 mirror vdevs = about 16TB usable
+# Tradeoff: no hot spare
+```
+
+```bash
+# Or keep mirror + 2 hot spares
+zpool add tank spare ata-WDC_WD80EFAX_<SERIAL4>
+# Result: 2-disk mirror + 2 hot spares = about 8TB usable, extreme fault tolerance
+```
+
+## Best-Practice Snapshot
+
+| Practice | Description | Implementation Status |
+|----------|-------------|----------------------|
+| RAID is not backup | Redundancy protects against drive failure, not deletion or corruption | yes |
+| 3-2-1 backup rule | 3 copies, 2 media, 1 offsite | not yet - offsite still to add |
+| ECC RAM | Helps avoid silent corruption in memory | yes |
+| UPS protection | Prevents dirty shutdowns during writes | documented, hardware still needed |
+| Mirror over 2-disk RAIDZ1 | Faster resilver and same usable space for 2 active drives | yes |
+| Hot spare | Automatic recovery without manual intervention | yes |
+| Stable by-id passthrough | Avoids `/dev/sdX` drift across reboots | yes |
+| Automated scrubs | Finds corruption before it becomes a surprise | yes |
+| SMART monitoring and alerts | Surfaces failure signals early | yes |
+| Dataset quotas and record sizes | Keeps one workload from consuming the entire pool | yes |
+
+## Related Topics
+
+- [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - the NFS, SMB, and backup wiring that these checks protect.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) - use this when the host side still needs its own notification cleanup.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) - pair the new `truenas-vzdump` target with the broader restore strategy.

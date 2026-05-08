@@ -1,7 +1,8 @@
 ---
 title: "Update And Maintenance"
 description: "A practical maintenance rhythm for updating the Proxmox host, LXC containers, and service workloads without turning a quiet Sunday into a rebuild session."
-publishedAt: "2026-02-19"
+publishedAt: "2024-12-01"
+updatedAt: "2025-01-19"
 order: 4
 status: published
 ---
@@ -499,7 +500,7 @@ pct exec 105 -- pihole -up
 pct listsnapshot <CTID>
 
 # Roll back to pre-update snapshot
-pct rollback <CTID> pre-update-2026-02-19
+pct rollback <CTID> pre-update-2025-01-19
 
 # Start the container
 pct start <CTID>

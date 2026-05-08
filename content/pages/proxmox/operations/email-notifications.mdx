@@ -1,7 +1,8 @@
 ---
 title: "Email Notifications"
 description: "Configure Proxmox to send real email for backups and system events instead of quietly keeping alerts on the host."
-publishedAt: "2026-02-10"
+publishedAt: "2024-11-19"
+updatedAt: "2025-01-20"
 order: 3
 status: published
 ---
@@ -29,7 +30,7 @@ The result is familiar and slightly dangerous:
 - nothing visibly errors
 - the message still never leaves the box
 
-The clean fix is to configure a real SMTP target in Proxmox's notification system.
+The clean fix is to configure a real SMTP target in Proxmox's notification system.[^1]
 
 ## Step 1: Update The Proxmox Email Address
 
@@ -69,7 +70,7 @@ The common mistake here is simple and stupid enough to be worth stating clearly:
 
 ## Step 3: Configure An SMTP Notification Target
 
-This is the preferred path because it uses the modern Proxmox notification system directly instead of treating Postfix as the only route.
+This is the preferred path because it uses the modern Proxmox notification system directly instead of treating Postfix as the only route.[^2]
 
 ### Via GUI
 
@@ -170,7 +171,7 @@ The more future-proof route is the notification system:
 vzdump 100 --storage backup --mode snapshot --compress zstd --notification-mode notification-system --prune-backups keep-weekly=2
 ```
 
-That keeps the alert path consistent with the rest of the host.
+That keeps the alert path consistent with the rest of the host and lines up with Proxmox's documented `notification-mode` behavior for backup jobs.[^3]
 
 ## Step 6: Test Delivery
 
@@ -204,6 +205,10 @@ journalctl -u postfix -f
 # Check Postfix mail queue
 mailq
 ```
+
+[^1]: Proxmox documents notification targets, events, and the shared notification configuration under Datacenter -> Notifications, backed by `/etc/pve/notifications.cfg` and `/etc/pve/priv/notifications.cfg`: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_notifications
+[^2]: Proxmox documents SMTP targets separately from sendmail targets, including the fact that SMTP targets send directly to the relay and do not use the system MTA queue: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#notification_targets_smtp
+[^3]: Proxmox documents `notification-mode` for `vzdump` and marks `mailnotification` and `mailto` as deprecated compatibility options: https://pve.proxmox.com/pve-docs/chapter-vzdump.html
 
 ## Optional: Configure Postfix As A Relay
 

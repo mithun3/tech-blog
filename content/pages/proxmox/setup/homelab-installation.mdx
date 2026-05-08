@@ -1,7 +1,8 @@
 ---
 title: "Homelab Installation"
 description: "Install Proxmox on a homelab host with the right BIOS settings, storage choices, and installer decisions before the rest of the lab begins to depend on them."
-publishedAt: "2026-02-05"
+publishedAt: "2024-10-24"
+updatedAt: "2025-01-30"
 order: 2
 status: published
 ---
@@ -37,6 +38,8 @@ This guide assumes a specific homelab host shape:
 | **SATA 5** | 8TB WD RED NAS HDD | TrueNAS NAS storage (hot spare) |
 
 That exact hardware is not required, but the decisions below assume the same kind of host: one Proxmox box expected to run real services, not just throwaway experiments.
+
+Those three WD RED drives matter later. They are either the basis of a temporary host-side `naspool`, or the clean handoff point into [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) when the NAS role needs its own VM, UI, and alerting path.
 
 ## The Hardware Shape That Matters
 
@@ -182,6 +185,12 @@ If any of the disks are reused rather than new, run the destructive preflight in
 - two matching 2TB NVMe drives
 - ZFS RAID1 for the Proxmox root pool
 - roughly 2TB usable with redundancy instead of more raw risk
+
+**If the WD RED drives are destined for NAS duty:**
+
+- keep them out of casual reuse during the host install
+- document their serial numbers early
+- continue later with [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) once the Proxmox host itself is stable
 
 If you know a mirror is coming, plan for it now even if you install on one disk first.
 

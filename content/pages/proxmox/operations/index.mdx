@@ -1,7 +1,8 @@
 ---
 title: "Proxmox Operations"
 description: "Day-two Proxmox work: storage, backups, notifications, updates, and the routines that keep the host recoverable instead of fragile."
-publishedAt: "2026-05-08"
+publishedAt: "2024-12-02"
+updatedAt: "2025-01-30"
 order: 3
 status: published
 ---
@@ -34,3 +35,5 @@ It is where storage layout, backups, update habits, alerting, and troubleshootin
 Read this section once the host exists and you care about keeping it stable.
 
 If you are still building the machine, start with [Proxmox Setup](/pages/proxmox/setup). If you are deploying services on top of the host, use [Proxmox Workloads](/pages/proxmox/workloads) for the platform-specific runbooks and come back here when those services need backup, maintenance, or recovery discipline.
+
+If storage is about to move from a host-managed `naspool` into a dedicated NAS VM, pair [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) with [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale). The first explains the host-side baseline. The second handles the actual handoff into NFS, SMB, snapshots, and hot-spare-backed storage.
