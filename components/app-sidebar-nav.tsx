@@ -67,7 +67,7 @@ export function AppSidebarNav({ tree }: Props) {
               poc to prod
             </span>
             <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 block leading-snug">
-              Software engineering &amp; building things
+              v12n, iot &amp; building things
             </span>
           </Link>
         </div>
