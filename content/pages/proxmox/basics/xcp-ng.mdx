@@ -1,0 +1,131 @@
+---
+title: "XCP-ng"
+description: "Why XCP-ng is the closest direct Proxmox alternative for homelabs, where it feels stronger, and where Proxmox still wins."
+publishedAt: "2026-05-08"
+order: 4
+status: published
+---
+
+# XCP-ng
+
+If Proxmox is the easiest Linux and KVM platform to recommend to homelab operators, XCP-ng is the first serious answer to "what would I run if not Proxmox?"
+
+As of May 2026, I think it is the closest direct alternative for VM-heavy homelabs. Not the broadest alternative. Not the most Linux-native alternative. The closest direct alternative.
+
+## What XCP-ng Actually Is
+
+XCP-ng is a bare-metal virtualization platform built around the Xen hypervisor.
+
+In practical terms, the project wants to feel like an appliance. You install it from an ISO, run it directly on the hardware, and manage it centrally through Xen Orchestra rather than treating the host like a general-purpose Linux box.
+
+That appliance shape is the first reason it competes so directly with Proxmox.
+
+As of May 2026, XCP-ng 8.3 LTS is the current long-term release, and the platform is presented around web-based management, live migration, scale, security, and backup through Xen Orchestra.
+
+## Why It Is The Closest Direct Alternative
+
+For a homelab, the comparison is straightforward:
+
+| Question | XCP-ng | Proxmox |
+|---|---|---|
+| Bare-metal hypervisor platform | Yes | Yes |
+| Web-based day-to-day management | Xen Orchestra | Built in |
+| Live migration and clustering story | Yes | Yes |
+| Backup story | Strong, centered on Xen Orchestra | Strong, centered on Proxmox tooling |
+| Guest focus | VMs first | VMs and LXCs |
+| Underlying ecosystem feel | Xen appliance | Linux and KVM appliance |
+
+That is why the comparison feels real rather than forced.
+
+XCP-ng is not just a hypervisor. It has the shape of a full platform. That matters because most homelab operators do not want to piece together five projects just to get clean VM workflows, backups, and a sane control plane.
+
+## What Feels Strong About XCP-ng
+
+### It Is Very VM-Centric
+
+This is the biggest selling point.
+
+If your lab is mostly or entirely VMs, XCP-ng feels focused. There is less ambiguity about what the platform is for. It exists to run and manage virtual machines cleanly on bare metal.
+
+That focus makes it especially attractive if you are coming from ESXi thinking rather than Linux host thinking.
+
+### Xen Orchestra Gives It A Real Control Plane
+
+Xen Orchestra is not a side detail. It is a huge part of why XCP-ng works as a serious Proxmox alternative.
+
+The management story is not "SSH into the host and build the rest yourself." It is centralized administration, web UI workflows, metrics, backup, and broader infrastructure visibility.
+
+For multi-host labs, that matters immediately.
+
+### It Feels More Appliance-Like
+
+Some homelab operators want the host to feel like infrastructure and nothing else.
+
+XCP-ng leans into that. It is easier to think of it as a dedicated virtualization appliance rather than as a Linux server that also happens to run a virtualization stack.
+
+That can be a feature, not a limitation, when you want stronger operational boundaries.
+
+## Where Proxmox Still Has The Better Homelab Fit
+
+### LXC Is A Real Advantage
+
+This is the biggest reason I still default to Proxmox for many personal labs.
+
+Proxmox can host full VMs and lightweight Linux system containers on one platform without making that feel strange. That is extremely useful for labs with DNS, reverse proxies, small automation services, media tools, and utility workloads that do not deserve full VM overhead.
+
+XCP-ng is the closer competitor overall, but it does not answer that mixed VM plus LXC pattern as naturally.
+
+### The Linux And KVM Foundations Feel More Familiar
+
+If you already think in Debian, KVM, QEMU, bridges, ZFS, and ordinary Linux operational habits, Proxmox usually feels more legible.
+
+XCP-ng is not hard to respect. It is just built around a different center of gravity: Xen rather than the Linux and KVM stack many homelabbers already know better.
+
+### The Best Experience Depends Heavily On Xen Orchestra
+
+This is both a strength and a tradeoff.
+
+Xen Orchestra is what gives XCP-ng much of its appliance-like coherence. It is also another distinct management layer you need to understand and plan around. Proxmox, by contrast, feels more self-contained from the first install.
+
+That does not make XCP-ng worse. It just changes the shape of the platform.
+
+## Who Should Pick XCP-ng
+
+XCP-ng makes the most sense when:
+
+- the lab is primarily VM-oriented
+- you want a turnkey hypervisor appliance more than a Linux host with virtualization features
+- you are leaving ESXi and want something that still feels like a serious dedicated platform
+- you care about centralized management and strong backup workflows early
+
+## Who Probably Should Not
+
+I would not start with XCP-ng when:
+
+- you rely heavily on small Linux system containers
+- you want the host to feel like a familiar Debian and KVM environment
+- you prefer to build your own virtualization stack directly on Linux
+- most of your lab is really application orchestration rather than machine orchestration
+
+## My Take As Of May 2026
+
+If someone asked me for the single closest direct alternative to Proxmox for a homelab, I would say XCP-ng without hesitation.
+
+If that same person asked me what I would still run in the average mixed homelab, I would usually say Proxmox.
+
+That is the distinction.
+
+XCP-ng is the best alternative when the question is about another serious VM platform. Proxmox is still the better default when the question is about overall homelab flexibility.
+
+## Further Reading
+
+- [XCP-ng](https://xcp-ng.org/)
+- [XCP-ng documentation](https://docs.xcp-ng.org/)
+- [Xen Orchestra](https://xen-orchestra.com/#!/xo-home)
+- [Proxmox Alternatives](/pages/proxmox/basics/proxmox-alternatives)
+
+## Continue Through The Series
+
+- [Proxmox Alternatives](/pages/proxmox/basics/proxmox-alternatives) — the tighter homelab-only shortlist of what is actually worth comparing.
+- [Proxmox Stack](/pages/proxmox/basics/proxmox-stack) — the architectural view of how Proxmox is layered underneath.
+- [Why I Use Proxmox](/pages/proxmox/basics/why-i-use-proxmox) — the opinionated case for why Proxmox still wins the default slot in many labs.

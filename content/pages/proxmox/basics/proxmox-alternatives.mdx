@@ -1,0 +1,105 @@
+---
+title: "Proxmox Alternatives"
+description: "A tighter, homelab-only view of the alternatives to Proxmox from mid-2024 to May 2026, with XCP-ng as the closest direct substitute."
+publishedAt: "2026-05-08"
+order: 3
+status: published
+---
+
+# Proxmox Alternatives
+
+If you are choosing for a homelab, you do not need a giant enterprise market map. You need a shortlist.
+
+My short version is simple: if you want the closest direct alternative to Proxmox, start with [XCP-ng](/pages/proxmox/basics/xcp-ng). Everything else is either more specialized, more DIY, or more Windows-shaped than most homelabs actually want.
+
+## The Shortlist That Actually Matters
+
+For a homelab in 2026, I would spend real time on only these options:
+
+- [XCP-ng](/pages/proxmox/basics/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.
+- Incus if you are Linux-first, API-first, and happy closer to the CLI than a polished appliance UI.
+- Hyper-V if Windows is the center of gravity rather than an occasional guest.
+- Standalone KVM and libvirt if you want full control and do not mind assembling your own platform.
+- Harvester only if your lab is already strongly Kubernetes-shaped.
+
+That is the real list.
+
+VMware still matters as historical context, because its 2024 pricing and licensing shock pushed a lot of people toward Proxmox. But for a new personal lab in May 2026, it is no longer the normal starting point I would recommend.
+
+## What Changed From Mid-2024 To May 2026
+
+### XCP-ng Became The Clearest Direct Alternative
+
+In mid-2024, XCP-ng was already the strongest open-source VM-first alternative. By May 2026, that is even clearer.
+
+The project now presents a very coherent story around XCP-ng 8.3 LTS, Xen Orchestra, live migration, centralized management, backup, and scale. If you want a real appliance-like hypervisor platform rather than a DIY Linux virtualization stack, XCP-ng is the first thing to test.
+
+That is why it gets its own page here: [XCP-ng](/pages/proxmox/basics/xcp-ng).
+
+### Incus Became Much More Credible
+
+Incus in mid-2024 was interesting. Incus in 2026 is a serious choice for the right operator.
+
+The 7.0 LTS release, longer support window, clustering work, backup APIs, and continued VM plus container story make it far easier to take seriously than it was early on.
+
+It is still not a one-to-one Proxmox replacement. It feels more like infrastructure you shape through APIs and CLI tools than an all-in-one homelab appliance. But if that is your style, its value went up materially between 2024 and 2026.
+
+### Hyper-V Stayed The Same Kind Of Answer
+
+Hyper-V did not suddenly become the universal homelab winner. It stayed the Windows-first answer.
+
+If the lab is built around Windows Server, Active Directory, PowerShell, and Microsoft management conventions, Hyper-V still makes sense. If the lab is Linux-heavy and self-hosting-shaped, it usually still feels like the wrong center of gravity.
+
+### Harvester Matured, But Stayed Specialized
+
+Harvester is clearly more mature in 2026 than it was in mid-2024. The problem is not capability. The problem is fit.
+
+It is still better understood as a Kubernetes and HCI platform that can run VMs well, not as the default replacement for a straightforward mixed homelab.
+
+If you already want Rancher, KubeVirt, and a cloud-native operating model, it is worth your time. If you want one clean place to host ordinary VMs and a few utility services, it is usually more platform than you need.
+
+### VMware Became Even Less Relevant For Fresh Homelabs
+
+In mid-2024, VMware was already becoming hard to recommend for small operators because the commercial story had changed.
+
+By May 2026, the VMware conversation is even more Cloud Foundation-shaped and even less aligned with the kind of small, personal lab where Proxmox usually shines.
+
+So VMware still belongs in the history of why this comparison exists. It just no longer deserves much of your evaluation time for a new homelab unless you are specifically practicing for enterprise work.
+
+## My Opinionated Homelab Ranking
+
+1. [XCP-ng](/pages/proxmox/basics/xcp-ng) if you want the closest direct substitute for Proxmox.
+2. Incus if you are Linux-native and comfortable living closer to APIs, CLI tooling, and automation.
+3. Standalone KVM and libvirt if you want maximum control and are willing to build your own management story.
+4. Hyper-V if your world is already Windows-first.
+5. Harvester if your lab is already Kubernetes-first.
+
+That is not a universal ranking. It is the ranking I would use for a serious personal lab operator who is actually deciding what to run at home.
+
+## Why Proxmox Still Wins So Often
+
+Proxmox keeps winning because it stays in the most useful middle ground for homelabs:
+
+- more turnkey than DIY KVM and libvirt
+- less Windows-shaped than Hyper-V
+- less Kubernetes-first than Harvester
+- easier to approach than Incus for most operators
+- more flexible than XCP-ng if you want both full VMs and lightweight Linux system containers
+
+That last point matters more than people sometimes admit.
+
+If your homelab includes a mix of real machine workloads and small utility services, the combination of KVM plus LXC is hard to beat. XCP-ng comes closest overall, but Proxmox still fits more mixed labs with less friction.
+
+## Further Reading
+
+- [XCP-ng](/pages/proxmox/basics/xcp-ng)
+- [Hyper-V overview](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/hyper-v-overview)
+- [Incus](https://linuxcontainers.org/incus/)
+- [Harvester](https://harvesterhci.io/)
+
+## Continue Through The Series
+
+- [XCP-ng](/pages/proxmox/basics/xcp-ng) — the closest direct Proxmox alternative, and the one I would test first for a VM-heavy homelab.
+- [Proxmox Fundamentals](/pages/proxmox/basics/proxmox-fundamentals) — the reference overview of what Proxmox is, how it is layered, and where it fits.
+- [Proxmox Stack](/pages/proxmox/basics/proxmox-stack) — the architectural view of the layers and boundaries underneath the platform.
+- [Why I Use Proxmox](/pages/proxmox/basics/why-i-use-proxmox) — the opinionated case for why that tradeoff is worth it in the first place.

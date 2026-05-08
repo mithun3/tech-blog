@@ -102,7 +102,7 @@ export default async function PostPage({ params }: Props) {
             )}
             <h1 className="text-4xl font-bold tracking-tight">{post.title}</h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500">
-              <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
+              <time dateTime={post.publishedAt}>Published {formatDate(post.publishedAt)}</time>
               <span aria-hidden="true">·</span>
               <span>{post.readingTime}</span>
               {post.updatedAt && post.updatedAt !== post.publishedAt && (

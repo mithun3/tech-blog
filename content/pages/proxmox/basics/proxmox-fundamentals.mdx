@@ -1,7 +1,7 @@
 ---
 title: "Proxmox Fundamentals"
 description: "A reference-style guide to what Proxmox VE is, how its architecture works, when to use VMs or LXCs, and where it fits against common alternatives."
-publishedAt: "2026-05-07"
+publishedAt: "2024-11-14"
 order: 2
 status: published
 ---
@@ -101,6 +101,7 @@ Proxmox is not "better than everything." It is better than many alternatives whe
 
 | Alternative | What It Is Good At | Where Proxmox Usually Wins In A Homelab |
 |------------|--------------------|------------------------------------------|
+| XCP-ng + Xen Orchestra | A strong VM-first appliance with centralized management and backup | Better fit for mixed VM and LXC labs, more familiar Linux and KVM foundations, and a more self-contained default experience |
 | VMware ESXi | Mature enterprise presence and familiar VMware workflows | Lower cost, open-source foundations, LXC support, and far less friction for personal labs |
 | Standalone KVM and libvirt | Maximum flexibility if you enjoy building your own control plane | A cohesive UI, integrated storage and networking workflows, backups, and easier day-to-day management |
 | Hyper-V | A sensible fit in Windows-heavy environments | Better fit for Linux-first labs, built-in LXC support, and a broader open infrastructure story |
@@ -121,5 +122,7 @@ That is why it often feels like a cleaner long-term choice than simply piling se
 ## Continue Through The Series
 
 - [Why I Use Proxmox](/pages/proxmox/basics/why-i-use-proxmox) — the opinionated, first-person case for choosing it in the first place.
+- [Proxmox Alternatives](/pages/proxmox/basics/proxmox-alternatives) — the longer comparison of what else was worth considering in mid-2024 and what changed by May 2026.
+- [XCP-ng](/pages/proxmox/basics/xcp-ng) — the dedicated page on the closest direct alternative and where its VM-first appliance model differs.
 - [Proxmox Stack](/pages/proxmox/basics/proxmox-stack) — the platform layers, boundaries, and operating model.
 - [Storage and Snapshots](/pages/proxmox/basics/storage-and-snapshots) — the part of the platform that usually decides whether the lab feels safe or fragile.

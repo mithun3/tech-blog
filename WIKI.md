@@ -102,11 +102,13 @@ Page is live at `/pages/my-section/my-page` with no other changes required.
 | `title` | string | ✅ | Sidebar label, page heading, breadcrumb, `<title>` tag, OG title |
 | `description` | string | Recommended | Shown below the page heading and used for OG description |
 | `order` | number | Recommended | Sidebar sort within a section — lower numbers appear first |
-| `publishedAt` | ISO date string | Recommended | e.g. `"2026-05-03"` — shown in page header |
-| `updatedAt` | ISO date string | No | If set and different from `publishedAt`, displayed as "Updated …" |
+| `publishedAt` | ISO date string | Recommended | Original publication date, e.g. `"2023-01-09"` — shown in page header and preserved across later edits |
+| `updatedAt` | ISO date string | No | Latest substantive revision date. Leave `publishedAt` unchanged and set this only when the content meaningfully changes; displayed as "Updated …" when different |
 | `status` | `published` / `draft` / `archived` | No | Informational only — all files are rendered regardless |
 
 Sidebar sort order: sorted by `order` ascending first, then alphabetically by `title` as a tiebreaker.
+
+Preserve `publishedAt` as the original date even if you reorganize files, rename sections, or clean up metadata. Use `updatedAt` for real later revisions, not for moves or formatting-only changes.
 
 ---
 

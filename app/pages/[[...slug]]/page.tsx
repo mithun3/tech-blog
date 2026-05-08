@@ -138,7 +138,7 @@ export default async function WikiPage({ params }: Props) {
           )}
           {page.publishedAt && (
             <p className="text-xs text-zinc-400 dark:text-zinc-500">
-              {formatDate(page.publishedAt)}
+              Published {formatDate(page.publishedAt)}
               {page.updatedAt && page.updatedAt !== page.publishedAt && (
                 <> · Updated {formatDate(page.updatedAt)}</>
               )}
