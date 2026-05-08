@@ -135,6 +135,37 @@ These components are available in every `.mdx` page without importing:
 <Audio src="/audio/clip.mp3" />
 ```
 
+## Citations And Sources
+
+Use Markdown footnotes for external citations in wiki pages.
+
+```md
+NVIDIA documents this behavior directly.[^1]
+
+[^1]: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html)
+```
+
+Use citations for:
+
+- version-sensitive commands, downloads, and package guidance
+- performance numbers, sizing guidance, and hardware tradeoff claims
+- product comparisons and platform-behavior claims that depend on upstream documentation
+- standards or protocol behavior when the page makes a concrete factual statement
+
+Source order matters:
+
+- prefer official vendor docs, upstream project docs, standards bodies, and maintainer documentation first
+- use community benchmarks, blog posts, or forum threads only when they add tested operational data or fill a gap the canonical docs do not cover
+- if a claim cannot be supported by a strong source, rewrite or remove it instead of adding a weak citation
+
+Keep navigation separate from citations:
+
+- `Related Topics` is for internal wiki links and reader navigation
+- do not use a trailing `Resources` or `Research References` section when those links are actually supporting claims in the page body; convert them into footnotes instead
+- keep a short `Further Reading` section only for optional supplemental material that is not being used as evidence
+
+If you materially revise a page while updating sources, keep `publishedAt` unchanged and update `updatedAt`.
+
 ---
 
 ## File Naming Conventions

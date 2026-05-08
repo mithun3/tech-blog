@@ -1,0 +1,52 @@
+---
+title: "Proxmox Helper Scripts"
+description: "community-scripts.org is my first stop for common Proxmox LXC and VM builds before I move into workload-specific runbooks."
+publishedAt: "2026-05-08"
+order: 0
+status: published
+---
+
+# Proxmox Helper Scripts
+
+If I want to stand up a common service on Proxmox quickly, this is usually the first place I check: [community-scripts.org](https://community-scripts.org).
+
+It is a community-driven Proxmox VE scripts project, continued in memory of tteck. For homelab work, it is often the shortest path from "I should spin this up" to "the guest exists and I can start validating it."
+
+## Why I Start Here
+
+I use it constantly for the repetitive part I do not want to rebuild from memory every time:
+
+- checking whether a service already has a sane LXC or VM path
+- getting a reasonable first-pass deployment without hand-assembling every Proxmox step
+- spending time on validation, networking, storage, and backups instead of repeating guest creation work
+
+That is the right boundary for it. It is an accelerator, not a substitute for understanding the workload.
+
+## How I Actually Use It
+
+My usual flow is simple:
+
+1. Check community-scripts first.
+2. Read the script page and verify I am on the official site before I run anything.
+3. Use the script to get the guest online quickly.
+4. Move back into the local guide when the workload needs exact sizing, IPs, GPU passthrough, DNS choices, storage layout, or maintenance expectations.
+
+That last step matters. The helper script gets me to a working starting point. The local runbook is where the stable version of the deployment lives.
+
+## Where This Stops
+
+Use this first when the question is "is there already a sane Proxmox path for this?"
+
+Use the workload guides in this section when the question becomes "how should I run this in my lab?"
+
+That is why pages like [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) and [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) still matter. They carry the validated settings, defaults files, networking assumptions, and follow-up checks that matter after the installer finishes.
+
+## Safety Note
+
+Copycat sites and stale snippets exist. Use the official [community-scripts.org](https://community-scripts.org) site, verify the script source, and read what the script will do before you run it on a host you care about.
+
+## Related Topics
+
+- [Proxmox Workloads](/pages/proxmox/workloads) - the section index for the Proxmox-specific deployment guides.
+- [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - a concrete workload guide that starts with the helper-script path and then gets opinionated.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the AI workload example where helper scripts are the fast start, not the whole story.

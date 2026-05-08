@@ -16,11 +16,11 @@ My short version is simple: if you want the closest direct alternative to Proxmo
 
 For a homelab in 2026, I would spend real time on only these options:
 
-- [XCP-ng](/pages/proxmox/basics/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.
-- Incus if you are Linux-first, API-first, and happy closer to the CLI than a polished appliance UI.
-- Hyper-V if Windows is the center of gravity rather than an occasional guest.
+- [XCP-ng](/pages/proxmox/basics/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.[^1]
+- Incus if you are Linux-first, API-first, and happy closer to the CLI than a polished appliance UI.[^2]
+- Hyper-V if Windows is the center of gravity rather than an occasional guest.[^3]
 - Standalone KVM and libvirt if you want full control and do not mind assembling your own platform.
-- Harvester only if your lab is already strongly Kubernetes-shaped.
+- Harvester only if your lab is already strongly Kubernetes-shaped.[^4]
 
 That is the real list.
 
@@ -32,7 +32,7 @@ VMware still matters as historical context, because its 2024 pricing and licensi
 
 In mid-2024, XCP-ng was already the strongest open-source VM-first alternative. By May 2026, that is even clearer.
 
-The project now presents a very coherent story around XCP-ng 8.3 LTS, Xen Orchestra, live migration, centralized management, backup, and scale. If you want a real appliance-like hypervisor platform rather than a DIY Linux virtualization stack, XCP-ng is the first thing to test.
+The project now presents a very coherent story around XCP-ng 8.3 LTS, Xen Orchestra, live migration, centralized management, backup, and scale. If you want a real appliance-like hypervisor platform rather than a DIY Linux virtualization stack, XCP-ng is the first thing to test.[^1]
 
 That is why it gets its own page here: [XCP-ng](/pages/proxmox/basics/xcp-ng).
 
@@ -40,19 +40,19 @@ That is why it gets its own page here: [XCP-ng](/pages/proxmox/basics/xcp-ng).
 
 Incus in mid-2024 was interesting. Incus in 2026 is a serious choice for the right operator.
 
-The 7.0 LTS release, longer support window, clustering work, backup APIs, and continued VM plus container story make it far easier to take seriously than it was early on.
+Its documented LTS track, clustering support, backup and migration features, and continued VM plus container story make it far easier to take seriously than it was early on.[^2]
 
 It is still not a one-to-one Proxmox replacement. It feels more like infrastructure you shape through APIs and CLI tools than an all-in-one homelab appliance. But if that is your style, its value went up materially between 2024 and 2026.
 
 ### Hyper-V Stayed The Same Kind Of Answer
 
-Hyper-V did not suddenly become the universal homelab winner. It stayed the Windows-first answer.
+Hyper-V did not suddenly become the universal homelab winner. It stayed the Windows-first answer.[^3]
 
 If the lab is built around Windows Server, Active Directory, PowerShell, and Microsoft management conventions, Hyper-V still makes sense. If the lab is Linux-heavy and self-hosting-shaped, it usually still feels like the wrong center of gravity.
 
 ### Harvester Matured, But Stayed Specialized
 
-Harvester is clearly more mature in 2026 than it was in mid-2024. The problem is not capability. The problem is fit.
+Harvester is clearly more mature in 2026 than it was in mid-2024. The problem is not capability. The problem is fit.[^4]
 
 It is still better understood as a Kubernetes and HCI platform that can run VMs well, not as the default replacement for a straightforward mixed homelab.
 
@@ -84,18 +84,11 @@ Proxmox keeps winning because it stays in the most useful middle ground for home
 - less Windows-shaped than Hyper-V
 - less Kubernetes-first than Harvester
 - easier to approach than Incus for most operators
-- more flexible than XCP-ng if you want both full VMs and lightweight Linux system containers
+- more flexible than XCP-ng if you want both full VMs and lightweight Linux system containers[^5]
 
 That last point matters more than people sometimes admit.
 
 If your homelab includes a mix of real machine workloads and small utility services, the combination of KVM plus LXC is hard to beat. XCP-ng comes closest overall, but Proxmox still fits more mixed labs with less friction.
-
-## Further Reading
-
-- [XCP-ng](/pages/proxmox/basics/xcp-ng)
-- [Hyper-V overview](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/hyper-v-overview)
-- [Incus](https://linuxcontainers.org/incus/)
-- [Harvester](https://harvesterhci.io/)
 
 ## Continue Through The Series
 
@@ -103,3 +96,9 @@ If your homelab includes a mix of real machine workloads and small utility servi
 - [Proxmox Fundamentals](/pages/proxmox/basics/proxmox-fundamentals) — the reference overview of what Proxmox is, how it is layered, and where it fits.
 - [Proxmox Stack](/pages/proxmox/basics/proxmox-stack) — the architectural view of the layers and boundaries underneath the platform.
 - [Why I Use Proxmox](/pages/proxmox/basics/why-i-use-proxmox) — the opinionated case for why that tradeoff is worth it in the first place.
+
+[^1]: XCP-ng positions itself as a turnkey bare-metal virtualization platform managed centrally through Xen Orchestra, with live migration, backup, and scale-out management as part of the story. The current site also presents XCP-ng 8.3 as the active LTS line: [XCP-ng](https://xcp-ng.org/), [XCP-ng Documentation](https://docs.xcp-ng.org/).
+[^2]: Incus describes itself as a next-generation system container, application container, and virtual machine manager with a single REST API, CLI tooling, clustering support, backups, migration, and an LTS release track: [Incus](https://linuxcontainers.org/incus/).
+[^3]: Microsoft describes Hyper-V as a type-1 hypervisor built into Windows Server and Windows, with live migration, high availability, disaster recovery, and Windows-centric management tooling: [Hyper-V virtualization in Windows Server and Windows](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/hyper-v-overview).
+[^4]: Harvester describes itself as a cloud-native HCI platform for bare metal built from Linux, KVM, Kubernetes, KubeVirt, and Longhorn, and explicitly targets VM plus cloud-native workloads rather than a simple VM-only homelab story: [Harvester](https://harvesterhci.io/).
+[^5]: Proxmox positions itself as a single platform that combines KVM full virtualization with Linux Containers (LXC), which is the core reason it fits mixed VM-plus-container homelabs so well: [Proxmox Virtual Environment](https://www.proxmox.com/en/proxmox-virtual-environment/overview).

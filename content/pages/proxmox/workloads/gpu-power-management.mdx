@@ -32,7 +32,7 @@ If the host driver is not installed yet, go back to [GPU Passthrough On Proxmox]
 
 ## Why 250 W Exists In This Build
 
-An RTX 3090-class card is usually a 350 W board-power device at stock settings.
+An RTX 3090-class card is usually treated as a roughly 350 W board-power device when people compare stock and capped behavior on homelab-class builds.[^1]
 
 With two of them, the math gets tight faster than it first appears.
 
@@ -60,13 +60,13 @@ These two settings solve different problems.
 
 | Setting | What It Does | What It Does Not Do |
 |---------|--------------|---------------------|
-| Persistence mode | Keeps the NVIDIA driver loaded when no client is active, which reduces driver re-init latency for CUDA workloads | It does not reduce heat or power draw by itself |
-| Power limit | Caps the maximum board power and forces the GPU to reduce clocks when a workload tries to exceed that cap | It does not change VRAM capacity, CUDA support, or basic passthrough behavior |
+| Persistence mode | Keeps the NVIDIA driver loaded when no client is active, which reduces driver re-init latency for CUDA workloads[^2] | It does not reduce heat or power draw by itself |
+| Power limit | Caps the maximum board power and lets NVIDIA's software power-capping logic reduce clocks to stay under that ceiling[^2] | It does not change VRAM capacity, CUDA support, or basic passthrough behavior |
 
 Two details matter a lot on Proxmox hosts:
 
-- both settings are runtime settings
-- both revert to defaults after reboot or driver reset unless you re-apply them
+- both settings live in the GPU-initialization lifecycle
+- persistence mode must be re-enabled after reboot, and software power caps revert after driver unload or GPU re-initialization unless you re-apply them[^3]
 
 NVIDIA also documents how the power cap is enforced: when the card hits the configured ceiling, software power capping reduces clocks to stay under the limit. That is the mechanism behind the performance loss.
 
@@ -100,7 +100,7 @@ nvidia-smi -L
 
 Use the UUIDs in your script instead of only numeric indexes.
 
-NVIDIA documents index ordering as something that can change between reboots or hardware rearrangements. UUID targeting is the stable option.
+NVIDIA documents index ordering as something that can change between reboots or hardware rearrangements. UUID targeting is the stable option.[^4]
 
 ## Create A Host Power Profile Script
 
@@ -199,13 +199,32 @@ When a real workload is pressing against the cap, look for software power cappin
 
 This is where the answer stops being universal.
 
-The performance loss depends heavily on the workload.
+The performance loss depends heavily on the workload, so the cleanest way to compare the published results is to normalize each test against that source's higher-power reference point.
 
-| Source | Workload | 250 W Behavior | What It Means |
-|--------|----------|----------------|---------------|
-| qwertyforce | Single RTX 3090 deep-learning tests | Around 80% of peak in some AMP training and TF32 inference tests, with peak defined against a much higher 480 W ceiling | 250 W is aggressive if your priority is maximum training throughput |
-| Janky AI | Single-model local-LLM inference on RTX 3090 | About 97 tok/s at 250 W versus about 103 tok/s at 350 W, roughly 94% of the 350 W output | For interactive inference, the efficiency gain can be much larger than the throughput loss |
-| Puget Systems | Multi-GPU ResNet50 training on 4x RTX 3090 | About 93% of maximum around 250 W per GPU, and above 95% around 280 W | Multi-GPU compute often has a broad efficiency plateau below stock TDP |
+> Read this as shape, not as one universal benchmark. Each row keeps its own workload and its own reference power point.
+
+| Source | Workload | Lower-Power Point | Reference Point | Throughput Retained | Power Retained | Relative Perf/Watt |
+|--------|----------|-------------------|-----------------|---------------------|----------------|--------------------|
+| qwertyforce[^5] | Single RTX 3090 deep-learning | 250 W | 480 W peak | about 80% | about 52% | about 1.54x |
+| Janky AI[^6] | Single-model local-LLM inference | 250 W | 350 W | about 94% | about 71% | about 1.32x |
+| Janky AI[^6] | Single-model local-LLM inference | 280 W | 350 W | about 96% | 80% | about 1.20x |
+| Puget Systems[^7] | 4x RTX 3090 ResNet50 training | 250 W | 350 W | about 93% | about 71% | about 1.30x |
+| Puget Systems[^7] | 4x RTX 3090 ResNet50 training | 280 W | 350 W | about 95% | 80% | about 1.19x |
+
+If you want something chartable instead of prose, use this compact normalized dataset:
+
+```csv
+source,workload,lower_power_w,reference_power_w,throughput_retained_pct,power_retained_pct,relative_perf_per_watt_index
+qwertyforce,single_rtx3090_deep_learning,250,480,80.0,52.1,1.54
+janky_ai,single_model_llm_inference,250,350,94.2,71.4,1.32
+janky_ai,single_model_llm_inference,280,350,96.1,80.0,1.20
+puget_systems,multi_gpu_resnet50_training,250,350,93.0,71.4,1.30
+puget_systems,multi_gpu_resnet50_training,280,350,95.0,80.0,1.19
+```
+
+In that table, `relative_perf_per_watt_index` is just `throughput_retained_pct / power_retained_pct`.
+
+So `1.32x` does not mean the capped GPU is faster in absolute terms. It means it is producing about 32% more work per watt than the higher-power reference used in that row.
 
 That spread is the real lesson.
 
@@ -215,11 +234,13 @@ The same 250 W cap can be:
 - a meaningful slowdown for heavy training workloads
 - a good whole-system trade if it lets you run both GPUs cleanly instead of pushing the PSU too hard
 
+The other useful pattern is that 280 W often looks like the compromise tier. It gives back part of the missing throughput while still staying meaningfully below stock board power.[^6][^7]
+
 ### A Good Reading Of The Data
 
 250 W is not a magic number.
 
-It is a conservative operational point for a dual-3090 style homelab when power headroom and heat matter more than absolute peak throughput. If your main goal is training speed, 280-300 W is often a more natural starting point. If your main goal is efficiency, some inference tests suggest the best perf-per-watt point is lower still, around the low-200 W range, but with a more obvious throughput penalty.
+It is a conservative operational point for a dual-3090 style homelab when power headroom and heat matter more than absolute peak throughput. If your main goal is training speed, 280-300 W is often a more natural starting point. If your main goal is efficiency, some inference tests suggest the best perf-per-watt point is lower still, around the low-200 W range, but with a more obvious throughput penalty.[^6][^7]
 
 ## Workflow Impact
 
@@ -272,9 +293,10 @@ If you are unsure, start at 250 W, validate under your real workload, and then m
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - what to do when host updates, kernel changes, or driver refreshes force you to revisit this setup.
 - [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - how to keep an eye on power, thermals, and long-running GPU behavior after the system is in service.
 
-## Research References
-
-- [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html) - official `nvidia-smi` behavior for persistence mode, power limits, and throttling reasons.
-- [Optimal power limit for deep learning tasks on RTX 3090](https://blog.qwertyforce.dev/posts/optimal_power_limit) - workload-sensitive deep-learning benchmarks across multiple precisions.
-- [Power limiting RTX 3090 GPU to increase power efficiency](https://jankyai.droidgram.com/power-limiting-rtx-3090-gpu-to-increase-power-efficiency/) - local-LLM single-inference efficiency curve and raw tok/s data.
-- [Quad RTX3090 GPU Wattage Limited "MaxQ" TensorFlow Performance](https://www.pugetsystems.com/labs/hpc/Quad-RTX3090-GPU-Wattage-Limited-MaxQ-TensorFlow-Performance-1974/) - multi-GPU training-oriented view of the same tradeoff.
+[^1]: Puget Systems uses 350 W as the stock RTX 3090 reference point in its 4x RTX 3090 power-limit testing, which is a reasonable baseline for the dual-GPU planning math used here: [Quad RTX3090 GPU Wattage Limited "MaxQ" TensorFlow Performance](https://www.pugetsystems.com/labs/hpc/Quad-RTX3090-GPU-Wattage-Limited-MaxQ-TensorFlow-Performance-1974/).
+[^2]: NVIDIA documents persistence mode as keeping the driver loaded when no clients are active and documents SW power capping as the mechanism that reduces clocks when a software power limit is hit: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).
+[^3]: NVIDIA's driver-persistence documentation places persistence mode and software power capping in the GPU-initialization lifecycle, and `nvidia-smi` notes that persistence mode does not survive reboot while the default power limit is restored after driver unload: [Data Persistence](https://docs.nvidia.com/deploy/driver-persistence/data-persistence.html), [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).
+[^4]: NVIDIA recommends UUID or PCI bus ID for stable targeting because enumeration order is not guaranteed between reboots: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).
+[^5]: qwertyforce's RTX 3090 deep-learning measurements show 250 W landing around 80% of peak in some AMP training and TF32 inference tests, with 280-350 W recovering much more of the peak curve depending on workload: [Optimal power limit for deep learning tasks on RTX 3090](https://blog.qwertyforce.dev/posts/optimal_power_limit).
+[^6]: Janky AI's single-inference measurements on RTX 3090 report about 97 tok/s at 250 W versus about 103 tok/s at 350 W, with the fitted efficiency peak around 211 W and a still-strong practical range around 260-280 W: [Power limiting RTX 3090 GPU to increase power efficiency](https://jankyai.droidgram.com/power-limiting-rtx-3090-gpu-to-increase-power-efficiency/).
+[^7]: Puget Systems' 4x RTX 3090 TensorFlow testing reports roughly 93% of maximum performance around 250 W per GPU and over 95% around 280 W, which is why 280 W is a common near-stock-performance compromise for training-oriented work: [Quad RTX3090 GPU Wattage Limited "MaxQ" TensorFlow Performance](https://www.pugetsystems.com/labs/hpc/Quad-RTX3090-GPU-Wattage-Limited-MaxQ-TensorFlow-Performance-1974/).

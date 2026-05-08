@@ -2,7 +2,7 @@
 title: "GPU Passthrough On Proxmox"
 description: "Install NVIDIA drivers on the Proxmox host, expose GPUs into LXC containers, and keep single- or dual-GPU AI workloads stable inside the Proxmox stack."
 publishedAt: "2025-05-09"
-updatedAt: "2025-06-15"
+updatedAt: "2026-05-08"
 order: 2
 status: published
 ---
@@ -27,7 +27,7 @@ If your homelab does not include a dedicated GPU, skip this page entirely.
 
 ## Host Preparation
 
-SSH into Proxmox and install dependencies:
+SSH into Proxmox and install the dependencies you need for the generic NVIDIA installer. NVIDIA's installer needs matching kernel headers plus a working build toolchain so it can build the kernel interface for the running kernel, and Proxmox ships those matching headers as `pve-headers-$(uname -r)`.[^1][^2]
 
 ```bash
 ssh root@192.168.1.100
@@ -72,8 +72,10 @@ reboot
 
 ## Download And Install The NVIDIA Driver
 
+Replace `580.126.09` below with the driver version you intend to standardize on. NVIDIA supports both distribution packages and the generic `.run` installer; this page uses the generic installer path so the same driver branch can be staged into containers later.[^2][^3]
+
 ```bash
-# Assuming driver version 580.126.09 (check current latest)
+# Example version; replace with the branch you intend to standardize on
 cd /tmp
 wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
 
@@ -98,6 +100,8 @@ nvidia-smi
 
 ### If You Hit The `.run` Versus Debian Package Conflict
 
+If you already installed Debian-packaged NVIDIA components and now want to use the generic installer, remove the packaged stack first and reboot cleanly before retrying so one packaging path owns the installed files.[^2][^3]
+
 ```bash
 # 1. Remove all Debian-packaged NVIDIA drivers
 apt purge -y 'nvidia-*' 'libnvidia-*'
@@ -117,7 +121,7 @@ cd /tmp
 
 ## Host Verification
 
-At this point the driver should be installed on the Proxmox host and the device nodes should exist.
+At this point `nvidia-smi` should work on the Proxmox host and the device nodes should exist. NVIDIA documents the Linux device nodes as `/dev/nvidia[minor number]` for each GPU.[^4]
 
 ```bash
 # Verify the driver is healthy
@@ -131,7 +135,7 @@ Keep persistence mode, power limits, and boot-time reapplication in [GPU Power M
 
 ## GPU Passthrough To LXC Containers
 
-LXC containers do not inherit direct GPU access automatically. They share the host kernel, but device files still have to be exposed intentionally.
+LXC containers do not inherit direct GPU access automatically. Proxmox containers use the host kernel directly, but host resources still have to be exposed intentionally. For device nodes, Proxmox documents `dev[n]` as the native config key for passing a host device into a container.[^5]
 
 That is the whole point of the passthrough step below.
 
@@ -173,6 +177,8 @@ ls -la /dev/nvidia*
 ```
 
 ### Add Devices To The Container Config
+
+Use the `dev[n]: /path/to/device` entries in `/etc/pve/lxc/<CTID>.conf` to map the NVIDIA device nodes you actually need into the container.[^5]
 
 ```bash
 # Edit container config directly
@@ -342,6 +348,8 @@ nvidia-smi
 
 ### Restrict Processes With `CUDA_VISIBLE_DEVICES`
 
+Once both GPUs are visible inside one container, NVIDIA documents `CUDA_VISIBLE_DEVICES` as the standard way to restrict which GPU indices or UUIDs a CUDA application can see. If you need stable targeting across reboots, prefer UUIDs over indices.[^6][^7]
+
 ```bash
 # Pin a process to GPU 0 only
 CUDA_VISIBLE_DEVICES=0 ollama serve
@@ -360,6 +368,8 @@ nvidia-smi pmon -s u  # Real-time per-GPU process monitor
 
 ### Secure Boot Blocking The Driver
 
+Re-running the installer without changing Secure Boot state will not fix an unsigned-module failure. On systems that enforce signed kernel modules, either enroll a trusted key and sign the NVIDIA module or disable Secure Boot before reinstalling.[^8]
+
 ```bash
 # Remove failed installation completely
 apt remove --purge nvidia-driver-* nvidia-dkms-* 2>/dev/null
@@ -377,7 +387,7 @@ cd /tmp
 wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
 chmod +x NVIDIA-Linux-x86_64-580.126.09.run
 
-# Install with DKMS (should work now without Secure Boot)
+# Install with DKMS after Secure Boot is handled
 ./NVIDIA-Linux-x86_64-580.126.09.run --dkms
 
 # Verify successful installation
@@ -385,6 +395,8 @@ nvidia-smi
 ```
 
 ### DKMS Mismatch After A Kernel Update
+
+NVIDIA notes that DKMS usually smooths over minor kernel updates, but a major kernel jump can still require a newer driver branch if the kernel APIs changed.[^9]
 
 ```bash
 # Install headers for the NEW kernel
@@ -410,6 +422,8 @@ ls -la /dev/nvidia*
 
 ### GPU Running Too Hot
 
+`nvidia-smi -pl` changes the software power limit within the min/max range the GPU reports.[^10]
+
 ```bash
 # Check current temperature
 nvidia-smi --query-gpu=temperature.gpu --format=csv
@@ -427,3 +441,14 @@ nvidia-smi -pl 200  # Reduce from 350W to 200W
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) — the multi-model serving path that leans hardest on clean GPU ownership and VRAM discipline.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — how GPU containers and driver versions fit into the broader maintenance window.
 - [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — GPU telemetry and alerting once the host is running real workloads.
+
+[^1]: NVIDIA's installer compiles a kernel interface specifically for the running kernel and requires the matching kernel source or headers plus a linker to do so: [Installing the NVIDIA Driver](https://download.nvidia.com/XFree86/Linux-x86_64/580.95.05/README/installdriver.html).
+[^2]: NVIDIA's current driver installation guide explicitly frames the choice between distribution-specific packages and the generic NVIDIA installer as a deployment decision, and calls out kernel headers, module support, and verification as part of that path: [NVIDIA Driver Installation Guide](https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/index.html).
+[^3]: NVIDIA's generic installer is the `.run` package, which extracts and launches `nvidia-installer`; that installer also offers DKMS registration when DKMS is present on the system: [Installing the NVIDIA Driver](https://download.nvidia.com/XFree86/Linux-x86_64/580.95.05/README/installdriver.html).
+[^4]: NVIDIA documents `nvidia-smi` as the verification tool for driver state, documents GPU UUID reporting, and documents the Linux device node naming as `/dev/nvidia[minor number]`: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).
+[^5]: Proxmox documents that containers use the host kernel directly, and `pct.conf` documents `dev[n]` as the container config key used to pass specific device nodes through to a container: [Proxmox Container Toolkit](https://pve.proxmox.com/pve-docs/chapter-pct.html), [pct.conf - Proxmox VE Container Configuration](https://pve.proxmox.com/pve-docs/pct.conf.5-plain.html).
+[^6]: NVIDIA documents `CUDA_VISIBLE_DEVICES` as the environment variable that controls which GPU indices or UUIDs are visible to a CUDA application: [CUDA_VISIBLE_DEVICES](https://docs.nvidia.com/deploy/topics/topic_5_2_1.html).
+[^7]: NVIDIA recommends UUID or PCI bus ID over numeric indices when you need stable targeting, because enumeration order is not guaranteed to remain consistent across reboots: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).
+[^8]: NVIDIA documents that Secure Boot systems may require signed kernel modules, and describes module signing plus MOK enrollment as the supported recovery path when unsigned modules cannot be loaded: [Installing the NVIDIA Driver](https://download.nvidia.com/XFree86/Linux-x86_64/580.95.05/README/installdriver.html).
+[^9]: NVIDIA documents that DKMS typically rebuilds registered modules for minor kernel updates, but warns that a major kernel update may require a newer NVIDIA driver because of kernel API compatibility changes: [Installing the NVIDIA Driver](https://download.nvidia.com/XFree86/Linux-x86_64/580.95.05/README/installdriver.html).
+[^10]: NVIDIA documents `nvidia-smi -pl` as the software power-limit control and reports the default, minimum, and maximum supported power limits for supported GPUs: [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html).

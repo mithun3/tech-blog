@@ -13,6 +13,8 @@ This section is where the platform stops being abstract and starts doing jobs.
 
 Some services belong conceptually to Networking. Some belong conceptually to GPU and AI. Some are really application stacks with their own logic. But when the question becomes "how do I run this on Proxmox?" this is the right home.
 
+If the workload is common and the immediate question is just "what is the fastest sane way to get this online?" start with [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts) before dropping into the more opinionated runbooks below.
+
 ## What Belongs Here
 
 - LXC or VM deployment guides that are specific to Proxmox
@@ -21,6 +23,7 @@ Some services belong conceptually to Networking. Some belong conceptually to GPU
 
 ## In This Section
 
+- [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
 - [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - NVIDIA host setup, LXC passthrough, and the single- or dual-GPU layouts that make local AI workloads practical on Proxmox.
 - [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management) - persistence mode, boot-time reapplication, and the 250 W tradeoffs that keep dual-GPU hosts inside saner thermal and PSU limits.
