@@ -1,0 +1,425 @@
+---
+title: "Cloudflare Tunnel On Proxmox"
+description: "Expose Proxmox-hosted services through a dedicated cloudflared LXC, keep inbound ports closed, and layer Cloudflare Access in front of the services that deserve it."
+publishedAt: "2024-12-02"
+order: 2
+status: published
+---
+
+# Cloudflare Tunnel On Proxmox
+
+This is the path for the lab that wants secure sharing without opening the firewall and without turning the Proxmox host into an internet-facing snowflake.
+
+The shape is simple: `cloudflared` lives in its own unprivileged container, makes an outbound connection to Cloudflare, and routes named hostnames back to internal services. That keeps the hypervisor cleaner, keeps the edge certificates off your plate, and makes remote sharing much less dramatic than traditional port-forwarded exposure.[^1]
+
+If you already know you want a self-hosted reverse proxy with wildcard certificates, skip to [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc).
+
+## Why This Path Exists
+
+- no public IP requirement
+- no inbound firewall rules for the exposed services
+- no Certbot or Nginx requirement just to publish a service
+- a clean place to add Cloudflare Access in front of admin surfaces[^1][^2]
+
+## The Traffic Shape
+
+```text
+Internet (HTTPS)
+    -> Cloudflare Edge
+    -> encrypted tunnel
+    -> Cloudflare Tunnel LXC (192.168.50.70)
+    -> internal service
+```
+
+That model is the whole appeal. The service stays internal, while the tunnel guest becomes the only thing that needs to know about the outside world.
+
+## Recommended Container Shape
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **201** | dedicated tunnel guest |
+| Hostname | `cloudflare-tunnel` | descriptive role |
+| Disk Size | **2 GB** | binary, config, logs |
+| CPU Cores | **1** | lightweight daemon |
+| RAM | **256 MB** | enough headroom for `cloudflared` |
+| OS | Debian 12 | stable and well-supported |
+| Bridge | `vmbr0` | same network as your services |
+| IPv4 | **192.168.50.70/24** | stable internal target |
+| Gateway | `192.168.50.1` | router |
+| Unprivileged | **Yes** | cleaner isolation |
+
+## Create The Tunnel Container
+
+On the Proxmox host:
+
+```bash
+# Download Debian 12 template if not present
+pveam update
+
+pveam available | grep debian-12-standard
+
+pveam download local debian-12-standard_12.12-1_amd64.tar.zst
+
+
+# Create the container
+# Replace local-zfs with your storage backend (check: pvesm status)
+pct create 201 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname cloudflare-tunnel \
+  --memory 256 \
+  --cores 1 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.70/24,gw=192.168.50.1 \
+  --rootfs local-zfs:2 \
+  --unprivileged 1 \
+  --features nesting=1 \
+  --password 'your-secure-password'
+
+# Start the container
+pct start 201
+
+# Verify it's running
+pct status 201
+# Expected: status: running
+```
+
+Enter the guest and verify outbound reachability:
+
+```bash
+# From Proxmox host
+pct enter 201
+
+# Inside container - verify network
+ping -c 3 cloudflare.com
+# Should succeed (proves outbound HTTPS works)
+```
+
+## Install And Authenticate `cloudflared`
+
+All commands in this section run inside CT 201.
+
+```bash
+# Update packages
+apt update
+
+# Install dependencies
+apt install -y curl
+
+# Download the latest cloudflared DEB package
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+
+# Install it
+dpkg -i cloudflared.deb
+
+# Verify installation
+cloudflared --version
+# Output: cloudflared version X.Y.Z (rev abcdef)
+
+# Clean up
+rm cloudflared.deb
+```
+
+Authenticate the container against your Cloudflare account:
+
+```bash
+# This will output a URL to visit in your browser
+cloudflared tunnel login
+
+# Copy the URL, open it in your browser on your laptop/desktop
+# Log in to Cloudflare and authorize the tunnel
+# Select your domain when prompted
+
+# After authorization, the certificate is saved at:
+# /root/.cloudflared/cert.pem
+```
+
+Create the tunnel itself:
+
+```bash
+# Create a tunnel named "homelab" (you can name it anything)
+cloudflared tunnel create homelab
+
+# Output example:
+# Tunnel credentials written to /root/.cloudflared/abc123-def456-ghi789.json
+# Created tunnel homelab with id abc123-def456-ghi789
+
+# Tunnel credentials written to /root/.cloudflared/74dc96b1-b5b5-4521-aaf6-3b99f9816e2f.json.
+# cloudflared chose this file based on where your origin certificate was found.
+# Keep this file secret. To revoke these credentials, delete the tunnel.
+
+# Created tunnel proxmox-ve with id 74dc96b1-b5b5-4521-aaf6-3b99f9816e2f
+```
+
+## Create The Live Config File
+
+The systemd service reads `/etc/cloudflared/config.yml`, not `/root/.cloudflared/config.yml`. That distinction matters later, so keep the live config in `/etc/cloudflared/` from the start.
+
+```bash
+# Create the directory (if it doesn't exist) and config file
+mkdir -p /etc/cloudflared
+nano /etc/cloudflared/config.yml
+```
+
+Use the validated template below and adjust only the hostnames, IPs, and credential path that belong to your environment.
+
+```yaml
+# Cloudflare Tunnel configuration
+# File: /etc/cloudflared/config.yml
+
+tunnel: proxmox-ve
+credentials-file: /root/.cloudflared/74dc96b1-b5b5-4521-aaf6-3b99f9816e2f.json
+
+# Log level: trace, debug, info, warn, error
+log: debug
+
+ingress:
+  # OpenWebUI (AI chat interface)
+  - hostname: openwebui.sysya.org
+    service: http://192.168.50.30:42
+    originRequest:
+      connectTimeout: 30s
+
+  # llama.cpp (LLM inference server)
+  - hostname: llamacpp.sysya.org
+    service: https://192.168.50.45:8012
+    originRequest:
+      connectTimeout: 30s
+
+  # Pi-hole-1 admin
+  - hostname: pihole1.sysya.org
+    service: https://192.168.50.10:31415
+    originRequest:
+      noTLSVerify: true
+      httpHostHeader: pihole1.sysya.org
+      connectTimeout: 30s
+
+  # Pi-hole-2 admin
+  - hostname: pihole2.sysya.org
+    service: https://192.168.50.11:31415
+    originRequest:
+      noTLSVerify: true
+      httpHostHeader: pihole2.sysya.org
+      connectTimeout: 30s
+
+  # Proxmox Web UI (note: self-signed cert)
+  - hostname: proxmox.sysya.org
+    service: https://192.168.50.20:8006
+    originRequest:
+      noTLSVerify: true  # Proxmox uses self-signed cert
+      connectTimeout: 30s
+
+  # Grafana (monitoring dashboards) - requires Cloudflare Access (see Scenario E)
+  # Grafana has its own login, but Cloudflare Access adds a second auth layer
+  - hostname: grafana.sysya.org
+    service: http://192.168.50.80:3000
+    originRequest:
+      connectTimeout: 30s
+
+  # Prometheus - MUST use Cloudflare Access (no built-in authentication)
+  # WARNING: exposes raw system metrics (CPU, GPU, disk, memory). Never leave unauthenticated.
+  - hostname: prometheus.sysya.org
+    service: http://192.168.50.80:9090
+    originRequest:
+      connectTimeout: 30s
+
+  # Catch-all: reject everything else
+  - service: http_status:404
+
+# Global settings
+originRequest:
+  connectTimeout: 30s
+  http2Origin: false
+  noTLSVerify: false
+```
+
+Validate what you wrote:
+
+```bash
+# Test configuration syntax
+cloudflared tunnel ingress validate
+
+# List auth credentials (cert + tunnel UUID)
+ls -la /root/.cloudflared/
+# Should show: cert.pem, [tunnel-id].json
+
+# List the live config read by the systemd service
+ls -la /etc/cloudflared/
+# Should show: config.yml
+```
+
+## DNS And Domain Setup
+
+If you own a domain and want multiple service hostnames, use CNAME records pointed at the tunnel target.
+
+```bash
+cloudflared tunnel list
+# Output: homelab    abc123-def456-ghi789   active
+```
+
+Create CNAME records in Cloudflare so each service points at `[TUNNEL-ID].cfargotunnel.com`, or let `cloudflared` create them for you:
+
+```bash
+cloudflared tunnel route dns homelab openwebui.yourdomain.com
+cloudflared tunnel route dns homelab pihole.yourdomain.com
+cloudflared tunnel route dns homelab grafana.yourdomain.com
+cloudflared tunnel route dns homelab prometheus.yourdomain.com
+```
+
+## Run The Tunnel As A Service
+
+```bash
+# Install as systemd service (runs at boot)
+cloudflared service install
+
+# The systemd service reads config from /etc/cloudflared/config.yml
+# (This is why we created the config there in the step above, not in /root/.cloudflared/)
+
+# Start the service
+systemctl start cloudflared
+
+# Enable it to start on boot
+systemctl enable cloudflared
+
+# Check status
+systemctl status cloudflared
+
+# View logs
+journalctl -u cloudflared -f  # Follow logs in real-time
+```
+
+Confirm reachability from inside the tunnel guest before you blame DNS:
+
+```bash
+# Test that container can reach your services
+curl -s http://192.168.50.30:42 | head -5   # OpenWebUI
+curl -s http://192.168.50.10:80 | head -5   # PiHole
+
+# All should return HTML responses
+```
+
+Then test externally:
+
+```bash
+exit  # Exit the container back to Proxmox host
+
+# From your laptop (on any network)
+curl https://openwebui.yourdomain.com
+
+# You should see the OpenWebUI HTML response, not a DNS error
+```
+
+## Choose The Access Model
+
+The tunnel only solves reachability. You still need to decide what kind of audience the service is meant to tolerate.
+
+| Model | Best For | Tradeoff |
+|-------|----------|----------|
+| simple URL sharing | trusted people, quick demos, services that already have an app login | weak auditability |
+| Cloudflare Access | admin panels, Grafana, Prometheus, shared internal tools | some policy setup overhead[^2] |
+| time-limited links | temporary access with automatic expiry | more custom logic |
+
+For most sensitive surfaces, Cloudflare Access is the right default.
+
+That is especially true for Prometheus, which has no built-in authentication and should not be exposed naked just because the tunnel made it technically easy.[^2]
+
+## WAF And Rate Limiting Basics
+
+At minimum, turn on Cloudflare-managed protection and add a simple rate-limiting rule.
+
+- enable the Cloudflare managed ruleset
+- add a rate limit for abusive request bursts
+- put admin surfaces behind Cloudflare Access
+- keep raw exporter ports and internal-only UIs off the tunnel completely
+
+## Common Failure Modes
+
+### Tunnel Not Connected
+
+```bash
+# Enter the container
+pct enter 201
+
+systemctl status cloudflared
+# If not running:
+systemctl start cloudflared
+```
+
+```bash
+# Inside container
+curl https://cloudflare.com
+# Should succeed (proves outbound HTTPS works)
+```
+
+```bash
+# Inside container
+ls -la /root/.cloudflared/
+# Should show: cert.pem, [TUNNEL-ID].json
+ls -la /etc/cloudflared/
+# Should show: config.yml
+
+# If cert.pem or UUID.json missing, re-authenticate:
+cloudflared tunnel login
+```
+
+```bash
+# Inside container
+journalctl -u cloudflared -n 50  # Last 50 lines
+# Look for: "error", "ERR", "failed"
+```
+
+### DNS Points To The Wrong Thing
+
+If you see `522` errors, check whether the hostname resolves to an A record instead of the tunnel CNAME.
+
+```bash
+# Check what your DNS record points to
+dig openwebui.yourdomain.com
+
+# BAD - A record pointing to IP (causes 522):
+# openwebui.yourdomain.com.  300  IN  A  103.224.53.156
+
+# GOOD - CNAME pointing to tunnel:
+# openwebui.yourdomain.com.  300  IN  CNAME  abc123.cfargotunnel.com.
+```
+
+### The Service Returns The Tunnel 404
+
+This usually means the running service is reading the wrong config file.
+
+```bash
+pct enter 201
+
+# Check which config the service is actually reading
+systemctl cat cloudflared | grep config
+# Output: --config /etc/cloudflared/config.yml
+
+# Check if your ingress rules are missing from the live config
+grep -A3 "grafana\|openwebui\|llamacpp" /etc/cloudflared/config.yml
+
+# If missing, copy the correct config over
+cp /root/.cloudflared/config.yml /etc/cloudflared/config.yml
+
+# Restart the service to pick up the new config
+systemctl restart cloudflared
+systemctl status cloudflared
+```
+
+### The Tunnel Reaches The Guest But The Backend Still Fails
+
+```bash
+# Inside cloudflare-tunnel container, test service reachability
+curl http://192.168.50.30:42
+# Should return HTML, not "connection refused"
+
+# If refused, check the service container:
+pct enter 103  # OpenWebUI container
+systemctl status open-webui
+```
+
+## Related Topics
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the decision hub for this subsection.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the self-hosted reverse-proxy alternative.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - the Grafana and Prometheus stack this page can front safely when Cloudflare Access is in place.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - one of the clearest examples of a workload that should not stay on raw HTTP once it matters.
+
+[^1]: Cloudflare documents Tunnel as an outbound connector model for publishing private services without traditional inbound exposure, and documents tunnel configuration through `cloudflared`: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), [cloudflared configuration](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/configure-tunnels/local-management/configuration-file/).
+[^2]: Cloudflare's application and Access documentation covers the identity layer used to front self-hosted admin surfaces such as Grafana, Proxmox, or Prometheus: [Self-hosted applications](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/), [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/policies/access/).

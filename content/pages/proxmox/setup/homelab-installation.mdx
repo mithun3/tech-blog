@@ -2,7 +2,7 @@
 title: "Homelab Installation"
 description: "Install Proxmox on a homelab host with the right BIOS settings, storage choices, and installer decisions before the rest of the lab begins to depend on them."
 publishedAt: "2026-02-05"
-order: 1
+order: 2
 status: published
 ---
 
@@ -15,6 +15,8 @@ That is why this page spends time on the boring part.
 The BIOS toggles, storage layout, installer path, and first network choices are not glamorous, but they decide whether the host feels steady later or whether every passthrough, ZFS change, and guest deployment starts with "I probably should have done this differently on day one."
 
 If you want the conceptual picture first, start with [Proxmox Basics](/pages/proxmox/basics). If you are already at the keyboard with a machine to build, this is the page.
+
+If second-hand disks are part of the plan, validate them first in [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation). It is much easier to fail a drive before pool creation than to discover its personality during a resilver.
 
 ## Target System
 
@@ -166,6 +168,8 @@ done
 ### Storage Planning
 
 Think about the storage story before you click through the installer.
+
+If any of the disks are reused rather than new, run the destructive preflight in [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you commit them to the layout below.
 
 **Current configuration (single-drive style):**
 
@@ -327,5 +331,6 @@ From here, the right next move depends on what kind of lab you are building.
 ## Related Topics
 
 - [Proxmox Basics](/pages/proxmox/basics) — the platform-level explanation before the install path.
+- [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the disk preflight that should happen before reused drives become part of the storage plan.
 - [Proxmox Operations](/pages/proxmox/operations) — what happens after the host exists and needs maintenance.
 - [Proxmox Workloads](/pages/proxmox/workloads) — where the guest and passthrough guides will live.

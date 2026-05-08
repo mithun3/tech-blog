@@ -1,0 +1,76 @@
+---
+title: "Secure Service Exposure On Proxmox"
+description: "Choose how to expose Proxmox-hosted services over HTTPS without losing the separation between platform decisions, certificate strategy, and workload-specific runbooks."
+publishedAt: "2024-11-18"
+order: 1
+status: published
+---
+
+# Secure Service Exposure On Proxmox
+
+This subsection starts at the moment a private service stops feeling private enough.
+
+Your Open WebUI stack works. Pi-hole is doing its job. Grafana is useful enough that you want it from outside the house. That is usually when a homelab drifts into the dangerous half-solution: raw HTTP, random port forwards, and a promise that it is "only temporary".
+
+This section exists to keep that part boring.
+
+If the question is purely about DNS theory, routing, or network design, stay in [Networking](/pages/networking). If the question is specifically "how do I expose this Proxmox-hosted thing cleanly?" this is the right layer.
+
+## What This Section Covers
+
+- comparing the practical HTTPS paths for Proxmox-hosted services
+- deciding when Cloudflare Tunnel is the better fit than a self-hosted reverse proxy
+- deciding when wildcard certificates are enough and when individual certificates are worth the extra work
+- keeping internet-facing components in dedicated guests instead of on the Proxmox host itself[^1]
+
+## The Three Practical Paths
+
+There are three real choices here.
+
+| Path | Best When | What You Trade |
+|------|-----------|----------------|
+| [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) | you want outbound-only exposure, no port forwarding, and Cloudflare Access in front of sensitive services | Cloudflare becomes part of the trust boundary[^2] |
+| [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) | you want a self-hosted reverse proxy, wildcard certificates, and one place to front multiple services | more moving parts, plus certificate renewal discipline[^3] |
+| Traefik | you already live in a container-native world and want service discovery plus label-driven routing | a steeper operational model than most small Proxmox labs actually need[^4] |
+
+The important thing is not which tool wins a theoretical comparison. The important thing is that one exposure pattern becomes the standard shape of the lab.
+
+## Certificate Strategy
+
+The certificate question is really a maintenance question wearing a security hat.
+
+| Strategy | Best When | Tradeoff |
+|----------|-----------|----------|
+| Wildcard certificate | the lab has a handful of services and you want one renewal path | one certificate covers many subdomains, so one mistake has wider blast radius |
+| [Individual certificates with acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) | a service deserves tighter separation or you expect a larger service count over time | more certificate objects to track |
+| SAN certificates | you want a middle ground between wildcard simplicity and per-service isolation | grouped certificates are reasonable, but this wiki does not carry a first-class SAN runbook yet |
+
+For most small homelabs, wildcard is the practical default. For more sensitive or more crowded estates, individual certificates start to make more sense.
+
+## Why A Dedicated Guest Still Makes Sense
+
+Do not install internet-facing glue directly on the Proxmox host unless you have a very strong reason.
+
+That advice applies to both `cloudflared` and Nginx. Proxmox containers share the host kernel, but they still give you a much cleaner operational boundary than mixing reverse-proxy or tunnel software directly into the hypervisor's own life.[^1]
+
+The goal is simple: if the service-exposure layer breaks, you want to repair a guest, not negotiate with your hypervisor.
+
+## Recommended Starting Points
+
+Start with [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) if you want the shortest secure path and would rather avoid opening inbound firewall ports.
+
+Start with [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) if you want to keep the reverse proxy on your own infrastructure and you are comfortable managing DNS, certificates, and port forwarding.
+
+Move to [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) when wildcard certificates stop feeling like the right blast radius for the lab.
+
+## Related Topics
+
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - a workload page that now points here for the HTTPS decision instead of carrying a partial duplicate.
+- [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - another workload where exposure decisions should stay separated from the service build itself.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - Prometheus and Grafana become much safer once the exposure path is intentional.
+- [Homelab Network Architecture](/pages/networking/homelab-architecture) - the network-side context behind DNS, isolation, and where public entry points should live.
+
+[^1]: Proxmox documents LXC containers as guests that share the host kernel while remaining operationally separate from the host, which is the boundary this subsection leans on: [Proxmox Container Toolkit](https://pve.proxmox.com/pve-docs/chapter-pct.html).
+[^2]: Cloudflare's tunnel documentation and self-hosted application guidance describe the outbound connector model and the access-control layer that can sit in front of internal apps: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), [Self-hosted applications](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/).
+[^3]: Certbot's usage and renewal documentation covers the standard automated renewal workflow that makes the wildcard-cert path practical for self-hosted reverse proxies: [Certbot user guide](https://eff-certbot.readthedocs.io/en/stable/using.html).
+[^4]: Traefik's core documentation shows the dynamic, provider-driven routing model that makes it powerful but heavier than many small Proxmox-only estates need: [Traefik documentation](https://doc.traefik.io/traefik/).

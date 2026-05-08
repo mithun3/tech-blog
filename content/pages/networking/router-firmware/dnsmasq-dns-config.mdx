@@ -2,15 +2,16 @@
 title: "dnsmasq DNS Configuration"
 description: "Use dnsmasq on ASUS Merlin for local records, blocklists, per-device DNS, and safe config reloads."
 publishedAt: "2024-09-19"
+updatedAt: "2026-05-08"
 order: 5
 status: published
 ---
 
 # dnsmasq DNS Configuration
 
-Merlin lets you extend dnsmasq with custom config files, which makes local DNS and policy-based DNS much easier to manage.
+Merlin lets you extend dnsmasq with custom config files, which makes local DNS and policy-based DNS much easier to manage. On Merlin, `dnsmasq.conf.add` appends to the firmware-generated dnsmasq config instead of replacing it outright.[^1]
 
-Edit `/jffs/configs/dnsmasq.conf.add` to append custom directives to the router's dnsmasq config.
+Edit `/jffs/configs/dnsmasq.conf.add` to append custom directives to the router's dnsmasq config. If you need to rewrite generated values rather than append new lines, prefer `dnsmasq.postconf` over replacing the whole config file.[^1]
 
 ## Local Hostname Records
 
@@ -20,21 +21,27 @@ address=/nas.home/192.168.1.30
 address=/openwebui.home/192.168.1.25
 ```
 
+`address=` answers for the named domain and matching subdomains without forwarding those requests upstream.[^2]
+
 ## Block Domains Network-wide
 
 ```text
-address=/ads.example.com/127.0.0.1
-address=/tracking.example.com/127.0.0.1
+address=/ads.example.com/#
+address=/tracking.example.com/#
 
-addn-hosts=/jffs/blocklist.txt
+addn-hosts=/jffs/configs/blocklist.hosts
 ```
 
-Download a blocklist and reload dnsmasq:
+If you use `addn-hosts`, the referenced file must be in hosts-file format, not an AdGuard/uBlock filter list.[^2]
 
-```bash
-wget -O /jffs/blocklist.txt https://adguardteam.github.io/AdGuardHome/filters/filter1.txt
-service restart dnsmasq
+Example hosts-format file:
+
+```text
+0.0.0.0 telemetry.example.com
+0.0.0.0 metrics.example.net
 ```
+
+Using `#` in an `address=` rule tells dnsmasq to return the null addresses `0.0.0.0` and `::`, which is usually cleaner than forcing only IPv4 localhost.[^2]
 
 ## Per-device DNS
 
@@ -46,11 +53,18 @@ dhcp-option=tag:iot,option:dns-server,149.112.112.112
 dhcp-option=tag:guest,option:dns-server,1.1.1.1
 ```
 
+Here the `dhcp-host` entries set tags, and the matching `dhcp-option` lines apply DNS-server overrides only to clients with those tags.[^2]
+
 ## Apply Changes Safely
 
 ```bash
 ssh admin@192.168.1.1
 dnsmasq --test
-service restart dnsmasq
 tail -f /var/log/messages | grep dnsmasq
+# then restart dnsmasq from the router UI or reboot the router
 ```
+
+Do not rely on SIGHUP for `dnsmasq.conf.add` edits. dnsmasq re-reads hosts-related files on HUP, but it does not re-read the main configuration file that way, so append-file changes need a real service restart or reboot.[^2]
+
+[^1]: Merlin supports config overrides under `/jffs/configs/`; `dnsmasq.conf.add` appends to the generated dnsmasq config, and `dnsmasq.postconf` can modify the generated file before the service starts: [Asuswrt-Merlin Custom Config Files](https://github.com/RMerl/asuswrt-merlin.ng/wiki/Custom-config-files).
+[^2]: dnsmasq documents `--address`, `--addn-hosts`, `--dhcp-host`, `--dhcp-option`, `--test`, and the fact that SIGHUP re-reads hosts-related files but not the main configuration file: [dnsmasq man page](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html).

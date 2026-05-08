@@ -2,7 +2,7 @@
 title: "Pi-hole LXC On Proxmox"
 description: "Deploy a secondary Pi-hole inside a Proxmox LXC container without mixing the platform-specific build steps into the broader networking design."
 publishedAt: "2025-06-03"
-updatedAt: "2025-06-12"
+updatedAt: "2026-05-08"
 order: 1
 status: published
 ---
@@ -41,7 +41,7 @@ If your current lab already uses a different container ID, keep the working ID y
 
 ## Fastest Path: Community Script With App Defaults
 
-If you want the cleanest repeatable build, pre-write the app defaults file and then let the community script create the container with those values.
+If you want the cleanest repeatable build, pre-write the app defaults file and then let the community script create the container with those values. The current Pi-hole community script defaults to Debian 13 with a lightweight 1 vCPU / 512 MiB shape, and the shared Community-Scripts framework supports app-specific defaults files under `/usr/local/community-scripts/defaults/`.[^1][^2]
 
 ### Create The App Defaults File
 
@@ -81,7 +81,7 @@ EOF
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/pihole.sh)"
 ```
 
-Select **App Defaults** so the container uses the values you already wrote.
+Select **App Defaults** so the container uses the values you already wrote. The Community-Scripts Pi-hole installer explicitly warns that it is about to run Pi-hole's upstream installer from `https://install.pi-hole.net`, then offers to add Unbound after the base Pi-hole install completes.[^2][^3]
 
 When the script asks about Unbound, answer based on the networking design you chose on [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab):
 
@@ -112,6 +112,8 @@ pihole status
 exit  # Return to host shell
 ```
 
+After the install, point your router's DHCP clients at this Pi-hole instance or use Pi-hole's built-in DHCP only if the router cannot advertise a custom DNS server.[^4]
+
 ## Manual Path: Create The LXC Yourself
 
 If you would rather own the container creation directly, the original manual path is below.
@@ -119,20 +121,21 @@ If you would rather own the container creation directly, the original manual pat
 ### Step 1: Download The Template
 
 ```bash
-# On the Proxmox host — check available Debian templates
-pveam available | grep debian-12-standard
+# On the Proxmox host — check available Debian 13 templates
+pveam available | grep debian-13-standard
 
-# Download the template
-pveam download local debian-12-standard_12.12-1_amd64.tar.zst
+# Download the first matching Debian 13 template
+TEMPLATE=$(pveam available | awk '/debian-13-standard/ {print $2; exit}')
+pveam download local "$TEMPLATE"
 
 # Verify download
-pveam list local | grep debian
+pveam list local | grep debian-13
 ```
 
 ### Step 2: Create The Container
 
 ```bash
-pct create 102 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+pct create 102 local:vztmpl/${TEMPLATE} \
   --hostname pihole-2 \
   --password \
   --rootfs local-zfs:4 \
@@ -167,6 +170,8 @@ apt install -y curl
 curl -sSL https://install.pi-hole.net | bash
 ```
 
+Pi-hole's official docs also publish clone-first and download-first alternatives if you want to inspect the installer before running it.[^3]
+
 After installation completes:
 
 ```bash
@@ -187,8 +192,10 @@ dig @192.168.50.11 example.com
 
 # Test ad blocking
 dig @192.168.50.11 ads.google.com
-# Expected: 0.0.0.0
+# Expected: the query should be logged as blocked according to your current Pi-hole blocking mode
 ```
+
+Do not hardcode `0.0.0.0` as the only "correct" answer here. Pi-hole can legitimately return different blocked reply types depending on blocking mode and query path.[^5]
 
 ## Dashboard And Service Checks
 
@@ -220,6 +227,8 @@ pct exec 102 -- free -h
 pct exec 102 -- df -h
 ```
 
+Those commands are part of Pi-hole's supported CLI surface: `pihole status`, `pihole setpassword`, `pihole -g`, `pihole -up`, `pihole query`, `pihole repair`, and `pihole reloaddns` are all documented operational entry points.[^6]
+
 ## Proxmox-Native Backup And Rollback
 
 This is the part that properly belongs here instead of in the networking concept page.
@@ -249,9 +258,9 @@ pct restore 102 /var/lib/vz/dump/vzdump-lxc-102-*.tar.zst --storage local-zfs
 
 ### Pi-hole Settings Export
 
-Pi-hole's Teleporter export still matters even though the container itself can be snapshotted.
+Pi-hole-native data exports still matter even though the container itself can be snapshotted.
 
-Use it when you want a Pi-hole-native backup of blocklists, settings, and custom entries independent of the Proxmox backup layer.
+Use them when you want Pi-hole-level recovery independent of the Proxmox backup layer. For the long-term query database specifically, Pi-hole documents SQLite's online backup method for `/etc/pihole/pihole-FTL.db` while FTL stays running.[^7]
 
 ## Troubleshooting Checks
 
@@ -285,9 +294,20 @@ pct exec 102 -- systemctl restart pihole-FTL
 pct exec 102 -- tail -50 /var/log/pihole/FTL.log
 ```
 
+If the service is unhealthy instead of just misconfigured, Pi-hole's own repair path is `pihole repair`, and list/query refreshes are exposed through `pihole -g`, `pihole query`, and `pihole reloaddns`.[^6]
+
 ## Related Topics
 
 - [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) — the networking-side architecture, failover, and upstream DNS decisions.
 - [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) — the dedicated Pi deployment path when the DNS node should live on its own hardware.
 - [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — the broader Proxmox backup routines around containers and workloads.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where this container fits into the regular host maintenance window.
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) — the place to decide whether the admin UI should be reachable remotely and, if so, through what layer.
+
+[^1]: The shared Community-Scripts framework supports app-specific defaults files under `/usr/local/community-scripts/defaults/<app>.vars` and exposes an App Defaults install mode when that file exists: [Community-Scripts build.func](https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func).
+[^2]: The current Pi-hole community script defaults to Debian 13 with 1 vCPU, 512 MiB RAM, and a lightweight disk allocation, then hands off to the installer logic for the rest of the setup: [Community-Scripts pihole.sh](https://github.com/community-scripts/ProxmoxVE/raw/refs/heads/main/ct/pihole.sh).
+[^3]: Pi-hole's official install docs publish the `curl -sSL https://install.pi-hole.net | bash` path plus clone-first and download-first alternatives, and the Community-Scripts Pi-hole installer warns before running that upstream script unattended: [Pi-hole Installation](https://docs.pi-hole.net/main/basic-install/), [Community-Scripts pihole-install.sh](https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/pihole-install.sh).
+[^4]: Pi-hole's post-install guidance says the network should either be pointed at Pi-hole via router DHCP/DNS settings or, when the router cannot advertise a custom DNS server, Pi-hole's own DHCP service can be used instead: [Pi-hole Post-Install](https://docs.pi-hole.net/main/post-install/).
+[^5]: Pi-hole's query database docs show that blocked queries can appear with multiple reply and status types, including gravity hits, NXDOMAIN-style upstream blocks, and `0.0.0.0`/`::` replies, so a successful block is not tied to one hardcoded sinkhole IP: [Pi-hole Query Database](https://docs.pi-hole.net/database/query-database/).
+[^6]: Pi-hole documents the operational CLI surface for status, password management, gravity refreshes, updates, repair, query checks, and DNS reloads through the `pihole` command: [The `pihole` Command](https://docs.pi-hole.net/main/pihole-command/).
+[^7]: Pi-hole documents SQLite's online backup method for `/etc/pihole/pihole-FTL.db`, which lets you copy the long-term query database while FTL stays running: [Pi-hole Query Database](https://docs.pi-hole.net/database/query-database/).

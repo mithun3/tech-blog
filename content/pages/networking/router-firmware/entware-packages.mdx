@@ -2,28 +2,34 @@
 title: "Entware Packages"
 description: "Install Entware on Merlin, use opkg, auto-start packages, and fix common package lookup problems."
 publishedAt: "2024-10-06"
+updatedAt: "2026-05-08"
 order: 3
 status: published
 ---
 
 # Entware Packages
 
-Entware gives the router access to a large package ecosystem. Think of it as a lightweight package manager for services and utilities that do not ship with the firmware.
+Entware gives the router access to a large package ecosystem. It is the embedded-device package repository Merlin documents for adding software that does not ship with the firmware, and it uses `opkg` as its package manager.[^1][^2]
 
 ## Install Entware
+
+Merlin's supported path is to install Entware from `amtm` over SSH, with the package tree mounted on a USB disk that uses a native Linux filesystem such as ext2/ext3/ext4.[^2]
 
 ```bash
 ssh admin@192.168.1.1
 amtm
+# Select: fd  (optional, format the USB disk if needed)
 # Select: ep  (Install Entware)
-# Requires USB drive connected to router
 ```
+
+Do not keep ASUS DownloadMaster installed alongside Entware. Merlin's Entware docs call that combination unsupported because DownloadMaster is Optware-based.[^2]
 
 ## Common Commands
 
 ```bash
 opkg update
-opkg search nginx
+opkg list 'nginx*'
+opkg info nginx
 opkg install openssh-server
 opkg list-installed
 opkg remove openssh-server
@@ -42,11 +48,16 @@ opkg install rsync
 opkg install nmap
 ```
 
-## Auto-start Packages On Boot
+## Service Startup And Boot
+
+Most daemon-style Entware packages expose init scripts under `/opt/etc/init.d/`. Start and stop a package through its own `S*` script, and let Entware's `rc.unslung` boot chain handle normal startup instead of hardcoding one package into Merlin's `services-start` unless you truly need custom ordering.[^1][^3]
 
 ```bash
-echo "/opt/etc/init.d/S22openssh-sftp-server start" >> /jffs/scripts/services-start
-chmod +x /jffs/scripts/services-start
+ls /opt/etc/init.d
+
+# Replace S50nginx with the init script your package actually ships
+/opt/etc/init.d/S50nginx start
+/opt/etc/init.d/S50nginx stop
 ```
 
 ## Troubleshooting Package Installs
@@ -54,7 +65,15 @@ chmod +x /jffs/scripts/services-start
 ```bash
 opkg update
 opkg --version
+df -h /opt
+mount | grep ' /opt '
 
-# If Entware is not installed:
+# If Entware is not installed or /opt is missing:
 amtm
 ```
+
+If `/opt` is not mounted from the USB disk, fix storage first. Entware expects a writable `/opt` and a boot-time `rc.unslung` launch path.[^1][^2][^3]
+
+[^1]: Entware is the software repository for embedded devices, uses the `opkg` package manager, and expects a mechanism that automatically runs `/opt/etc/init.d/rc.unslung start` at boot: [Entware Wiki Home](https://github.com/Entware/Entware/wiki).
+[^2]: Merlin's Entware documentation says to install over SSH via `amtm`, use a USB disk formatted with a native Linux filesystem, and avoid DownloadMaster because it is Optware-based and incompatible with Entware: [Asuswrt-Merlin Entware](https://github.com/RMerl/asuswrt-merlin.ng/wiki/Entware).
+[^3]: Entware services are designed around `/opt/etc/init.d/rc.unslung` and package-specific init scripts under `/opt/etc/init.d/`; Merlin's scriptable boot hooks are documented separately under `/jffs/scripts`: [Entware Wiki Home](https://github.com/Entware/Entware/wiki), [Asuswrt-Merlin User Scripts](https://github.com/RMerl/asuswrt-merlin.ng/wiki/User-scripts).

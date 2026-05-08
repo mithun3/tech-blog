@@ -17,6 +17,8 @@ This page is for that later stage: when the host already exists and you need to 
 
 If you want the conceptual storage overview first, start with [Storage And Snapshots](/pages/proxmox/basics/storage-and-snapshots). This page is the operational layer on top of that model.
 
+If reused disks have not been validated yet, stop here and do that first in [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation). Pool design is not the place to discover that cheap capacity was actually deferred failure.
+
 ## Understand The Pool Shape First
 
 Proxmox's root storage is not just a single lump of disk.
@@ -290,3 +292,4 @@ zfs set compression=zstd rpool/pve-data
 - [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — what to do once the storage layout is healthy enough to trust with backups.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where scrub cadence, snapshots, and GPU-safe maintenance windows intersect.
 - [Storage And Snapshots](/pages/proxmox/basics/storage-and-snapshots) — the conceptual storage explanation before the operational layer.
+- [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the destructive disk preflight that should happen before reused drives join a real pool.

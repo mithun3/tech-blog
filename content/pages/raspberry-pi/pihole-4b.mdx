@@ -2,7 +2,7 @@
 title: "Pi-hole On Raspberry Pi 4B"
 description: "Deploy Pi-hole on a dedicated Raspberry Pi 4B with Pi OS Lite, SSH hardening, backups, and the Pi-side steps for active-passive DNS redundancy."
 publishedAt: "2026-02-01"
-updatedAt: "2026-04-13"
+updatedAt: "2026-05-08"
 order: 1
 status: published
 ---
@@ -23,11 +23,11 @@ What this page covers is the dedicated-Pi path: Raspberry Pi OS Lite, SSH access
 ### Hardware Required
 
 ```text
-✅ Raspberry Pi 4B (4GB minimum, 8GB recommended for Pi-hole)
-✅ 32GB+ microSD card (UHS-U3 or faster for reliability)
-✅ Wired Ethernet connection (gigabit, avoid Wi-Fi)
-✅ Power supply: USB-C 5.1V 3A minimum
-✅ Case with passive cooling (Pi-hole runs 24/7)
+✅ Raspberry Pi 4B
+✅ 8 GB or larger microSD card for Raspberry Pi OS Lite
+✅ Wired Ethernet connection when this Pi will be primary DNS
+✅ Power supply: 5 V at 3 A for Raspberry Pi 4B
+✅ Case with basic cooling
 ✅ Another computer to prepare the microSD card
 ```
 
@@ -53,7 +53,7 @@ If reliability matters more than cost, an SSD is still better than microSD. The 
 
 ### Use Raspberry Pi Imager
 
-Download it from https://www.raspberrypi.com/software/
+Download it from https://www.raspberrypi.com/software/.[^3]
 
 In the imager:
 
@@ -61,13 +61,14 @@ In the imager:
 2. Choose OS: Raspberry Pi OS Lite (64-bit).
 3. Choose storage: your microSD card.
 
-Then configure the advanced options before writing.
+Then configure the advanced options before writing. Imager can preconfigure hostname, the local admin user, Wi-Fi, and SSH before first boot, which is the cleanest way to build a headless Pi-hole node.[^3][^4]
 
 ### Recommended Imager Settings
 
 - Hostname: `pihole`
 - Enable SSH: yes
 - Prefer public-key authentication if you already use SSH keys
+- Username: choose the admin user you actually plan to keep using; current Raspberry Pi OS images are meant to be customised at install time rather than relying on an assumed default account.[^4]
 - Wi-Fi: leave unconfigured if Ethernet is the plan
 - Timezone and keyboard: set correctly now so logs and cron behave sanely later
 
@@ -78,7 +79,7 @@ The source notes were explicit here for good reason: wired Ethernet is the right
 Find the Pi's IP address from the router or with a subnet scan, then connect:
 
 ```bash
-ssh pi@<pihole-ip>
+ssh <admin-user>@<pihole-ip>
 ```
 
 Update the system before installing Pi-hole:
@@ -94,6 +95,12 @@ Use the official installer:
 
 ```bash
 curl -sSL https://install.pi-hole.net | bash
+```
+
+After installation, add your normal admin user to the `pihole` group so Pi-hole v6 CLI commands can authenticate cleanly without prompting every time in a fresh shell.[^5][^6]
+
+```bash
+sudo usermod -aG pihole $USER
 ```
 
 During the installer:
@@ -113,7 +120,7 @@ The installer asks about Pi-hole privacy mode. For a personal homelab, the sensi
 | Hide Domains and Clients | shared household where visibility is sensitive | Reasonable compromise |
 | Anonymous Mode | maximum privacy, minimal diagnostics | Avoid unless you really mean it |
 
-You can change it later in the web UI under `Settings -> Privacy`.
+You can change it later in the web UI under `Settings -> Privacy`.[^7]
 
 At the end of installation, save the admin password the installer prints.
 
@@ -127,7 +134,7 @@ The cleanest setup is still:
 - Pi-hole handles DNS
 - router advertises the Pi-hole IP to clients
 
-Use DHCP reservation or MAC binding in the router so the Pi always gets the same address.
+Use DHCP reservation or MAC binding in the router so the Pi always gets the same address. Raspberry Pi's own networking guidance recommends router-side DHCP reservation over manually pinning a static IP on the device for service hosts.[^8]
 
 Then set the router DNS values to:
 
@@ -142,20 +149,30 @@ nslookup google.com
 
 ### Advanced: Pi-hole As DHCP Server
 
-Only do this if the router cannot hand out the DNS settings you need.
+Only do this if the router cannot hand out the DNS settings you need. Disable DHCP on the router first, then configure Pi-hole's built-in DHCP from the web UI or in `/etc/pihole/pihole.toml`.[^5][^7]
 
-```bash
-pihole -a -i local <pihole-ip> <gateway-ip> <netmask>
+```toml
+[dhcp]
+active = true
+start = "192.168.50.100"
+end = "192.168.50.199"
+router = "192.168.50.1"
+netmask = "255.255.255.0"
+leaseTime = "24h"
 ```
+
+Pi-hole's FTL docs prefer the web UI, API, or CLI when possible because those paths validate settings before writing them. Manual edits still work, but treat them like infrastructure changes and restart FTL afterward.[^7]
 
 ## Security Hardening
 
 ### Move The Web UI To A Non-Default Port
 
+Changing the port reduces noise, not exposure. Treat it as housekeeping, not as a substitute for firewall rules.
+
 Edit the Pi-hole config:
 
 ```bash
-ssh raspi@192.168.50.10
+ssh <admin-user>@<pihole-ip>
 
 sudo nano /etc/pihole/pihole.toml
 ```
@@ -170,33 +187,27 @@ port = "31415s"
 Then restart FTL:
 
 ```bash
-# SSH into the Pi
-ssh root@192.168.50.10
-
-# Restart the web service
-systemctl restart pihole-FTL
-
-# Check if port 31415 is listening
-ss -tulnp | grep ':31415'
-
-# View recent errors
-tail -50 /var/log/pihole/FTL.log
+sudo systemctl restart pihole-FTL
+ss -tulnp | grep ':8080'
+sudo tail -50 /var/log/pihole/FTL.log
+sudo pihole status
 ```
 
 ### Change The Admin Password
 
-Do it immediately after installation from the web UI under `Settings -> Admin`.
+Do it immediately after installation:
+
+```bash
+sudo pihole setpassword
+```
 
 ### Enable UFW
 
 ```bash
-# SSH into Pi-hole
-ssh pi@<pihole-ip>
-
 # Install UFW
 sudo apt install ufw -y
 
-# Initialize firewall (reset to defaults)
+# Initialize firewall
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
@@ -205,18 +216,18 @@ sudo ufw allow 22/tcp    # SSH (enable before activating!)
 sudo ufw allow 53/tcp    # DNS TCP
 sudo ufw allow 53/udp    # DNS UDP
 sudo ufw allow 67/udp    # DHCP (if using Pi-hole DHCP)
-sudo ufw allow 68/udp    # DHCP client
-sudo ufw allow 80/tcp    # HTTP web UI
-sudo ufw allow 443/tcp   # HTTPS web UI (optional)
+sudo ufw allow 8080/tcp  # Web UI for the example above
 
 # Enable firewall
 sudo ufw enable
 
 # Verify
-sudo ufw status
+sudo ufw status verbose
 ```
 
 ### Move SSH To Keys
+
+If you are imaging from scratch, Imager can preload your public key and avoid a password-authenticated first login entirely. If you are converting an existing host, move to keys before you disable password auth.[^4][^9]
 
 From your computer:
 
@@ -251,8 +262,6 @@ sudo systemctl restart ssh
 ### Add `fail2ban`
 
 ```bash
-ssh pi@<pihole-ip>
-
 # Install fail2ban
 sudo apt install fail2ban -y
 
@@ -282,19 +291,14 @@ sudo systemctl enable fail2ban
 sudo fail2ban-client status sshd
 ```
 
-### Enable Automatic Security Updates
+### Keep Raspberry Pi OS Updated
 
 ```bash
-# Enable automatic security updates
-sudo apt install unattended-upgrades -y
-sudo dpkg-reconfigure -plow unattended-upgrades
-
-# Verify
-sudo nano /etc/apt/apt.conf.d/50unattended-upgrades
-
-# Enable
-sudo systemctl enable unattended-upgrades
+sudo apt update
+sudo apt full-upgrade -y
 ```
+
+Raspberry Pi's security guidance is simple here: stay current on the latest security fixes, and keep SSH and firewall rules explicit instead of assuming the defaults are "close enough."[^9]
 
 ## Performance And Storage Hygiene
 
@@ -308,24 +312,26 @@ df -h
 du -sh /etc/pihole/
 
 # Check logs
-tail -f /var/log/pihole.log
+tail -f /var/log/pihole/pihole.log
 ```
 
 If you want to tune the DNS cache:
 
 ```bash
-# Edit dnsmasq config
-sudo nano /etc/dnsmasq.d/05-pihole-custom-cname.conf
-
-# Add cache optimization:
-cache-size=10000
-
-# Also add:
-dns-forward-max=5000
-
-# Restart dnsmasq
-sudo systemctl restart dnsmasq
+sudo nano /etc/pihole/pihole.toml
 ```
+
+```toml
+[dns.cache]
+size = 10000
+```
+
+```bash
+sudo systemctl restart pihole-FTL
+sudo pihole status
+```
+
+Pi-hole v6 keeps its primary DNS settings in `/etc/pihole/pihole.toml`. Avoid legacy `/etc/dnsmasq.d` drop-ins unless you intentionally enable `misc.etc_dnsmasq_d`, because that path is off by default in v6. If you truly need raw dnsmasq directives, use `misc.dnsmasq_lines` and keep the change set small.[^7]
 
 Watch resource usage directly:
 
@@ -345,75 +351,59 @@ vcgencmd measure_temp
 Create a simple backup script on the Pi:
 
 ```bash
-ssh pi@<pihole-ip>
-
-# Create backup directory
-sudo mkdir -p /home/pi/pihole-backups
-
-# Create backup script
-sudo nano /home/pi/backup-pihole.sh
+mkdir -p "$HOME/pihole-backups"
+nano "$HOME/backup-pihole.sh"
 ```
 
 Use this script:
 
 ```bash
-#!/bin/bash
+#!/bin/sh
 
-# Pi-hole Backup Script
-BACKUP_DIR="/home/pi/pihole-backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/pihole-backup-$DATE.tar.gz"
+set -eu
 
-echo "[$(date)] Starting Pi-hole backup..."
+STAMP=$(date +%Y%m%d_%H%M%S)
+DEST="$HOME/pihole-backups/$STAMP"
 
-# Backup critical files
-sudo tar -czf "$BACKUP_FILE" \
-  /etc/pihole/ \
-  /etc/dnsmasq.d/ \
-  /home/pi/.ssh/ \
-  2>&1 | tee -a "$BACKUP_DIR/backup.log"
+mkdir -p "$DEST"
 
-# Verify backup
-if [ -f "$BACKUP_FILE" ]; then
-  echo "[$(date)] ✅ Backup completed: $BACKUP_FILE"
-  
-  # Keep only last 7 backups (remove oldest)
-  ls -t "$BACKUP_DIR"/pihole-backup-*.tar.gz | tail -n +8 | xargs rm -f
-else
-  echo "[$(date)] ❌ Backup failed!"
-  exit 1
-fi
+sudo sqlite3 /etc/pihole/pihole-FTL.db ".backup '$DEST/pihole-FTL.db'"
+sudo cp /etc/pihole/pihole.toml /etc/pihole/gravity.db "$DEST"/
+cp -a "$HOME/.ssh" "$DEST/ssh-home"
 ```
+
+The important difference in Pi-hole v6 is that the long-term query database should be backed up with SQLite's online backup method while FTL is still running. `pihole.toml` and `gravity.db` are regular file copies.[^10][^11]
 
 Make it executable and schedule it:
 
 ```bash
-# Make executable
-sudo chmod +x /home/pi/backup-pihole.sh
+chmod +x "$HOME/backup-pihole.sh"
 
 # Edit crontab
-sudo crontab -e
+crontab -e
 
 # Add this line (backs up at 2 AM daily):
-0 2 * * * /home/pi/backup-pihole.sh
+0 2 * * * /home/<admin-user>/backup-pihole.sh
 ```
 
 To restore:
 
 ```bash
-# SSH into Pi
-ssh pi@<pihole-ip>
+STAMP=YYYYMMDD_HHMMSS
 
-# Extract backup
-sudo tar -xzf /home/pi/pihole-backups/pihole-backup-YYYYMMDD_HHMMSS.tar.gz -C /
-
-# Restart Pi-hole services
+sudo cp "$HOME/pihole-backups/$STAMP/pihole.toml" /etc/pihole/pihole.toml
+sudo cp "$HOME/pihole-backups/$STAMP/gravity.db" /etc/pihole/gravity.db
+sudo cp "$HOME/pihole-backups/$STAMP/pihole-FTL.db" /etc/pihole/pihole-FTL.db
 sudo systemctl restart pihole-FTL
-sudo systemctl restart dnsmasq
-sudo systemctl restart lighttpd
+sudo pihole status
+```
 
-# Verify
-curl http://localhost/admin/
+If `gravity.db` is actually damaged rather than just stale, use Pi-hole's built-in recovery path instead of trying to hand-repair it:
+
+```bash
+sudo pihole -g -r recover
+# or, as a last resort:
+sudo pihole -g -r recreate
 ```
 
 ## High Availability From The Raspberry Pi Side
@@ -438,93 +428,54 @@ Keep DHCP on the router. That remains the cleanest model for this lab.
 On both Pi-hole instances:
 
 ```bash
-sudo nano /etc/dnsmasq.d/05-pihole-custom-cname.conf
-
-# Add this line:
-local-ttl=300
-
-# Also add:
-min-cache-ttl=300
-max-cache-ttl=3600
-
-# Save and restart
-sudo systemctl restart dnsmasq
+sudo nano /etc/pihole/pihole.toml
 ```
 
-That keeps cache behavior sane while still allowing clients to recover within a few minutes when the primary disappears.
-
-### Install `gravity-sync` On The Secondary Pi-Based Node
-
-If the second instance is also Pi-based, the Pi-side sync workflow is:
+```toml
+[misc]
+dnsmasq_lines = [
+  "local-ttl=300",
+  "min-cache-ttl=300",
+  "max-cache-ttl=3600"
+]
+```
 
 ```bash
-# SSH into secondary
-ssh pi@pihole-2-ip
-
-# Download and install gravity-sync
-cd /opt
-sudo git clone https://github.com/vmstan/gravity-sync.git
-cd gravity-sync
-sudo chmod +x gravity-sync.sh
-
-# Create symlink
-sudo ln -s /opt/gravity-sync/gravity-sync.sh /usr/local/bin/gravity-sync
+sudo systemctl restart pihole-FTL
 ```
 
-Set up SSH keys from primary to secondary:
+That keeps cache behavior sane while still allowing clients to recover within a few minutes when the primary disappears. These are advanced dnsmasq lines in Pi-hole v6, so keep them deliberate and identical across both nodes.[^7]
 
-```bash
-# Generate SSH key with no passphrase (for automation)
-ssh-keygen -t ed25519 -f ~/.ssh/gravity-sync -N "" -C "gravity-sync"
+### Do Not Start New Pi-hole 6 Pairs On `gravity-sync`
 
-# Copy to secondary
-ssh-copy-id -i ~/.ssh/gravity-sync.pub pi@192.168.x.11
-```
+Do not build a new Pi-hole 6 redundancy plan around `gravity-sync`. The project was retired in July 2024, archived by its maintainer, and the final release notes explicitly say version `4.0.7` should continue to work with Pi-hole 5.x, but not with Pi-hole 6+ because of architecture changes.[^12]
 
-Initialize:
+For Pi-hole 6 pairs, keep the sync story explicit:
 
-```bash
-# Run interactive setup
-sudo gravity-sync config
-```
-
-Test the pull:
-
-```bash
-# Manual sync (pull from primary)
-sudo gravity-sync pull
-```
-
-Automate it hourly:
-
-```bash
-# Edit crontab
-sudo crontab -e
-
-# Add this line (sync every hour):
-0 * * * * /usr/local/bin/gravity-sync pull >/var/log/gravity-sync.log 2>&1
-```
+- document local DNS records, DHCP scopes, and upstream resolvers in one source of truth
+- reproduce configuration changes on the secondary node immediately after changing the primary
+- if you automate sync, use tooling you understand and test against Pi-hole 6 instead of inheriting an archived project
 
 ### Failover Test
 
 To verify the active-passive model really works:
 
 ```bash
-# On the Raspberry Pi — temporarily stop Pi-hole
-pihole disable 120
+# On the Raspberry Pi primary
+sudo systemctl stop pihole-FTL
 
-# From a client — DNS should still resolve via the secondary
+# From a client, DNS should still resolve via the secondary
 nslookup google.com
 ```
 
-Or explicitly stop the services on the primary during a controlled test:
+Then restore the primary and confirm it is healthy again:
 
 ```bash
-sudo systemctl stop pihole-FTL
-sudo systemctl stop dnsmasq
+sudo systemctl start pihole-FTL
+sudo pihole status
 ```
 
-Then confirm clients fail over to the secondary and return to the primary when it comes back.
+`pihole disable` only turns blocking off; it does not take DNS down. For an actual failover test, stop `pihole-FTL` and force the clients to use the secondary resolver.[^6][^10]
 
 ### Monitor HA Health
 
@@ -595,6 +546,19 @@ sudo mount -a
 sudo cp -r /etc/pihole /mnt/pihole-ssd/
 sudo mount --bind /mnt/pihole-ssd/pihole /etc/pihole
 ```
+
+[^1]: Raspberry Pi OS Lite needs at least 8 GB of storage to get started, while Raspberry Pi's getting-started guide recommends choosing more space for growth: [Raspberry Pi Getting Started](https://www.raspberrypi.com/documentation/computers/getting-started.html).
+[^2]: Raspberry Pi's hardware guidance recommends wired Ethernet when available for headless setups and specifies that Raspberry Pi 4 Model B needs a 5 V / 3 A USB-C power supply: [Raspberry Pi Getting Started](https://www.raspberrypi.com/documentation/computers/getting-started.html).
+[^3]: Raspberry Pi Imager is the official path for writing Raspberry Pi OS images and preconfiguring a headless system: [Raspberry Pi Software](https://www.raspberrypi.com/software/), [Raspberry Pi Imager docs](https://www.raspberrypi.com/documentation/computers/getting-started.html#imager-install).
+[^4]: Imager's OS customisation flow can preconfigure hostname, localisation, the admin user, Wi-Fi, and SSH, including public-key authentication: [Raspberry Pi Imager docs](https://www.raspberrypi.com/documentation/computers/getting-started.html#imager-install).
+[^5]: Pi-hole's official post-install docs say the preferred model is to have the router hand out Pi-hole as DNS, using Pi-hole's built-in DHCP only when the router cannot advertise the DNS server you want: [Pi-hole Post-Install](https://docs.pi-hole.net/main/post-install/).
+[^6]: Pi-hole v6 CLI authentication can be simplified by adding your local user to the `pihole` group: [Pi-hole Post-Install](https://docs.pi-hole.net/main/post-install/).
+[^7]: Pi-hole v6 stores its main configuration in `/etc/pihole/pihole.toml`; the docs prefer web UI/API/CLI changes when possible, document the `[dhcp]` and `[webserver]` sections, and warn that `misc.etc_dnsmasq_d` defaults to `false` while `misc.dnsmasq_lines` is the advanced path for raw dnsmasq directives: [Pi-hole FTL Configuration Reference](https://docs.pi-hole.net/ftldns/configfile/).
+[^8]: Raspberry Pi networking guidance recommends DHCP reservation on the router for hosts that need a stable address, rather than manually pinning a static IP on the device itself: [Raspberry Pi Configuration](https://www.raspberrypi.com/documentation/computers/configuration.html#networking).
+[^9]: Raspberry Pi's operational security guidance covers key-based SSH hardening, UFW, and Fail2ban, including the warning to allow SSH before enabling the firewall: [Raspberry Pi Security Guidance](https://www.raspberrypi.com/documentation/computers/configuration.html#operational-security).
+[^10]: Pi-hole documents the supported admin commands for status, password changes, repairs, reloads, and updates through the `pihole` CLI wrapper: [The `pihole` command](https://docs.pi-hole.net/main/pihole-command/).
+[^11]: Pi-hole's query database docs describe SQLite online backup for `/etc/pihole/pihole-FTL.db`, and the database recovery docs document `pihole -g -r recover` and `pihole -g -r recreate` for `gravity.db`: [Pi-hole Query Database](https://docs.pi-hole.net/database/query-database/), [Pi-hole Database Recovery](https://docs.pi-hole.net/database/domain-database/recovery/).
+[^12]: `gravity-sync` was retired in July 2024, archived by its maintainer, and the maintainer states the final release only continues to work with Pi-hole 5.x, not Pi-hole 6+: [vmstan/gravity-sync](https://github.com/vmstan/gravity-sync).
 
 ## Related Topics
 

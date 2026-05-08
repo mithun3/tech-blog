@@ -1,0 +1,176 @@
+---
+title: "Container Network Throttling"
+description: "Use `tc` to rate-limit specific Proxmox LXC guests when large downloads or model pulls should not consume the entire link."
+publishedAt: "2025-02-07"
+order: 6
+status: published
+---
+
+# Container Network Throttling
+
+Sometimes the problem is not that a container is broken.
+
+It is that the container is working exactly as asked and taking the whole pipe with it.
+
+This page is for those moments: large model pulls, package downloads, or one-off data transfers where you want the guest to keep moving without letting it consume the entire connection.
+
+The control lives on the Proxmox host because that is where the LXC veth interface lives.
+
+## Identify The Container Interface First
+
+On the Proxmox host:
+
+```bash
+ip link show | grep veth
+```
+
+Example output:
+
+```text
+13: veth100i0@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+17: veth101i0@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+19: veth102i0@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+20: veth201i0@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+```
+
+The naming pattern is usually `veth<CTID>i0`.
+
+- CT 100 -> `veth100i0`
+- CT 101 -> `veth101i0`
+- CT 102 -> `veth102i0`
+- CT 201 -> `veth201i0`
+
+## Apply A Throttle With `tc`
+
+Run this on the Proxmox host.
+
+```bash
+# Throttle CT 102 (llama-cpp) to 400 kB/s (= 3200 kbit/s)
+tc qdisc add dev veth102i0 root tbf rate 3200kbit burst 32kbit latency 400ms
+```
+
+Common conversions:
+
+| Speed | kbit/s | Use Case |
+|-------|--------|----------|
+| 20 kB/s | 160 kbit/s | very minimal |
+| 100 kB/s | 800 kbit/s | light throttle |
+| 400 kB/s | 3200 kbit/s | moderate throttle |
+| 1 MB/s | 8000 kbit/s | light cap for large downloads |
+| 5 MB/s | 40000 kbit/s | minimal impact |
+
+Rule of thumb: `kB/s x 8 = kbit/s`.
+
+## Verify The Rule
+
+```bash
+tc qdisc show dev veth102i0
+```
+
+Expected output:
+
+```text
+qdisc tbf 8001: dev veth102i0 root refcnt 2 rate 3200Kbit burst 32Kb lat 400.0ms
+```
+
+If you want to watch the traffic from inside the guest:
+
+```bash
+# Inside CT 102
+apt install iftop
+iftop -i eth0
+```
+
+## Reset To Full Speed
+
+```bash
+# Reset CT 102 to full bandwidth
+tc qdisc del dev veth102i0 root
+```
+
+Check that it is gone:
+
+```bash
+tc qdisc show dev veth102i0
+```
+
+## Common Scenarios
+
+### Throttle llama.cpp Downloads To 400 kB/s
+
+```bash
+# Apply
+tc qdisc add dev veth102i0 root tbf rate 3200kbit burst 32kbit latency 400ms
+
+# Monitor (from inside container)
+# Inside CT 102: iftop -i eth0
+
+# Remove when done
+tc qdisc del dev veth102i0 root
+```
+
+### Limit Open WebUI To 1 MB/s
+
+```bash
+# Apply
+tc qdisc add dev veth100i0 root tbf rate 8000kbit burst 32kbit latency 400ms
+
+# Remove
+tc qdisc del dev veth100i0 root
+```
+
+### Light Throttle On Ollama To 5 MB/s
+
+```bash
+# Apply
+tc qdisc add dev veth101i0 root tbf rate 40000kbit burst 32kbit latency 400ms
+
+# Remove
+tc qdisc del dev veth101i0 root
+```
+
+## Bidirectional Limiting With `wondershaper`
+
+If you need a quick down/up cap rather than the simple `tc tbf` shape above:
+
+```bash
+# Using wondershaper (if installed on Proxmox host)
+apt install wondershaper
+
+# Limit to 5 MB/s down, 2 MB/s up
+wondershaper veth102i0 5000 2000
+
+# Check status
+wondershaper veth102i0
+
+# Remove
+wondershaper clear veth102i0
+```
+
+## Troubleshooting
+
+If the throttle does not seem to apply:
+
+- verify the interface name with `ip link show | grep veth`
+- check whether a qdisc is already present
+- remove any conflicting root qdisc before reapplying
+
+```bash
+tc qdisc show dev veth102i0
+```
+
+```bash
+# Force remove
+tc qdisc del dev veth102i0 root force
+```
+
+```bash
+# Show all throttle rules
+tc qdisc show
+```
+
+## Related Topics
+
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - where one-off operational controls like this often get used during busy maintenance windows.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - a common place to use throttling during large model downloads.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - another workload where large pulls can monopolize the link if left uncapped.

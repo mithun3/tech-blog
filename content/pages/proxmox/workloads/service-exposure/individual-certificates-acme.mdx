@@ -1,0 +1,360 @@
+---
+title: "Individual Certificates On Proxmox With acme.sh"
+description: "Issue and install one certificate per service with acme.sh when a wildcard certificate no longer feels like the right blast radius for the lab."
+publishedAt: "2025-01-09"
+order: 4
+status: published
+---
+
+# Individual Certificates On Proxmox With acme.sh
+
+This is the maximum-separation certificate path.
+
+Instead of one wildcard certificate covering the whole service family, each service gets its own certificate and key pair. That raises the management overhead, but it also narrows the operational and security blast radius when something goes wrong.
+
+This page assumes the reverse-proxy guest already exists. If it does not, build that first in [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc).
+
+## Why Use Individual Certificates
+
+- certificate compromise affects one service rather than every subdomain
+- renewal failures are isolated to one service
+- larger estates are easier to rotate incrementally than with one giant wildcard
+
+The tradeoff is straightforward: more certificate objects, more files, and more policy to keep tidy.
+
+## Architecture
+
+```text
+openwebui.sysya.org -> /etc/nginx/ssl/individual/openwebui.{crt,key}
+pihole.sysya.org    -> /etc/nginx/ssl/individual/pihole.{crt,key}
+llamacpp.sysya.org  -> /etc/nginx/ssl/individual/llamacpp.{crt,key}
+nextcloud.sysya.org -> /etc/nginx/ssl/individual/nextcloud.{crt,key}
+```
+
+Nginx then selects the right certificate per hostname through SNI.
+
+## Install `acme.sh`
+
+Inside the Nginx proxy guest:
+
+```bash
+# Download and install acme.sh (no root required, but we use root for simplicity)
+curl https://get.acme.sh | sh -s email=admin@example.com
+
+# Verify installation
+~/.acme.sh/acme.sh --version
+
+# Output: acme.sh v3.0.x (or higher)
+```
+
+## Configure DNS Provider Access
+
+Cloudflare example:
+
+```bash
+# Set Cloudflare API credentials
+# Get your API token from: dash.cloudflare.com/profile/api/tokens
+export CF_Key="your-cloudflare-api-key"
+export CF_Email="your-email@cloudflare.com"
+
+# Save credentials for future use
+echo 'export CF_Key="your-key"' >> ~/.bashrc
+echo 'export CF_Email="your-email"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Other providers follow the same pattern with different environment variables.
+
+## Issue One Certificate Per Service
+
+```bash
+#!/bin/bash
+# File: /root/issue-individual-certs.sh
+
+# Define your services
+SERVICES=(
+    "openwebui"
+    "pihole"
+    "llamacpp"
+    "nextcloud"
+    "syncthing"
+    "pgadmin"
+    "portainer"
+    "plex"
+)
+
+# Issue certificate for each service
+for service in "${SERVICES[@]}"; do
+    echo "=== Issuing certificate for $service.sysya.org ==="
+    ~/.acme.sh/acme.sh --issue \
+        -d $service.sysya.org \
+        --dns dns_cloudflare \
+        --keylength ec-256  # ECDSA: smaller & faster than RSA
+
+    # Check if successful
+    if [ $? -eq 0 ]; then
+        echo "✓ Certificate issued for $service.sysya.org"
+    else
+        echo "✗ Failed to issue certificate for $service.sysya.org"
+    fi
+done
+
+echo ""
+echo "=== All certificates issued ==="
+~/.acme.sh/acme.sh --list
+```
+
+Run it:
+
+```bash
+chmod +x /root/issue-individual-certs.sh
+/root/issue-individual-certs.sh
+
+# Output:
+# === Issuing certificate for openwebui.sysya.org ===
+# [Sun Feb 11 10:30:45 UTC 2026] Issuing certificate for openwebui.sysya.org
+# [Sun Feb 11 10:30:52 UTC 2026] Certificate successfully issued!
+# ✓ Certificate issued for openwebui.sysya.org
+# ... (repeats for each service)
+```
+
+```bash
+~/.acme.sh/acme.sh --list
+
+# Output shows all issued certificates with details
+```
+
+## Install The Certificates Into Nginx
+
+```bash
+#!/bin/bash
+# File: /root/install-individual-certs.sh
+
+SERVICES=(
+    "openwebui"
+    "pihole"
+    "llamacpp"
+    "nextcloud"
+    "syncthing"
+    "pgadmin"
+    "portainer"
+    "plex"
+)
+
+# Create SSL directory
+mkdir -p /etc/nginx/ssl/individual
+
+# Install each certificate
+for service in "${SERVICES[@]}"; do
+    echo "=== Installing certificate for $service.sysya.org ==="
+
+    ~/.acme.sh/acme.sh --install-cert \
+        -d $service.sysya.org \
+        --key-file /etc/nginx/ssl/individual/$service.key \
+        --fullchain-file /etc/nginx/ssl/individual/$service.crt \
+        --reloadcmd "systemctl reload nginx"
+
+    # Set permissions
+    chmod 644 /etc/nginx/ssl/individual/$service.crt
+    chmod 600 /etc/nginx/ssl/individual/$service.key
+
+    echo "✓ $service certificate installed"
+done
+
+echo ""
+echo "=== All certificates installed ==="
+ls -lh /etc/nginx/ssl/individual/
+```
+
+```bash
+chmod +x /root/install-individual-certs.sh
+/root/install-individual-certs.sh
+
+# Verify certificates installed
+ls -lh /etc/nginx/ssl/individual/
+
+# Output:
+# -rw-r--r-- openwebui.crt
+# -rw------- openwebui.key
+# -rw-r--r-- pihole.crt
+# -rw------- pihole.key
+# ... (one pair per service)
+```
+
+## Create The Nginx Config For Per-Service Certificates
+
+```bash
+cat > /etc/nginx/sites-available/individual-services.conf << 'EOF'
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Individual certificates for each service
+
+server {
+    listen 443 ssl http2;
+    server_name openwebui.sysya.org;
+
+    ssl_certificate /etc/nginx/ssl/individual/openwebui.crt;
+    ssl_certificate_key /etc/nginx/ssl/individual/openwebui.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://192.168.50.30:42;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name pihole.sysya.org;
+
+    ssl_certificate /etc/nginx/ssl/individual/pihole.crt;
+    ssl_certificate_key /etc/nginx/ssl/individual/pihole.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://192.168.50.10:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name llamacpp.sysya.org;
+
+    ssl_certificate /etc/nginx/ssl/individual/llamacpp.crt;
+    ssl_certificate_key /etc/nginx/ssl/individual/llamacpp.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://192.168.50.45:65535;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+}
+
+# Add remaining services following same pattern...
+# (nextcloud, syncthing, pgadmin, portainer, plex, etc.)
+
+EOF
+
+# Enable the configuration
+ln -sf /etc/nginx/sites-available/individual-services.conf /etc/nginx/sites-enabled/
+
+# Test and reload
+nginx -t && systemctl reload nginx
+```
+
+## Renewal And Monitoring
+
+`acme.sh` installs its own renewal automation. Verify it first:
+
+```bash
+# Check cron job installed
+crontab -l | grep acme.sh
+
+# Output:
+# 0 0 * * * "/root/.acme.sh"/acme.sh --cron --home "/root/.acme.sh" > /dev/null 2>&1
+
+# Renewal happens daily (only actual renewal if cert within 30 days)
+```
+
+If you prefer systemd timers:
+
+```bash
+# Create service
+cat > /etc/systemd/system/acme-renew.service << 'EOF'
+[Unit]
+Description=ACME Certificate Renewal
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/.acme.sh/acme.sh --cron --home /root/.acme.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+# Create timer
+cat > /etc/systemd/system/acme-renew.timer << 'EOF'
+[Unit]
+Description=Daily ACME Certificate Renewal
+Requires=acme-renew.service
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=1d
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Enable and start
+systemctl daemon-reload
+systemctl enable acme-renew.timer
+systemctl start acme-renew.timer
+
+# Verify
+systemctl list-timers acme-renew.timer
+```
+
+Check expiry whenever you want a quick sanity pass:
+
+```bash
+# List all certificates with expiry
+~/.acme.sh/acme.sh --list
+
+# Check specific certificate
+openssl x509 -enddate -noout -in /etc/nginx/ssl/individual/openwebui.crt
+
+# Check all certificate expiry dates
+for cert in /etc/nginx/ssl/individual/*.crt; do
+    echo "$(basename $cert): $(openssl x509 -enddate -noout -in $cert)"
+done
+```
+
+## Related Topics
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the subsection overview and decision hub.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the wildcard-certificate path that usually comes first.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the no-port-forwarding alternative.
+
+[^1]: `acme.sh` is the project's documented shell-based ACME client, and its native multi-certificate workflow is the reason it fits this pattern well: [acme.sh](https://github.com/acmesh-official/acme.sh).

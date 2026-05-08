@@ -1,0 +1,588 @@
+---
+title: "Nginx Reverse Proxy LXC On Proxmox"
+description: "Run a dedicated Nginx reverse proxy in Proxmox, issue a wildcard certificate, and front multiple internal services behind one stable HTTPS entry point."
+publishedAt: "2024-12-16"
+order: 3
+status: published
+---
+
+# Nginx Reverse Proxy LXC On Proxmox
+
+This is the self-hosted path.
+
+You keep the reverse proxy on your own infrastructure, terminate TLS in one dedicated guest, and let internal services stay internal. It takes more setup than Cloudflare Tunnel, but it also keeps the edge layer inside the homelab and gives you one stable front door for everything that deserves a hostname.
+
+If you do not want to forward inbound ports or maintain certificates yourself, use [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead.
+
+## Recommended Container Shape
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| CT ID | **200** | dedicated proxy guest |
+| Hostname | `nginx-proxy` | descriptive role |
+| Cores | **2** | enough for light reverse-proxy work |
+| RAM | **512 MB** | suitable for Nginx plus Certbot |
+| Disk | **5 GB** | configs, logs, certificate material |
+| Bridge | `vmbr0` | same network as the services |
+| IPv4 | **192.168.50.60/24** | stable internal proxy address |
+| Unprivileged | **Yes** | cleaner separation from the host |
+
+## Create The LXC
+
+On the Proxmox host:
+
+```bash
+# Create nginx-proxy container
+# IMPORTANT: Replace STORAGE_BACKEND with your actual backend name (local-zfs, local-lvm, local, etc.)
+
+pct create 200 local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst \
+  --hostname nginx-proxy \
+  --cores 1 \
+  --memory 512 \
+  --swap 512 \
+  --rootfs local-zfs:5 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.200/24,gw=192.168.50.1 \
+  --unprivileged 1 \
+  --features nesting=1,keyctl=1 \
+  --onboot 1 \
+  --password '<your-root-password>'
+```
+
+Then start it:
+
+```bash
+# Start the container
+pct start 200
+
+# Verify it's running
+pct status 200
+
+# Expected output: Status: running
+```
+
+Use a full stop/start cycle for config-sensitive changes later rather than relying on `pct reboot`.
+
+## Enable SSH And Install Nginx
+
+```bash
+# Enter the LXC container directly from Proxmox host
+ssh root@<proxmox-ip>
+pct enter 200
+
+# Inside the container:
+systemctl start ssh
+systemctl enable ssh
+
+# Reset root password
+passwd root
+
+# Configure SSH to allow root password login
+nano /etc/ssh/sshd_config
+# Ensure these lines are uncommented:
+# PermitRootLogin yes
+# PasswordAuthentication yes
+# PubkeyAuthentication yes
+
+# Restart SSH and verify
+systemctl restart ssh
+ss -tlnp | grep ssh
+# Should show: tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN
+
+exit
+```
+
+Inside the guest, install the reverse-proxy stack:
+
+```bash
+# Update package lists
+apt update
+
+# Install Nginx full + Certbot
+apt install -y nginx-full certbot python3-certbot-nginx curl
+
+# Verify installation
+nginx -v
+certbot --version
+
+# Output should show something similar to:
+# nginx version: nginx/1.22.1
+# certbot 2.1.0
+```
+
+## Verify Internal Reachability First
+
+```bash
+# Test reachability to your services
+curl -v http://192.168.50.30:42    # OpenWebUI
+curl -v http://192.168.50.10:80      # PiHole
+curl -v http://192.168.50.45:65535    # LlamaCPP
+
+# All should return 200 or service-specific responses
+# If connection refused -> services not running or IP wrong
+```
+
+If the proxy guest cannot reach the services internally, do not move on to certificate work yet.
+
+## Issue A Wildcard Certificate
+
+This is the low-friction certificate strategy when the lab has multiple subdomains but you do not want to manage one certificate per service.[^1]
+
+```bash
+# Obtain wildcard certificate for all subdomains
+ certbot certonly --manual \
+  -d sysya.org \
+  -d *.sysya.org \
+  --preferred-challenges dns
+
+# Interactive prompts:
+# 1. Enter email: your-email@example.com
+# 2. Agree to ToS: Y
+# 3. Share email: Y (optional)
+# 4. For each domain, you'll see instructions:
+#
+#    Please deploy a DNS TXT record under the name
+#    _acme-challenge.sysya.org
+#    with the following value:
+#    abc123def456ghi789...
+#
+#    (Go to your DNS provider, add record, then press Enter)
+
+# Repeat for both sysya.org and *.sysya.org
+
+# Success message:
+# Successfully received certificate.
+# Certificate is saved at: /etc/letsencrypt/live/sysya.org/
+```
+
+```bash
+ls -la /etc/letsencrypt/live/sysya.org/
+
+# Output:
+# -rw-r--r-- cert.pem
+# -rw-r--r-- chain.pem
+# -rw-r--r-- fullchain.pem
+# -r-------- privkey.pem
+```
+
+## Create The Reusable Nginx Template
+
+```bash
+mkdir -p /etc/nginx/templates
+
+cat > /etc/nginx/templates/service-template.conf << 'EOF'
+# Service template for: {{SERVICE_DOMAIN}}
+# Auto-generated - do not edit manually
+# Use: nginx-add-service <name> <ip> <port>
+
+server {
+    listen 80;
+    server_name {{SERVICE_DOMAIN}};
+
+    # ACME challenge for certificate renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Redirect HTTP to HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name {{SERVICE_DOMAIN}};
+    client_max_body_size 1000M;
+
+    # Wildcard certificate - valid for all subdomains
+    ssl_certificate /etc/letsencrypt/live/sysya.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sysya.org/privkey.pem;
+
+    # Modern TLS configuration - strong security
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security headers - applied to all services
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Reverse proxy to backend service
+    location / {
+        proxy_pass http://{{SERVICE_IP}}:{{SERVICE_PORT}};
+        proxy_http_version 1.1;
+
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Headers for correct client identity
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # Buffer settings for streaming/large files
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+}
+EOF
+```
+
+## Create The Service-Addition Script
+
+```bash
+cat > /usr/local/bin/nginx-add-service << 'EOF'
+#!/bin/bash
+
+set -e
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <service_name> <service_ip> <service_port>"
+    echo ""
+    echo "Examples:"
+    echo "  $0 openwebui 192.168.50.30 42"
+    echo "  $0 pihole 192.168.50.10 80"
+    echo "  $0 llamacpp 192.168.50.45 65535"
+    exit 1
+fi
+
+SERVICE_NAME=$1
+SERVICE_IP=$2
+SERVICE_PORT=$3
+SERVICE_DOMAIN="${SERVICE_NAME}.sysya.org"
+CONFIG_FILE="/etc/nginx/sites-available/${SERVICE_DOMAIN}"
+
+echo "Adding service: ${SERVICE_NAME}"
+echo "Domain:  ${SERVICE_DOMAIN}"
+echo "Backend: ${SERVICE_IP}:${SERVICE_PORT}"
+echo ""
+
+# Generate config from template
+sed -e "s|{{SERVICE_DOMAIN}}|${SERVICE_DOMAIN}|g" \
+    -e "s|{{SERVICE_IP}}|${SERVICE_IP}|g" \
+    -e "s|{{SERVICE_PORT}}|${SERVICE_PORT}|g" \
+    /etc/nginx/templates/service-template.conf > "${CONFIG_FILE}"
+
+# Enable site (create symlink)
+ln -sf "${CONFIG_FILE}" "/etc/nginx/sites-enabled/"
+
+# Remove default site if present
+rm -f /etc/nginx/sites-enabled/default
+
+# Test configuration
+echo "Testing Nginx configuration..."
+nginx -t
+
+# Reload Nginx with new configuration
+systemctl reload nginx
+
+echo ""
+echo "✓ Service added successfully!"
+echo "✓ Nginx reloaded"
+echo ""
+echo "Access at: https://${SERVICE_DOMAIN}"
+EOF
+
+chmod +x /usr/local/bin/nginx-add-service
+
+# Verify it's executable
+which nginx-add-service
+```
+
+## Add Services Behind The Proxy
+
+```bash
+nginx-add-service openwebui 192.168.50.30 42
+
+# Output:
+# Adding service: openwebui
+# Domain:  openwebui.sysya.org
+# Backend: 192.168.50.30:42
+#
+# Testing Nginx configuration...
+# nginx: the configuration file /etc/nginx/etc/nginx.conf syntax is ok
+# nginx: configuration file /etc/nginx/etc/nginx.conf test is successful
+#
+# ✓ Service added successfully!
+# ✓ Nginx reloaded
+#
+# Access at: https://${SERVICE_DOMAIN}
+```
+
+```bash
+# Service 2: PiHole
+nginx-add-service pihole 192.168.50.10 80
+
+# Service 3: LlamaCPP
+nginx-add-service llamacpp 192.168.50.32 5000
+
+# Service 4: Nextcloud (if running)
+nginx-add-service nextcloud 192.168.50.33 80
+
+# Service 5+: Add as needed
+nginx-add-service <name> <ip> <port>
+```
+
+## Automate Wildcard Renewal
+
+The validated path here uses manual DNS validation plus Cloudflare hook scripts so renewal can happen without turning into a quarterly chore.
+
+```bash
+# Create certbot directory if it doesn't exist
+ mkdir -p /root/certbot
+ chmod 700 /root/certbot
+
+# Create credentials file with your API credentials
+ cat > /root/certbot/cloudflare.conf << 'EOF'
+# Cloudflare API credentials for Certbot renewal
+CLOUDFLARE_API_TOKEN="paste-your-api-token-here"
+CLOUDFLARE_ZONE_ID="paste-your-zone-id-here"
+EOF
+
+# Secure the file (readable only by root)
+ chmod 600 /root/certbot/cloudflare.conf
+
+# Verify ownership and permissions
+ ls -la /root/certbot/cloudflare.conf
+# Output should show: -rw------- root root /root/certbot/cloudflare.conf
+```
+
+```bash
+ cat > /root/certbot/certbot-auth.sh << 'HOOK_EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Source credentials
+source /root/certbot/cloudflare.conf
+
+# Validate environment
+[[ -z "${CLOUDFLARE_API_TOKEN:-}" ]] && { echo "ERROR: CLOUDFLARE_API_TOKEN not set" >&2; exit 1; }
+[[ -z "${CLOUDFLARE_ZONE_ID:-}" ]] && { echo "ERROR: CLOUDFLARE_ZONE_ID not set" >&2; exit 1; }
+[[ -z "${CERTBOT_VALIDATION:-}" ]] && { echo "ERROR: CERTBOT_VALIDATION not provided" >&2; exit 1; }
+
+# Extract base domain
+DOMAIN="${CERTBOT_DOMAIN#*.}"
+[[ "$DOMAIN" == "$CERTBOT_DOMAIN" ]] || DOMAIN="$CERTBOT_DOMAIN"
+
+RECORD_NAME="_acme-challenge.${DOMAIN}"
+LOG_FILE="/var/log/letsencrypt/cloudflare-auth.log"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] AUTH: Creating TXT record for $CERTBOT_DOMAIN (token: ${CERTBOT_VALIDATION:0:20}...)" >> "$LOG_FILE"
+
+# Always CREATE (POST) new record - DO NOT UPDATE existing
+# This allows multiple TXT records for wildcard validation
+RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/dns_records" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"type\":\"TXT\",\"name\":\"${RECORD_NAME}\",\"content\":\"${CERTBOT_VALIDATION}\",\"ttl\":120}")
+
+# Check for success
+if ! echo "$RESPONSE" | grep -q '"success":true'; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR creating record: $RESPONSE" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Extract record ID for cleanup
+RECORD_ID=$(echo "$RESPONSE" | grep -o '"id\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4)
+echo "$RECORD_ID" > "/tmp/certbot_${CERTBOT_DOMAIN}_${CERTBOT_VALIDATION:0:10}.id"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] AUTH: Record created ID=$RECORD_ID" >> "$LOG_FILE"
+
+# Wait for DNS propagation (increased timeout for wildcard)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] AUTH: Waiting for DNS propagation..." >> "$LOG_FILE"
+for i in {1..100}; do
+    if dig "+short" "$RECORD_NAME" TXT @8.8.8.8 2>/dev/null | grep -qF "$CERTBOT_VALIDATION"; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] AUTH: DNS verified after $((i*2)) seconds" >> "$LOG_FILE"
+        sleep 5
+        exit 0
+    fi
+    sleep 2
+done
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARN: DNS propagation timeout (continuing anyway)" >> "$LOG_FILE"
+sleep 10
+exit 0
+HOOK_EOF
+
+chmod +x /root/certbot/certbot-auth.sh
+```
+
+```bash
+ cat > /root/certbot/certbot-cleanup.sh << 'HOOK_EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Source credentials
+source /root/certbot/cloudflare.conf
+
+# Validate environment
+[[ -z "${CLOUDFLARE_API_TOKEN:-}" ]] && exit 0
+[[ -z "${CLOUDFLARE_ZONE_ID:-}" ]] && exit 0
+
+# Extract base domain
+DOMAIN="${CERTBOT_DOMAIN#*.}"
+[[ "$DOMAIN" == "$CERTBOT_DOMAIN" ]] || DOMAIN="$CERTBOT_DOMAIN"
+
+RECORD_NAME="_acme-challenge.${DOMAIN}"
+LOG_FILE="/var/log/letsencrypt/cloudflare-auth.log"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] CLEANUP: Removing TXT record for $CERTBOT_DOMAIN (token: ${CERTBOT_VALIDATION:0:20}...)" >> "$LOG_FILE"
+
+# Get record ID from auth hook's temp file
+ID_FILE="/tmp/certbot_${CERTBOT_DOMAIN}_${CERTBOT_VALIDATION:0:10}.id"
+
+if [[ -f "$ID_FILE" ]]; then
+    RECORD_ID=$(cat "$ID_FILE")
+    rm -f "$ID_FILE"
+else
+    # Fallback: search for record with matching content
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] CLEANUP: ID file not found, searching by content" >> "$LOG_FILE"
+
+    EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/dns_records?name=${RECORD_NAME}&type=TXT" \
+      -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+      -H "Content-Type: application/json")
+
+    # Find record with matching validation token
+    RECORD_ID=$(echo "$EXISTING" | grep -B5 "$CERTBOT_VALIDATION" | grep '"id":' | head -1 | cut -d'"' -f4 || echo "")
+
+    [[ -z "$RECORD_ID" ]] && { echo "[$(date '+%Y-%m-%d %H:%M:%S')] CLEANUP: Record not found (already deleted)" >> "$LOG_FILE"; exit 0; }
+fi
+
+# Delete the specific record
+DELETE=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/dns_records/${RECORD_ID}" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Content-Type: application/json")
+
+if echo "$DELETE" | grep -q '"success":true'; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] CLEANUP: Record $RECORD_ID deleted successfully" >> "$LOG_FILE"
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] CLEANUP: Failed to delete (may expire automatically)" >> "$LOG_FILE"
+fi
+
+exit 0
+HOOK_EOF
+
+chmod +x /root/certbot/certbot-cleanup.sh
+```
+
+Finish by wiring the renewal config and testing it:
+
+```bash
+# Backup original
+ cp /etc/letsencrypt/renewal/sysya.org.conf /etc/letsencrypt/renewal/sysya.org.conf.backup
+
+# Edit renewal configuration
+ nano /etc/letsencrypt/renewal/sysya.org.conf
+```
+
+```ini
+[sysya.org]
+# ... existing lines ...
+
+# Add these new lines:
+authenticator = manual
+manual_auth_hook = /root/certbot/certbot-auth.sh
+manual_cleanup_hook = /root/certbot/certbot-cleanup.sh
+```
+
+```bash
+# Test renewal WITHOUT making changes
+ certbot renew --dry-run
+```
+
+```bash
+# Enable and start certbot timer
+ systemctl enable certbot.timer
+ systemctl start certbot.timer
+
+# Verify timer is active and running
+ systemctl status certbot.timer
+
+# View schedule (should show next run time)
+ systemctl list-timers certbot
+```
+
+## Publish The Proxy To The Internet
+
+If you are using the self-hosted Nginx path, forward ports 80 and 443 from your router to the Nginx guest.
+
+```text
+External Port 80 (HTTP)   -> Proxmox LXC Container 192.168.50.60:80
+External Port 443 (HTTPS) -> Proxmox LXC Container 192.168.50.60:443
+```
+
+Then verify externally:
+
+```bash
+# From external device (not on your home network)
+curl -v http://openwebui.sysya.org
+# Should get HTTP 301 response redirecting to HTTPS
+```
+
+```bash
+curl https://openwebui.sysya.org
+# Expected: HTTP 200 response
+# Body: HTML from OpenWebUI service
+```
+
+## Internal HTTPS With `mkcert`
+
+The same guest can also front internal-only services over HTTPS when a public certificate does not make sense.
+
+On your workstation:
+
+```bash
+brew install mkcert nss    # nss for Firefox trust store
+mkcert -install            # Install local CA into system trust stores
+```
+
+```bash
+# Generate cert covering all internal service IPs
+mkcert 192.168.50.200 192.168.50.86 192.168.50.85 localhost 127.0.0.1
+
+# Rename for clarity
+mv 192.168.50.200+4.pem self-signed.pem
+mv 192.168.50.200+4-key.pem self-signed-key.pem
+
+# Copy root CA (needed for Node.js apps to trust the cert)
+cp "$(mkcert -CAROOT)/rootCA.pem" .
+```
+
+Deploy the generated files to CT 200:
+
+```bash
+# Copy cert files to Proxmox host, then push to container
+scp self-signed.pem self-signed-key.pem root@192.168.50.20:/tmp/
+ssh root@192.168.50.20 << 'SSH'
+  pct exec 200 -- mkdir -p /etc/nginx/ssl
+  pct push 200 /tmp/self-signed.pem /etc/nginx/ssl/cert.pem
+  pct push 200 /tmp/self-signed-key.pem /etc/nginx/ssl/key.pem
+SSH
+```
+
+## When Multiple Apps Share One IP
+
+For third-party apps, port-based routing is usually the least fragile option.
+
+Path-based routing can work when you control the app and can maintain `basePath`-style changes. For third-party web apps and long-lived dashboards, separate HTTPS ports behind the same certificate usually age more gracefully.
+
+## Related Topics
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the overview page for the subsection.
+- [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path when wildcard stops feeling right.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the no-port-forwarding alternative.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - where the proxy guest, certificates, and exposed workloads should be maintained deliberately.
+
+[^1]: Certbot's manual DNS challenge flow and renewal model are the basis for the wildcard-certificate path used here: [Certbot user guide](https://eff-certbot.readthedocs.io/en/stable/using.html).

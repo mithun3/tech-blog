@@ -1,0 +1,431 @@
+---
+title: "Used Drive Validation Before Deployment"
+description: "Test second-hand hard drives before they touch a production pool so old disks do not arrive in the lab disguised as cheap capacity."
+publishedAt: "2024-12-11"
+order: 1
+status: published
+---
+
+# Used Drive Validation Before Deployment
+
+This page is for the part of homelab storage that is cheap right up until it becomes expensive.
+
+Used drives can be a perfectly rational buy. They can also be ten-year-old roulette if you let price talk louder than evidence. The goal here is simple: do the destructive testing before the drive earns a place in Proxmox, TrueNAS, or any pool you would be annoyed to rebuild.
+
+If you are still building the host itself, keep [Homelab Installation](/pages/proxmox/setup/homelab-installation) open as the next page. If the host already exists and you are preparing disks for pool work, this page is the right starting point.
+
+## Why This Belongs In Setup
+
+Drive validation is not really a day-two storage task.
+
+It happens before trust. Before pool creation. Before a mirror, RAIDZ vdev, or hot spare assignment starts to look official. That is why it sits in Setup rather than under [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs).
+
+## The Risk Profile
+
+The source notes for this guide were built around six used WD RED 8 TB drives from 2016. The exact model matters less than the pattern: older spinning disks with unknown duty cycle, unknown thermal history, and enough age that "it still spins" is not close to a real validation standard.
+
+The testing flow below is deliberately progressive.
+
+| Phase | Test | What It Catches | Typical Duration |
+|-------|------|-----------------|------------------|
+| 1 | physical inspection | visible damage, connectors, obvious mechanical failure | minutes |
+| 2 | SMART health check | reallocated sectors, pending sectors, error history | minutes |
+| 3 | extended SMART self-test | firmware-level surface and mechanism issues | roughly 18 hours on 8 TB |
+| 4 | destructive `badblocks` | surface defects and write-path failures | 24 to 48 hours |
+| 5 | performance and temperature checks | degraded throughput and cooling problems | under an hour |
+
+That sounds slow because it is slow. The point is to spend the time here instead of spending it during a degraded resilver later.
+
+## Start With Physical Inspection
+
+Before you connect anything, check the drive like you expect it to fail.
+
+- enclosure dents or cracks
+- bent SATA data or power pins
+- corrosion, missing PCB components, or burn marks
+- stripped mounting holes
+- burnt-electronics smell
+
+At first power-on, listen for the obvious mechanical failures as well.
+
+- quiet spin-up and a few soft seeks are fine
+- repetitive clicking, scraping, repeated spin-up/spin-down, or complete silence under power are hard-stop signals
+
+If a drive makes those sounds, stop there. Do not let curiosity turn into platter damage.
+
+## Plan The Batch Strategy Before You Swap Cables
+
+The source environment only had one free SATA port, which is exactly the kind of detail that turns a neat test plan into a two-week chore if you ignore it.
+
+If you need to free ports temporarily, export the pool first instead of yanking cables and trusting memory.
+
+```bash
+# Check backuppool status
+zpool status backuppool
+
+# Export the pool (makes it safe to disconnect drives)
+zpool export backuppool
+```
+
+Then shut the host down cleanly:
+
+```bash
+# Shut down the Proxmox host
+shutdown -h now
+```
+
+After a batch completes, reconnect the original drives and import the pool again:
+
+```bash
+# Import backuppool (ZFS finds it by pool metadata, not port assignment)
+zpool import backuppool
+
+# Verify it's healthy
+zpool status backuppool
+```
+
+## Identify The Drives Properly
+
+Never test by guesswork. Map serial number to device name every time the batch changes.
+
+```bash
+lsblk -o NAME,SIZE,MODEL,SERIAL,TYPE,MOUNTPOINT
+```
+
+```bash
+ls -la /dev/disk/by-id/ | grep -i ata
+```
+
+```bash
+# Install lsscsi if not present
+apt install -y lsscsi
+
+# List all SCSI/SATA devices
+lsscsi
+```
+
+```bash
+# Quick one-liner: show device, model, serial, and size
+for dev in /dev/sd?; do
+    echo "=== $dev ==="
+    smartctl -i "$dev" | grep -E "Device Model|Serial Number|User Capacity|Firmware"
+    echo ""
+done
+```
+
+Before you do anything destructive, confirm the drive is not already part of a live pool:
+
+```bash
+# This should return nothing for your test drives
+zpool status | grep -E "sd[abc]"
+```
+
+If an old ZFS label is present on a drive you have already confirmed is disposable test media, clear it explicitly:
+
+```bash
+# Only run this on drives you've confirmed are test drives!
+zpool labelclear -f /dev/sdX
+```
+
+## Run The SMART Checks First
+
+Install the tooling if it is not already present:
+
+```bash
+# Usually pre-installed on Proxmox, but verify
+apt install -y smartmontools
+```
+
+Start with identity and overall health:
+
+```bash
+smartctl -i /dev/sdX
+```
+
+```bash
+smartctl -H /dev/sdX
+```
+
+Then inspect the attribute table and logs:
+
+```bash
+smartctl -A /dev/sdX
+```
+
+```bash
+# View SMART error log
+smartctl -l error /dev/sdX
+```
+
+```bash
+smartctl -l selftest /dev/sdX
+```
+
+```bash
+# All information in one shot
+smartctl -a /dev/sdX
+```
+
+For a batch run:
+
+```bash
+# Run SMART health check on all test drives at once
+for dev in /dev/sda /dev/sdb /dev/sdc; do
+    echo "============================================"
+    echo "SMART REPORT: $dev"
+    echo "============================================"
+    smartctl -a "$dev"
+    echo ""
+done
+```
+
+The hard-stop attributes from the source notes are still the right ones to care about first: reallocated sectors, pending sectors, uncorrectable sectors, reported errors, and spin retries. If those are non-zero, do not keep trying to talk yourself into the drive.
+
+## Run The Extended SMART Self-Test
+
+This is the drive firmware testing itself.
+
+```bash
+# Start extended self-test (runs in drive firmware - does not impact host CPU/RAM)
+smartctl -t long /dev/sdX
+```
+
+On 8 TB spinning disks, expect something close to 18 hours.
+
+You can launch the whole batch in parallel:
+
+```bash
+# Start extended self-test on all test drives simultaneously
+for dev in /dev/sda /dev/sdb /dev/sdc; do
+    echo "Starting extended self-test on $dev..."
+    smartctl -t long "$dev"
+done
+```
+
+Check progress and results here:
+
+```bash
+# Check progress (will show percentage remaining)
+smartctl -l selftest /dev/sdX
+```
+
+```bash
+smartctl -c /dev/sdX | grep -A 1 "Self-test execution status"
+```
+
+```bash
+smartctl -l selftest /dev/sdX
+```
+
+Batch-check the results if you are running several drives at once:
+
+```bash
+for dev in /dev/sda /dev/sdb /dev/sdc; do
+    echo "=== $dev ==="
+    smartctl -l selftest "$dev" | head -10
+    echo ""
+done
+```
+
+Anything other than `Completed without error` is a real failure, not a "maybe later" note.
+
+## Run The Destructive `badblocks` Pass
+
+This is the part that proves whether you trust the drive enough to erase it on purpose.
+
+```bash
+# tmux is usually available on Proxmox; install if needed
+apt install -y tmux
+
+# Start a new tmux session
+tmux new -s disktest
+```
+
+Single-drive run:
+
+```bash
+# Destructive 4-pattern test with progress output
+# -w = destructive write mode (writes 4 patterns)
+# -s = show progress
+# -v = verbose (report errors immediately)
+# -b 4096 = test block size matches physical sector size
+badblocks -wsvb 4096 /dev/sdX
+```
+
+Parallel run:
+
+```bash
+# Create tmux session with multiple panes
+tmux new -s disktest
+
+# In pane 1 (first drive):
+badblocks -wsvb 4096 /dev/sda 2>&1 | tee /root/badblocks-sda.log
+
+# Split pane: Ctrl+B, then %
+# In pane 2 (second drive):
+badblocks -wsvb 4096 /dev/sdb 2>&1 | tee /root/badblocks-sdb.log
+
+# Split pane: Ctrl+B, then %
+# In pane 3 (third drive):
+badblocks -wsvb 4096 /dev/sdc 2>&1 | tee /root/badblocks-sdc.log
+```
+
+Or background them:
+
+```bash
+# Run all three in background with logging
+for dev in sda sdb sdc; do
+    nohup badblocks -wsvb 4096 /dev/$dev > /root/badblocks-$dev.log 2>&1 &
+    echo "Started badblocks on /dev/$dev (PID: $!)"
+done
+```
+
+Check progress:
+
+```bash
+# Check if still running
+jobs -l
+
+# Or check processes
+ps aux | grep badblocks
+
+# View current progress
+tail -1 /root/badblocks-sda.log
+tail -1 /root/badblocks-sdb.log
+tail -1 /root/badblocks-sdc.log
+```
+
+If `badblocks` prints block numbers during compare, the drive has earned a fail verdict.
+
+## Benchmark And Watch Temperatures
+
+After health tests pass, check that the drive is not suspiciously slow and not cooking itself.
+
+```bash
+hdparm -tT /dev/sdX
+```
+
+```bash
+# Write 10GB of zeros directly to the drive (destructive - drive is blank)
+dd if=/dev/zero of=/dev/sdX bs=1M count=10240 oflag=direct status=progress
+```
+
+```bash
+# Read 10GB from the drive
+dd if=/dev/sdX of=/dev/null bs=1M count=10240 iflag=direct status=progress
+```
+
+Batch benchmark loop:
+
+```bash
+echo "=== Performance Benchmark Results ==="
+for dev in /dev/sda /dev/sdb /dev/sdc; do
+    echo ""
+    echo "--- $dev ---"
+
+    # Buffered read (run twice, show both)
+    echo "Buffered Read (run 1):"
+    hdparm -t "$dev" 2>/dev/null | grep "Timing"
+    echo "Buffered Read (run 2):"
+    hdparm -t "$dev" 2>/dev/null | grep "Timing"
+
+    # Sequential write
+    echo "Sequential Write (10GB):"
+    dd if=/dev/zero of="$dev" bs=1M count=10240 oflag=direct status=progress 2>&1 | tail -1
+
+    # Sequential read
+    echo "Sequential Read (10GB):"
+    dd if="$dev" of=/dev/null bs=1M count=10240 iflag=direct status=progress 2>&1 | tail -1
+
+    echo ""
+done
+```
+
+Temperature check:
+
+```bash
+# Via SMART attributes
+smartctl -A /dev/sdX | grep -i temperature
+```
+
+Continuous watch loop:
+
+```bash
+# Monitor temperature every 60 seconds
+while true; do
+    echo "$(date '+%H:%M:%S') | $(for dev in /dev/sda /dev/sdb /dev/sdc; do
+        temp=$(smartctl -A "$dev" 2>/dev/null | grep Temperature_Celsius | awk '{print $NF}')
+        echo -n "$dev: ${temp}°C  "
+    done)"
+    sleep 60
+done
+```
+
+## Pass/Fail Rules
+
+Treat these as hard fails.
+
+- SMART overall health fails
+- reallocated sector count above zero
+- current pending sector count above zero
+- offline uncorrectable above zero
+- reported uncorrectable errors above zero
+- spin retry count above zero
+- SMART extended self-test does not finish cleanly
+- `badblocks` finds anything at all
+- the drive makes grinding, scraping, or repeated click-of-death sounds
+
+Treat these as caution signals rather than automatic discard.
+
+- very high power-on hours
+- small UDMA CRC counts that may just be a cable issue
+- persistent temperature above the comfortable range during testing
+- performance notably below spec but not catastrophic
+
+If the drive passes everything above, then it has earned the right to be considered for a pool. It still has not earned your trust permanently, which is why [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) matters later.
+
+## Quick Reference
+
+```bash
+# DRIVE IDENTIFICATION
+lsblk -o NAME,SIZE,MODEL,SERIAL,TYPE,MOUNTPOINT
+ls -la /dev/disk/by-id/ | grep -i ata
+lsscsi
+
+# SMART CHECKS
+smartctl -i /dev/sdX
+smartctl -H /dev/sdX
+smartctl -A /dev/sdX
+smartctl -l error /dev/sdX
+smartctl -l selftest /dev/sdX
+smartctl -a /dev/sdX
+
+# SMART SELF-TEST
+smartctl -t long /dev/sdX
+smartctl -l selftest /dev/sdX
+smartctl -c /dev/sdX
+
+# DESTRUCTIVE BADBLOCKS
+badblocks -wsvb 4096 /dev/sdX
+
+# PERFORMANCE
+hdparm -tT /dev/sdX
+dd if=/dev/zero of=/dev/sdX bs=1M count=10240 oflag=direct status=progress
+dd if=/dev/sdX of=/dev/null bs=1M count=10240 iflag=direct status=progress
+
+# TEMPERATURE
+smartctl -A /dev/sdX | grep -i temperature
+
+# ZFS POOL MANAGEMENT FOR BATCH TESTING
+zpool export backuppool
+zpool import backuppool
+zpool status backuppool
+zpool labelclear -f /dev/sdX
+```
+
+## What Comes Next
+
+Once the drives pass here, they can graduate into real storage decisions.
+
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) if the host is still being built and storage layout choices are still in front of you.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) if the Proxmox host already exists and you are planning pools, compression, scrubs, or root-pool growth.

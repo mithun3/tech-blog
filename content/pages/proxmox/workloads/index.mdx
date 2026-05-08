@@ -44,6 +44,17 @@ One is for getting something working quickly. One is for taking direct control o
 | [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) | you want direct control over GGUF models and runtime tuning | more manual setup and maintenance |
 | [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) | you want multiple models behind one endpoint and one UI connection | more planning around VRAM, presets, and lifecycle |
 
+## Secure Service Exposure
+
+Several workload pages eventually hit the same question: how should this service actually leave the house?
+
+That decision is now grouped here so Open WebUI, Pi-hole, Grafana, Prometheus, and the rest do not each grow their own slightly different HTTPS explanation.
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the decision hub for tunnels, reverse proxies, and certificate strategy.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the outbound-only path when you want remote access without opening inbound ports.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the self-hosted reverse-proxy path with a dedicated guest and wildcard certificates.
+- [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path once wildcard no longer feels like the right blast radius.
+
 ## What Does Not
 
 Pure concepts still belong in their own sections.

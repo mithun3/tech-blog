@@ -1,64 +1,32 @@
 ---
-title: "Monitoring And Alerts"
-description: "Monitor the Proxmox host and its workloads with daily checks, Prometheus, Grafana, SMART telemetry, GPU metrics, and alerting that reaches you before a quiet failure becomes a bigger story."
-publishedAt: "2026-02-24"
-updatedAt: "2026-02-25"
-order: 5
+title: "Prometheus And Grafana Stack On Proxmox"
+description: "Build a dedicated monitoring LXC, install host exporters, configure Prometheus scrape targets, and bring Grafana online for a Proxmox homelab."
+publishedAt: "2025-01-28"
+order: 1
 status: published
 ---
 
-# Monitoring And Alerts
+# Prometheus And Grafana Stack On Proxmox
 
-Healthy homelabs do not stay healthy because their owners are lucky.
+This page owns the actual stack build.
 
-They stay healthy because the host is being watched, the important services emit signals, and failures have a way to leave the machine before they turn into a Saturday rebuild.
+If [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) is the decision layer, this is the runbook: one monitoring guest, host-side exporters, Prometheus for collection, and Grafana for visibility.
 
-This page covers both ends of that spectrum:
+## Architecture Overview
 
-- the lightweight manual checks you can do from the shell
-- the proper monitoring stack for when the lab is mature enough to justify Prometheus and Grafana
+```text
+Proxmox host (192.168.50.20)
+  -> node_exporter :9100
+  -> nvidia_gpu_exporter :9835
+  -> smartmon textfile collector
 
-Pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) so alerts have somewhere useful to go.
-
-## Start With The Simple Checks
-
-Before building a dashboard, know the host well enough to inspect it directly.
-
-```bash
-# SSH into Proxmox
-ssh root@192.168.50.20
-
-# Check system health
-proxmox-ve-hello
-
-# View system load and memory
-top -b -n 1 | head -20
-
-# Check disk usage
-df -h /
-zpool list
-zfs list
-
-# Monitor GPU
-nvidia-smi
-
-# Check for errors in logs
-tail -50 /var/log/syslog | grep -i error
-dmesg | tail -20
+CT 400 monitoring (192.168.50.80)
+  -> Prometheus :9090
+  -> Grafana :3000
+  -> optional pve-exporter :9221
 ```
 
-That will not replace a monitoring system, but it will sharpen your intuition about what normal looks like.
-
-## The Monitoring Stack Shape
-
-The full stack documented here uses:
-
-- `node_exporter` for host metrics
-- `nvidia_gpu_exporter` for GPU metrics
-- a SMART textfile collector for disk health
-- Prometheus for scraping and storage
-- Grafana for dashboards and alerting
-- optional `pve-exporter` for Proxmox API visibility
+That is enough to cover host CPU and memory, GPU thermals and VRAM, disk health, and any additional targets you decide to scrape later.
 
 ## Create The Monitoring LXC
 
@@ -192,11 +160,11 @@ EOF
 systemctl daemon-reload
 systemctl enable --now nvidia_gpu_exporter
 
-# Test — should show GPU metrics
+# Test - should show GPU metrics
 curl -s http://localhost:9835/metrics | grep -E "nvidia_gpu_(temperature|fan|memory|power|utilization)" | head -30
 ```
 
-## Install SMART Monitoring
+## Install SMART Monitoring On The Host
 
 ```bash
 apt install -y smartmontools
@@ -217,32 +185,140 @@ get_disks() {
 parse_nvme_smart() {
     local disk=$1
     local output
-    
+
     output=$(smartctl -a "$disk" 2>&1)
-    
+
     # Extract temperature
     temp=$(echo "$output" | grep "^Temperature:" | head -1 | awk '{print $(NF-1)}')
     if [[ -n "$temp" ]] && [[ "$temp" =~ ^[0-9]+$ ]]; then
         echo "smartmon_temperature_celsius_value{disk=\"$disk\",type=\"nvme\"} $temp"
     fi
+
+    # Extract percentage used
+    percent_used=$(echo "$output" | grep "Percentage Used:" | awk '{print $(NF-1)}' | sed 's/%//')
+    if [[ -n "$percent_used" ]] && [[ "$percent_used" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_percentage_used_raw_value{disk=\"$disk\",type=\"nvme\"} $percent_used"
+    fi
+
+    # Extract power on hours
+    power_on_hours=$(echo "$output" | grep "Power On Hours:" | awk '{print $(NF-1)}' | tr -d ',')
+    if [[ -n "$power_on_hours" ]] && [[ "$power_on_hours" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_power_on_hours_raw_value{disk=\"$disk\",type=\"nvme\"} $power_on_hours"
+    fi
 }
 
+parse_sata_smart() {
+    local disk=$1
+    local output
+
+    output=$(smartctl -a "$disk" 2>&1)
+
+    # Extract temperature from SATA attributes
+    temp=$(echo "$output" | grep "194 Temperature_Celsius" | awk '{print $10}')
+    if [[ -n "$temp" ]] && [[ "$temp" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_temperature_celsius_value{disk=\"$disk\",type=\"sata\"} $temp"
+    fi
+
+    # Extract reallocated sectors
+    reallocated=$(echo "$output" | grep "5 Reallocated_Sector" | awk '{print $10}')
+    if [[ -n "$reallocated" ]] && [[ "$reallocated" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_reallocated_sector_ct_raw_value{disk=\"$disk\",type=\"sata\"} $reallocated"
+    fi
+
+    # Extract power on hours
+    power=$(echo "$output" | grep "9 Power_On_Hours" | awk '{print $10}')
+    if [[ -n "$power" ]] && [[ "$power" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_power_on_hours_raw_value{disk=\"$disk\",type=\"sata\"} $power"
+    fi
+}
+
+# Get smartctl version - properly handle multiline output
+smartctl_version=$(smartctl -V 2>&1 | head -1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+/) print $i}')
+if [[ -z "$smartctl_version" ]]; then
+    smartctl_version="unknown"
+fi
+
+# Header
+echo "# HELP smartmon_smartctl_version SMART metric smartctl_version"
+echo "# TYPE smartmon_smartctl_version gauge"
+echo "smartmon_smartctl_version{version=\"$smartctl_version\"} 1"
+
+echo ""
+echo "# HELP smartmon_device_active SMART metric device_active"
+echo "# TYPE smartmon_device_active gauge"
+
+echo ""
+echo "# HELP smartmon_device_smart_healthy SMART metric device_smart_healthy"
+echo "# TYPE smartmon_device_smart_healthy gauge"
+
+echo ""
 echo "# HELP smartmon_temperature_celsius_value SMART metric temperature_celsius_value"
 echo "# TYPE smartmon_temperature_celsius_value gauge"
 
+echo ""
+echo "# HELP smartmon_reallocated_sector_ct_raw_value SMART metric reallocated_sector_ct_raw_value"
+echo "# TYPE smartmon_reallocated_sector_ct_raw_value gauge"
+
+echo ""
+echo "# HELP smartmon_power_on_hours_raw_value SMART metric power_on_hours_raw_value"
+echo "# TYPE smartmon_power_on_hours_raw_value gauge"
+
+echo ""
+echo "# HELP smartmon_percentage_used_raw_value SMART metric percentage_used_raw_value"
+echo "# TYPE smartmon_percentage_used_raw_value gauge"
+
+echo ""
+echo "# HELP smartmon_smartctl_run SMART metric smartctl_run"
+echo "# TYPE smartmon_smartctl_run gauge"
+
+smartctl_run_timestamp=$(date +%s)
+
+# Process each disk
 for disk in $(get_disks); do
     if smartctl -i "$disk" &>/dev/null; then
-        parse_nvme_smart "$disk"
+        echo "smartmon_device_active{disk=\"$disk\"} 1"
+
+        disk_info=$(smartctl -i "$disk" 2>&1)
+
+        if echo "$disk_info" | grep -q "NVMe"; then
+            # NVMe drive
+            if echo "$disk_info" | grep -q "PASSED"; then
+                echo "smartmon_device_smart_healthy{disk=\"$disk\",type=\"nvme\"} 1"
+            else
+                echo "smartmon_device_smart_healthy{disk=\"$disk\",type=\"nvme\"} 0"
+            fi
+
+            # Parse NVMe SMART
+            parse_nvme_smart "$disk"
+        else
+            # SATA/SAS drive
+            if smartctl -H "$disk" 2>&1 | grep -q "PASSED"; then
+                echo "smartmon_device_smart_healthy{disk=\"$disk\",type=\"sata\"} 1"
+            else
+                echo "smartmon_device_smart_healthy{disk=\"$disk\",type=\"sata\"} 0"
+            fi
+
+            # Parse SATA SMART
+            parse_sata_smart "$disk"
+        fi
+
+        echo "smartmon_smartctl_run{disk=\"$disk\"} $smartctl_run_timestamp"
     fi
 done
 EOF
 
 chmod +x /usr/local/bin/smartmon.sh
+
+# Test it
+/usr/local/bin/smartmon.sh | head -30
 ```
 
 ```bash
 cat > /etc/cron.d/smartmon-prometheus << 'EOF'
 # Collect SMART metrics for Prometheus node_exporter textfile collector
+# Runs every 5 minutes - output is ~2 KB per disk, negligible I/O
+# CRITICAL: PATH must include /usr/sbin where smartctl is located
+# CRITICAL: chmod ensures node_exporter user can read the output file
 PATH=/usr/sbin:/usr/bin:/bin
 */5 * * * * root /usr/local/bin/smartmon.sh > /var/lib/node_exporter/textfile_collector/smartmon.prom 2>/dev/null && chmod 644 /var/lib/node_exporter/textfile_collector/smartmon.prom
 EOF
@@ -256,9 +332,7 @@ EOF
 curl -s http://localhost:9100/metrics | grep "smartmon_temperature_celsius_value"
 ```
 
-## Install Prometheus
-
-Inside CT 400:
+## Install Prometheus In CT 400
 
 ```bash
 useradd --no-create-home --shell /usr/sbin/nologin prometheus
@@ -284,10 +358,13 @@ chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 
 ```bash
 cat > /etc/prometheus/prometheus.yml << 'EOF'
+# Prometheus Configuration for Proxmox Homelab Monitoring
+# Docs: https://prometheus.io/docs/prometheus/latest/configuration/
+
 global:
-  scrape_interval: 30s
-  evaluation_interval: 30s
-  scrape_timeout: 10s
+  scrape_interval: 30s          # How often to scrape targets (30s is efficient for homelab)
+  evaluation_interval: 30s      # How often to evaluate alerting rules
+  scrape_timeout: 10s           # Timeout per scrape
 
 scrape_configs:
   - job_name: "prometheus"
@@ -349,9 +426,9 @@ systemctl enable --now prometheus
 curl -s http://localhost:9090/-/healthy
 ```
 
-## Optional: `pve-exporter`
+## Optional `pve-exporter`
 
-This is useful, but it is explicitly optional because certificate handling can be annoying in some environments.
+This is useful when the Proxmox API path behaves cleanly in your environment. It is optional on purpose.
 
 ```bash
 apt install -y python3-full python3-pip
@@ -413,14 +490,14 @@ systemctl enable --now pve-exporter
 curl -s "http://localhost:9221/pve?target=192.168.50.20&cluster=1&node=1" --max-time 15 | head -20
 ```
 
-## Install Grafana
+## Install Grafana In CT 400
 
 ```bash
 # Import Grafana GPG key
 mkdir -p /etc/apt/keyrings
 wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
 
-# Add repository (OSS edition — free, open-source)
+# Add repository (OSS edition - free, open-source)
 echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
   > /etc/apt/sources.list.d/grafana.list
 ```
@@ -462,35 +539,16 @@ systemctl enable --now grafana-server
 
 Then add Prometheus as the data source at `http://localhost:9090`.
 
-## Dashboards Worth Importing
+## Validate The Targets
 
-The original stack used these Grafana dashboards:
+```bash
+curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool | grep -E '"job"|"health"'
+```
 
-- `1860` — Node Exporter Full
-- `14574` — NVIDIA GPU Metrics
-- `10347` — Proxmox via Prometheus
-- `10530` — SMART Disk Monitoring for Prometheus
-
-That gives you host CPU and memory, GPU thermals and VRAM, guest visibility where `pve-exporter` works cleanly, and disk health from the SMART collector.
-
-## Alerting
-
-Grafana alerting is the simplest place to start because it can send mail through the same Gmail/App Password setup documented for the rest of the lab.
-
-Recommended alert ideas from the source guide:
-
-- high CPU usage
-- high memory usage
-- GPU overheating
-- GPU VRAM nearly full
-- low disk space
-- SMART health failure
-- target down
-
-If you want the full Prometheus-native path instead, add Alertmanager later. The important thing is not which alerting product wins. The important thing is that the lab tells you when it is drifting out of a safe state.
+All targets should eventually report `health: "up"`.
 
 ## Related Topics
 
-- [Email Notifications](/pages/proxmox/operations/email-notifications) — the SMTP path that makes alerts useful.
-- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where monitoring data and alerting should inform maintenance windows.
-- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the workload page that introduces the GPU telemetry this page watches.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - the overview page for this subsection.
+- [Dashboards And Alerting On Proxmox](/pages/proxmox/operations/monitoring-and-alerts/dashboards-and-alerting) - the next step once data is flowing.
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - if Grafana or Prometheus ever need remote access, decide that there instead of improvising it here.

@@ -1,0 +1,91 @@
+---
+title: "Dashboards And Alerting On Proxmox"
+description: "Import the right Grafana dashboards, validate the Prometheus data path, and turn host, GPU, and disk signals into alerts that can leave the lab."
+publishedAt: "2025-02-03"
+order: 2
+status: published
+---
+
+# Dashboards And Alerting On Proxmox
+
+Once the stack exists, the question changes.
+
+It is no longer "can I scrape the metrics?" It becomes "which graphs actually matter, and which alerts deserve to interrupt me?"
+
+This page keeps that second part separate so the stack build stays procedural and the signal-design work stays readable.
+
+## Start With A Small Dashboard Set
+
+The original stack used these Grafana dashboard IDs:
+
+- `1860` - Node Exporter Full
+- `14574` - NVIDIA GPU Metrics
+- `10347` - Proxmox via Prometheus
+- `10530` - SMART Disk Monitoring for Prometheus
+
+That is enough to cover host load, memory pressure, GPU heat and VRAM, storage health, and the guest-level view where `pve-exporter` behaves cleanly.
+
+## Validate The Data Before You Trust The Panel
+
+Check the Prometheus targets first:
+
+```bash
+curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool | grep -E '"job"|"health"'
+```
+
+For GPU-specific visibility, confirm the exporter is really producing data:
+
+```bash
+curl -s http://localhost:9835/metrics | grep -E "nvidia_gpu_(temperature|fan|memory|power|utilization)" | head -30
+```
+
+For SMART visibility, confirm the textfile collector is flowing through `node_exporter`:
+
+```bash
+curl -s http://localhost:9100/metrics | grep "smartmon_temperature_celsius_value"
+```
+
+If you enabled `pve-exporter`, validate that separately before you let a Grafana panel convince you everything is fine:
+
+```bash
+curl -s "http://localhost:9221/pve?target=192.168.50.20&cluster=1&node=1" --max-time 15 | head -20
+```
+
+## Recommended Alert Set
+
+Grafana alerting is the simplest place to start because it can reuse the SMTP path already documented in [Email Notifications](/pages/proxmox/operations/email-notifications).
+
+The alert list from the source notes is still the right first pass:
+
+- high CPU usage
+- high memory usage
+- GPU overheating
+- GPU VRAM nearly full
+- low disk space
+- SMART health failure
+- target down
+
+Do not start by alerting on everything the stack can technically observe. Start with the conditions that would either damage the host, hide a failing disk, or quietly take a service away.
+
+## Exposure Rules For Dashboards
+
+Grafana can be exposed carefully. Prometheus usually should not be exposed casually.
+
+If you need remote access, put both behind a deliberate path from [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure), and prefer an identity layer such as Cloudflare Access in front of them. Prometheus has no built-in authentication, so a pretty tunnel does not make it safe by itself.
+
+## Maintenance Rhythm
+
+The monitoring stack also needs a little operational discipline.
+
+- verify dashboards after Prometheus config changes
+- test the alert destination after mail changes
+- confirm exporters are still up after host driver or kernel changes
+- revisit thresholds when the workload mix changes
+
+The point is not perfection. The point is to keep the alerts aligned with the current shape of the lab instead of with a version of the lab that no longer exists.
+
+## Related Topics
+
+- [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/operations/monitoring-and-alerts/prometheus-grafana-stack) - build the stack first.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) - the mail path that makes the alerts actionable.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - the place where post-update health checks should use the monitoring stack on purpose.

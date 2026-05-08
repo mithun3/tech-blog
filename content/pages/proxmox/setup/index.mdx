@@ -17,16 +17,20 @@ Use this section when the question is not "what is Proxmox?" but "how do I stand
 ## What Belongs Here
 
 - host installation and initial bring-up
+- pre-deployment drive validation when reused disks are part of the plan
 - BIOS and virtualization settings
 - first-pass storage and network choices
 - hardware-specific setup that shapes the platform before workloads land on it
 
 ## In This Section
 
+- [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the destructive preflight for second-hand disks before they earn a place in Proxmox, TrueNAS, or any other pool you would rather not rebuild.
 - [Homelab Installation](/pages/proxmox/setup/homelab-installation) — BIOS choices, installer path, storage layout, and the early host decisions that are easier to get right before the lab depends on them.
 
 ## How To Read It
 
 Start here when you are building or rebuilding the Proxmox host itself.
+
+If used disks are part of the storage plan, read [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you let those drives near a production pool. Then move into [Homelab Installation](/pages/proxmox/setup/homelab-installation) for the host bring-up itself.
 
 If you are still deciding whether Proxmox is the right base at all, go back to [Proxmox Basics](/pages/proxmox/basics) first. If the host already exists and you are trying to operate or extend it, continue into [Proxmox Operations](/pages/proxmox/operations) or [Proxmox Workloads](/pages/proxmox/workloads).
