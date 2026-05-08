@@ -2,7 +2,7 @@
 title: "Proxmox Workloads"
 description: "Service and workload guides that depend on Proxmox mechanics: LXC deployments, passthrough, and application setups that live on top of the host."
 publishedAt: "2024-12-05"
-updatedAt: "2025-01-31"
+updatedAt: "2026-05-09"
 order: 4
 status: published
 ---
@@ -34,6 +34,7 @@ If the workload is common and the immediate question is just "what is the fastes
 - [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level single-model path when control over GGUF models, build flags, and server behavior matters more than convenience.
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the multi-model path for one Open WebUI connection, on-demand loading, and a cleaner long-term inference setup.
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the personal-assistant path that sits on top of Router Mode when the lab wants Telegram, Discord, scheduled workflows, and an always-on gateway.
+- [SearXNG LXC On Proxmox](/pages/proxmox/workloads/searxng-lxc) - the local metasearch backend for OpenClaw research and other retrieval-heavy workflows that should stop depending on public instances.
 - [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) - the concrete deployment walkthrough for the dual-RTX-3090 Router Mode layout.
 
 ## AI Workloads
@@ -51,6 +52,8 @@ One is for getting something working quickly. One is for peeling the browser lay
 | [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) | you want a mobile-first assistant that uses the local model stack through Telegram, Discord, and scheduled workflows | more channel, daemon, and exposure plumbing |
 
 Once inference already lives elsewhere, the standalone Open WebUI page is the browser-first split. Once Router Mode exists and the lab wants an assistant rather than one more browser tab, OpenClaw is the follow-on path.
+
+Once the assistant starts leaning on repeatable retrieval rather than one-off manual browsing, [SearXNG LXC On Proxmox](/pages/proxmox/workloads/searxng-lxc) becomes a supporting service worth treating as part of the stack instead of an afterthought.
 
 ## NAS And Shared Storage
 

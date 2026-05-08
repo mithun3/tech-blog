@@ -1,0 +1,481 @@
+---
+title: "SearXNG LXC On Proxmox"
+description: "Deploy a self-hosted SearXNG container on Proxmox so OpenClaw and other research workflows get a stable local search backend instead of depending on public instances and their moods."
+publishedAt: "2026-05-09"
+updatedAt: "2026-05-09"
+order: 2
+status: published
+---
+
+# SearXNG LXC On Proxmox
+
+This page is for the moment when web search stops being a casual browser activity and starts becoming infrastructure.
+
+If OpenClaw's researcher agent, weather workflows, or other retrieval-heavy jobs depend on public SearXNG instances, they eventually inherit the same familiar problems: rate limits, variable latency, missing JSON support, and the quiet frustration of debugging someone else's box.
+
+That is where a local SearXNG container starts making sense.
+
+If you want the shortest sane Proxmox path first, begin with [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts). This page is the more opinionated version for the SearXNG layout that fits the current OpenClaw stack.
+
+## Before You Start
+
+The attached source material mixed several older example IDs and IPs.
+
+For the current lab shape, the validated layout is:
+
+- Proxmox host on `192.168.50.20`
+- SearXNG on `CT 115` at `192.168.50.90:8888`
+- OpenClaw on `CT 106` at `192.168.50.85`
+
+If your existing SearXNG container already runs on a different stable address, keep the working address you have. Do not renumber a healthy deployment just to make the docs look neat.
+
+## Why Self-Host It
+
+Public SearXNG instances are useful for quick manual checks. They are not a serious foundation for automated research.
+
+| Issue | Public instances | Self-hosted |
+|---|---|---|
+| rate limits | common under automation | you control the limiter |
+| JSON API support | inconsistent | explicit and stable |
+| engine selection | whatever the instance owner chose | only the engines you trust |
+| latency | unpredictable | bounded by your own network and tuning |
+| privacy | queries leave your network | queries stay inside the lab until upstream engines are contacted |
+| uptime | someone else's problem until it becomes yours | your own service, your own maintenance |
+
+For an OpenClaw-style research agent, that last row is the real point. The system becomes easier to reason about once search is another local service instead of a public dependency with moods.
+
+## Recommended Container Shape
+
+| Setting | Value | Rationale |
+|---|---|---|
+| Container ID | **115** | current validated slot in the lab |
+| Hostname | `searxng` | descriptive and boring in the best way |
+| Disk Size | **7 GB** | enough for the app, virtualenv, logs, and cache |
+| CPU Cores | **2** | enough for parallel engine fan-out |
+| RAM | **2048 MiB** | comfortable for Python, Valkey, and concurrent requests |
+| OS | Debian 13 | aligns with the current helper-script path |
+| Bridge | `vmbr0` | same LAN as OpenClaw and the rest of the stack |
+| IPv4 | **192.168.50.90/24** | stable internal endpoint |
+| Gateway | `192.168.50.1` | router |
+| Unprivileged | **Yes** | no need to widen the blast radius |
+| Nesting | **Enabled** | required for a comfortable systemd-based LXC path |
+
+## Fastest Path: Community Script With App Defaults
+
+The community script is the right place to save time here. The important part is not the installer itself. The important part is pinning the container shape and network details so the result is repeatable.
+
+On the Proxmox host:
+
+```bash
+# Create the defaults directory if needed
+mkdir -p /usr/local/community-scripts/defaults
+
+# Write app defaults for SearXNG
+cat > /usr/local/community-scripts/defaults/searxng.vars << 'EOF'
+# SearXNG - local search backend for OpenClaw and research workflows
+var_cpu=2
+var_ram=2048
+var_disk=7
+var_unprivileged=1
+var_brg=vmbr0
+var_net=192.168.50.90/24
+var_gateway=192.168.50.1
+var_hostname=searxng
+var_os=debian
+var_version=13
+var_ssh=yes
+var_nesting=1
+var_protection=yes
+var_tags=search;ai;research
+var_timezone=Australia/Melbourne
+var_container_storage=local-zfs
+var_template_storage=local
+EOF
+```
+
+Then run the installer:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/searxng.sh)"
+```
+
+Choose `App Defaults` so the script uses the values above instead of making you re-enter them by hand.
+
+## Verify The Guest After Creation
+
+The script gets you to a working starting point. Do not stop there.
+
+```bash
+# On the Proxmox host
+pct list
+
+# Enter the container
+pct enter 115
+
+# Verify networking
+hostname -I
+# Expected: 192.168.50.90
+
+ping -c 3 192.168.50.1
+
+# Check services
+systemctl status searxng
+systemctl status valkey-server
+
+# Quick API smoke test
+curl -s "http://localhost:8888/search?q=test&format=json" | head -c 200
+```
+
+If that last command does not return JSON, do not move on to OpenClaw integration yet. Fix the local service first.
+
+## Production Configuration
+
+The stock install is a good start, not the final answer.
+
+The settings below matter because they turn SearXNG from a human search page into a dependable API surface for agents.
+
+Edit the config inside the container:
+
+```bash
+pct enter 115
+nano /etc/searxng/settings.yml
+```
+
+### 1. Enable The JSON API
+
+Without JSON output, OpenClaw has nothing structured to consume.
+
+```yaml
+search:
+  safe_search: 0
+  autocomplete: ''
+  default_lang: ''
+  formats:
+    - html
+    - json
+```
+
+If `json` is missing from `formats`, requests with `format=json` will fail or behave like a browser-oriented path instead of an API.
+
+### 2. Relax The Outgoing Time Budget
+
+The default request budget is usually too tight for research use.
+
+```yaml
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+  retries: 1
+```
+
+This is the difference between "one slow upstream engine was skipped gracefully" and "the whole search backend feels flaky for no obvious reason".
+
+### 3. Use A Deliberate Engine Set
+
+For homelab research, a smaller good engine list is usually better than a giant optimistic one.
+
+```yaml
+engines:
+  - name: google
+    engine: google
+    shortcut: gg
+    use_mobile_ui: false
+    timeout: 5.0
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    display_error_messages: true
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    timeout: 5.0
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    timeout: 5.0
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    base_url: 'https://en.wikipedia.org/'
+
+  - name: stackoverflow
+    engine: stackoverflow
+    shortcut: so
+
+  - name: github
+    engine: github
+    shortcut: gh
+
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+
+  - name: yahoo
+    engine: yahoo
+    disabled: true
+
+  - name: startpage
+    engine: startpage
+    disabled: true
+```
+
+That mix keeps general search, technical search, and recent-news coverage without carrying engines that mostly add redundancy, latency, or captcha trouble.
+
+### 4. Turn On The Limiter, But Pass-List The Homelab
+
+For a private lab, the right answer is not "disable protection forever". The right answer is "protect the instance from accidental abuse, but never throttle trusted internal callers".
+
+In `settings.yml`:
+
+```yaml
+server:
+  bind_address: "0.0.0.0"
+  port: 8888
+  secret_key: "<keep-the-generated-value>"
+  limiter: true
+  image_proxy: true
+
+valkey:
+  url: "valkey://localhost:6379/0"
+```
+
+Then create `/etc/searxng/limiter.toml`:
+
+```toml
+[botdetection.ip_lists]
+pass_ip = [
+  '192.168.50.0/24',
+]
+
+[botdetection.ip_limit]
+filter_link_local = false
+link_token = false
+```
+
+This keeps OpenClaw on `192.168.50.85` from getting rate-limited while still protecting the service from stupidity elsewhere.
+
+### Restart And Check
+
+```bash
+systemctl restart searxng
+systemctl restart valkey-server
+
+systemctl status searxng
+systemctl status valkey-server
+```
+
+## Integrate It With OpenClaw
+
+Once SearXNG is stable locally, point the research side of OpenClaw at it and stop depending on public fallback chains.
+
+For a simple instance file on CT 106:
+
+```bash
+cat > ~/.openclaw/config/searx/instances.json << 'EOF'
+{
+  "searx_instances": {
+    "primary": "http://192.168.50.90:8888/",
+    "fallback": []
+  },
+  "config": {
+    "timeout_primary": 8000,
+    "timeout_fallback": 0,
+    "retry_attempts": 1,
+    "user_agent": "OpenClaw-Researcher/1.0",
+    "rate_limit_respect": false,
+    "min_delay_between_queries_ms": 0
+  }
+}
+EOF
+```
+
+If you are calling it directly from code, keep the request simple:
+
+```python
+import requests
+
+SEARXNG_BASE = "http://192.168.50.90:8888/search"
+
+
+def search_searxng(query: str, num_results: int = 10) -> list[dict]:
+    response = requests.get(
+        SEARXNG_BASE,
+        params={"q": query, "format": "json", "pageno": 1},
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data.get("results", [])[:num_results]
+```
+
+The important part is not cleverness. It is that the endpoint, timeout, and result shape are now predictable.
+
+## Research Query Tuning
+
+SearXNG becomes far more useful once you stop sending every query through the same engine mix.
+
+| Query intent | `engines=` | `categories=` | `time_range=` |
+|---|---|---|---|
+| general factual | `google,bing,brave` | `general` | omit |
+| technical or tooling | `github,stackoverflow` | `it` | omit |
+| recent releases or announcements | `bing_news` | `news` | `week` |
+| research or benchmarks | `google,brave` | `science` | `year` |
+| code examples | `github,stackoverflow,google` | `it` | omit |
+
+Examples:
+
+```bash
+SEARXNG="http://192.168.50.90:8888/search"
+
+# General query
+curl -s "${SEARXNG}?q=multi-agent+AI+best+practices&format=json&engines=google,bing,brave&categories=general"
+
+# Technical query
+curl -s "${SEARXNG}?q=llm+orchestration+python+library&format=json&engines=github,stackoverflow&categories=it"
+
+# Recent news
+curl -s "${SEARXNG}?q=AI+agent+framework+release&format=json&engines=bing_news&categories=news&time_range=week"
+```
+
+That is especially useful when OpenClaw breaks a larger research task into typed sub-questions instead of pretending one search string should do everything.
+
+## Verification
+
+Run these from the Proxmox host or from CT 106.
+
+### Web UI
+
+Open:
+
+```text
+http://192.168.50.90:8888
+```
+
+If the UI does not load, the API is not your first problem.
+
+### JSON API
+
+```bash
+curl -s "http://192.168.50.90:8888/search?q=proxmox&format=json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(f'Query: {data["query"]}')
+print(f'Results: {len(data["results"])}')
+print(f'First result: {data["results"][0]["url"] if data["results"] else "none"}')
+"
+```
+
+### Cache Check
+
+```bash
+time curl -s "http://192.168.50.90:8888/search?q=proxmox+backup&format=json" > /dev/null
+time curl -s "http://192.168.50.90:8888/search?q=proxmox+backup&format=json" > /dev/null
+```
+
+The second request should be dramatically faster if Valkey caching is working.
+
+### Pass-List Check
+
+```bash
+for i in $(seq 1 20); do
+  curl -s -o /dev/null -w "query ${i}: HTTP %{http_code}\n" \
+    "http://192.168.50.90:8888/search?q=test+${i}&format=json"
+done
+```
+
+From a trusted homelab IP, those should stay `200`, not drift into `429`.
+
+## Day-Two Operations
+
+### Service Control
+
+```bash
+pct exec 115 -- systemctl status searxng
+pct exec 115 -- systemctl status valkey-server
+
+pct exec 115 -- systemctl restart searxng
+pct exec 115 -- journalctl -u searxng -n 100 --no-pager
+```
+
+### Update Path
+
+The community script is still the clean update path. Re-run it on the Proxmox host and choose the update option.
+
+Your custom `settings.yml` should survive the update, but treat that as something to verify, not something to trust blindly.
+
+### Backups
+
+```bash
+# Config backups from the host
+pct exec 115 -- cat /etc/searxng/settings.yml > ~/searxng-settings-backup.yml
+pct exec 115 -- cat /etc/searxng/limiter.toml > ~/searxng-limiter-backup.toml
+
+# Snapshot before risky changes
+pct snapshot 115 pre-searxng-change-$(date +%Y%m%d)
+
+# Full container backup
+vzdump 115 --compress zstd --storage local
+```
+
+The files that matter most are still the boring ones: `settings.yml` and `limiter.toml`.
+
+## Troubleshooting
+
+### `format=json` Fails
+
+Check `search.formats` first. If `json` is missing, do not chase network ghosts.
+
+```bash
+pct exec 115 -- grep -A5 'formats:' /etc/searxng/settings.yml
+```
+
+### OpenClaw Gets `429`
+
+That is usually your limiter pass-list, not the OpenClaw side.
+
+```bash
+pct exec 115 -- cat /etc/searxng/limiter.toml
+```
+
+### Valkey Is Dead
+
+```bash
+pct exec 115 -- systemctl status valkey-server
+pct exec 115 -- valkey-cli ping
+```
+
+If cache-backed behavior suddenly feels slow, start here.
+
+### Engines Return Nothing Or Start Throwing Captchas
+
+```bash
+pct exec 115 -- journalctl -u searxng -n 200 --no-pager | grep -i "captcha\|blocked\|timeout\|error"
+```
+
+Disable the offender temporarily and keep the rest of the service healthy. A smaller reliable engine set is better than clinging to one prestige engine that keeps poisoning the whole request path.
+
+### Port `8888` Is Not Reachable
+
+```bash
+pct exec 115 -- ss -tulnp | grep 8888
+pct exec 115 -- grep bind_address /etc/searxng/settings.yml
+```
+
+You want `0.0.0.0`, not a loopback-only bind.
+
+## Related Pages
+
+- [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts)
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
+- [OpenClaw Workforce, Delegation, And Review Patterns](/pages/openclaw/workforce-delegation-and-review-patterns)
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting)
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel)
+
+If you do expose SearXNG externally, do it deliberately. For most homelab research use, it is more useful as an internal utility than as a public-facing service.
