@@ -1,0 +1,387 @@
+---
+title: "OpenClaw Voice Transcription With whisper.cpp"
+description: "Configure OpenClaw voice input the way the current binary actually expects it: `tools.media.audio` at the gateway, a small transcription script, and a local whisper.cpp server instead of dead-end handler hacks."
+publishedAt: "2026-05-09"
+updatedAt: "2026-05-09"
+order: 3
+status: published
+---
+
+# OpenClaw Voice Transcription With whisper.cpp
+
+Voice support in OpenClaw looks simple from the outside. A voice note arrives in Telegram or Discord, and the assistant replies as though it had always been dealing in plain text.
+
+The part that matters is how that illusion is built.
+
+In the current OpenClaw runtime, voice is not a handler plugin story. It is a gateway media-processing story. If you keep that boundary straight, the setup is reliable. If you do not, you can waste a lot of time wiring together components the binary never even reads.
+
+## The Two Important Corrections
+
+The attached implementation notes close the door on two older assumptions.
+
+### `~/.openclaw/handlers/` Is Not The Extension Point
+
+The older v1-style idea of dropping custom handler code into `~/.openclaw/handlers/` is the wrong model for the current OpenClaw binary.
+
+OpenClaw is a compiled gateway distributed through npm. The supported path for audio transcription is the media configuration surface in `openclaw.json`, not an external Node or Python handler that the runtime never loads.
+
+### `type: "provider"` Is Not Right For `whisper.cpp`
+
+`whisper.cpp` does not expose the OpenAI-style `/audio/transcriptions` endpoint that the provider mode expects.
+
+That is why the working pattern is:
+
+- `type: "cli"`
+- run a local script
+- convert the audio with `ffmpeg`
+- POST it to `whisper-server` at `/inference`
+- print the transcript to stdout
+
+That plain text is what OpenClaw feeds into the agent.
+
+## Architecture
+
+```text
+Discord or Telegram voice note
+            |
+            v
+OpenClaw gateway on CT 106
+reads ~/.openclaw/openclaw.json
+            |
+            v
+tools.media.audio.models[]
+type: "cli"
+command: /root/.openclaw/voice/transcribe-whisper.sh "{{MediaPath}}"
+            |
+            v
+transcribe-whisper.sh
+  1. ffmpeg converts OGG/OPUS -> 16 kHz mono WAV
+  2. curl POSTs the file to whisper-server /inference
+  3. jq extracts .text and prints it to stdout
+            |
+            v
+OpenClaw passes the transcript to the agent
+```
+
+The important implication is that the agent itself never transcribes audio. The gateway resolves media first, then hands the agent ordinary text.
+
+## Current Infrastructure Shape
+
+| Component | Host | Port | Role |
+|---|---|---|---|
+| OpenClaw gateway | `192.168.50.85` | `18789` | receives the message and runs the media command |
+| whisper-server | `192.168.50.45` | `8013` | performs transcription |
+| transcription script | CT 106 local path | — | `/root/.openclaw/voice/transcribe-whisper.sh` |
+
+In the current lab, `whisper-server` lives beside the llama.cpp stack rather than inside the OpenClaw container itself. That keeps the gateway light and makes the voice path feel like another clean service dependency instead of an ad-hoc bundle of tools.
+
+## Quick Status Check
+
+Before changing anything, verify the parts that are already supposed to exist.
+
+```bash
+# 1. whisper-server health
+curl -s http://192.168.50.45:8013/health || echo "whisper-server not responding"
+
+# 2. transcription script exists and is executable
+ssh root@192.168.50.85 "ls -la /root/.openclaw/voice/transcribe-whisper.sh"
+
+# 3. OpenClaw config has a media block
+ssh root@192.168.50.85 "jq '.tools.media' ~/.openclaw/openclaw.json"
+
+# 4. OpenClaw service is up
+ssh root@192.168.50.85 "systemctl status openclaw.service --no-pager"
+```
+
+If those four checks are healthy, the voice path is usually close to working. If one is broken, fix that local failure before assuming the whole pipeline is mysterious.
+
+## Step-By-Step Setup
+
+### 1. Install The Utility Layer On CT 106
+
+OpenClaw itself is not enough here. The script depends on the usual boring tools.
+
+```bash
+ssh root@192.168.50.85
+
+apt-get update && apt-get install -y ffmpeg jq curl
+
+ffmpeg -version | head -1
+jq --version
+```
+
+### 2. Create The Transcription Script
+
+```bash
+mkdir -p /root/.openclaw/voice
+
+cat > /root/.openclaw/voice/transcribe-whisper.sh << 'EOF'
+#!/bin/bash
+TMPFILE=$(mktemp /tmp/whisper-XXXXXX.wav)
+
+# Discord and Telegram voice messages commonly arrive as OGG/OPUS.
+# whisper-server works reliably with a 16 kHz mono WAV input.
+ffmpeg -i "$1" -ar 16000 -ac 1 -y "$TMPFILE" 2>/dev/null
+
+curl -s -X POST http://192.168.50.45:8013/inference \
+  -F "file=@$TMPFILE" \
+  -F "language=en" | jq -r '.text // empty'
+
+rm -f "$TMPFILE"
+EOF
+
+chmod +x /root/.openclaw/voice/transcribe-whisper.sh
+```
+
+The key detail is that the script prints only the transcript. That stdout becomes the text OpenClaw sees.
+
+### 3. Configure `tools.media.audio`
+
+Add the working audio block to `~/.openclaw/openclaw.json`.
+
+```json
+{
+  "tools": {
+    "agentToAgent": { "enabled": true },
+    "media": {
+      "audio": {
+        "enabled": true,
+        "models": [
+          {
+            "type": "cli",
+            "command": "/root/.openclaw/voice/transcribe-whisper.sh",
+            "args": ["{{MediaPath}}"]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+If you prefer to patch the file programmatically:
+
+```bash
+OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+
+cp "$OPENCLAW_CONFIG" "${OPENCLAW_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+
+jq '.tools.media = {
+  "audio": {
+    "enabled": true,
+    "models": [
+      {
+        "type": "cli",
+        "command": "/root/.openclaw/voice/transcribe-whisper.sh",
+        "args": ["{{MediaPath}}"]
+      }
+    ]
+  }
+}' "$OPENCLAW_CONFIG" > /tmp/openclaw-new.json
+
+jq empty /tmp/openclaw-new.json && mv /tmp/openclaw-new.json "$OPENCLAW_CONFIG"
+```
+
+### 4. Restart OpenClaw
+
+```bash
+systemctl restart openclaw.service
+systemctl status openclaw.service --no-pager
+```
+
+### 5. Test With A Real Voice Message
+
+The simplest test is still the best one: send a voice note in Telegram or Discord.
+
+If the setup is correct, the assistant responds to what you said. If it falls back to the stock audio message, the gateway never received a valid transcript.
+
+## The Working Script, Explained
+
+```bash
+#!/bin/bash
+TMPFILE=$(mktemp /tmp/whisper-XXXXXX.wav)
+
+ffmpeg -i "$1" -ar 16000 -ac 1 -y "$TMPFILE" 2>/dev/null
+
+curl -s -X POST http://192.168.50.45:8013/inference \
+  -F "file=@$TMPFILE" \
+  -F "language=en" | jq -r '.text // empty'
+
+rm -f "$TMPFILE"
+```
+
+This script does three unglamorous but important jobs:
+
+1. convert whatever came in to a format `whisper.cpp` can handle reliably,
+2. send it to the correct endpoint,
+3. return only the transcription text.
+
+That is why `ffmpeg` matters. Without the conversion step, voice messages that look fine to a human can still produce empty transcripts.
+
+## whisper-server Setup
+
+If the transcription backend is not already running, the source notes describe a working build on `192.168.50.45`.
+
+### Build `whisper.cpp`
+
+```bash
+ssh root@192.168.50.45
+
+cd /root
+git clone https://github.com/ggml-org/whisper.cpp.git
+cd whisper.cpp
+
+rm -rf build && mkdir build && cd build
+cmake .. \
+  -DGGML_CUDA=ON \
+  -DCMAKE_CUDA_ARCHITECTURES='86' \
+  -DCMAKE_BUILD_TYPE=Release
+
+cmake --build . --config Release -j$(nproc)
+```
+
+### Download A Model
+
+```bash
+cd /root/whisper.cpp
+bash models/download-ggml-model.sh large-v2
+ls -lh models/ggml-large-v2*.bin
+```
+
+### Install A Service
+
+```ini
+[Unit]
+Description=whisper.cpp Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/whisper.cpp
+
+ExecStart=/root/whisper.cpp/build/bin/whisper-server \
+  -m models/ggml-large-v2.bin \
+  --host 0.0.0.0 \
+  --port 8013 \
+  -t 8
+
+RuntimeMaxSec=1800
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+StandardInput=null
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now whisper-server.service
+systemctl status whisper-server.service --no-pager
+```
+
+The restart interval is there for a practical reason: long-lived inference services can accumulate enough VRAM mess over time that a periodic clean restart is less annoying than chasing subtle degradation later.
+
+## API Surface
+
+The working endpoint is:
+
+```text
+POST http://192.168.50.45:8013/inference
+```
+
+Not:
+
+```text
+/v1/audio/transcriptions
+```
+
+That mismatch is exactly why the CLI path is the right OpenClaw integration pattern here.
+
+## Quick Troubleshooting
+
+### The Assistant Says: "I've received another audio file..."
+
+That usually means OpenClaw never got a usable transcript.
+
+Check in this order:
+
+```bash
+ssh root@192.168.50.85
+
+# media block exists
+jq '.tools.media' ~/.openclaw/openclaw.json
+
+# script exists and is executable
+ls -la /root/.openclaw/voice/transcribe-whisper.sh
+
+# whisper-server is up
+curl -s http://192.168.50.45:8013/health
+
+# test the script directly
+/root/.openclaw/voice/transcribe-whisper.sh /path/to/test.ogg
+```
+
+### The Assistant Says It Has No Audio Transcription Tools
+
+That usually means the transcript came back empty.
+
+Common causes:
+
+- `ffmpeg` is missing,
+- `jq` is missing,
+- `whisper-server` is down,
+- the input format never converted properly.
+
+Quick manual conversion test:
+
+```bash
+ffmpeg -i /tmp/test-voice.ogg -ar 16000 -ac 1 /tmp/test.wav
+```
+
+### Full Pipeline Test
+
+If you want a synthetic end-to-end probe:
+
+```bash
+ffmpeg -f lavfi -i "sine=frequency=440:duration=3" -y /tmp/test.wav
+/root/.openclaw/voice/transcribe-whisper.sh /tmp/test.wav
+```
+
+### VRAM Conflict Check
+
+If `whisper-server` and `llama.cpp` start fighting, verify where they actually landed:
+
+```bash
+ssh root@192.168.50.45 "nvidia-smi"
+```
+
+The validated pattern in the source notes was simple:
+
+- `whisper-server` on one GPU,
+- `llama.cpp` on the other.
+
+That separation is worth keeping if the hardware allows it.
+
+## What This Means For The Rest Of OpenClaw
+
+Once voice is working, the rest of the system gets simpler.
+
+Household does not need a parallel "audio reasoning" path. It just receives text. Commands, reminders, board-task intent detection, and normal conversational logic all stay in one lane because the gateway already did the messy media work up front.
+
+That is the right shape for this kind of system. Keep the media mechanics at the edge. Keep the agent logic textual.
+
+## Related Pages
+
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows)
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting)
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode)
