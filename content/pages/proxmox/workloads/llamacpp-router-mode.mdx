@@ -17,6 +17,8 @@ That is the point of Router Mode.
 
 If the base llama.cpp stack is not in place yet, start with [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc). If you want the concrete dual-RTX-3090 deployment example after the architecture is clear, continue to [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment).
 
+If the goal is still a browser-first interface but the UI should live in a separate guest, continue to [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc).
+
 If the goal is no longer just a browser client but a persistent assistant riding on top of the same multi-model endpoint, continue to [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw).
 
 ## Why Multi-Model Management
@@ -606,6 +608,7 @@ nvidia-smi
 - [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model setup this page builds on.
 - [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) — the concrete dual-RTX-3090 deployment checklist and live config example.
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the simpler bundled stack if Router Mode is unnecessary.
+- [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc) — the split browser layer when Router Mode is already handling inference somewhere else.
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) — the assistant layer when Telegram, Discord, and scheduled workflows should sit on top of Router Mode.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA and LXC groundwork that still applies here.
 *** End Patch

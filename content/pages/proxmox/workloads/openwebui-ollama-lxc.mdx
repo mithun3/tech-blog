@@ -13,6 +13,8 @@ This page owns one very specific Proxmox path: getting a usable local AI stack o
 
 That can mean one combined container when you want the shortest path to a working system. It can also mean splitting Ollama into its own inference node once the lab starts to care more about GPU discipline than convenience.
 
+If the lab wants to finish that split and move Open WebUI into its own lightweight frontend container, continue to [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc).
+
 If you want the general fast path first, start with [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts). This page is the deeper runbook for the exact Open WebUI and Ollama shape I run on Proxmox.
 
 The host-side GPU work still belongs in [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough). The broader maintenance rhythm still belongs in [Update And Maintenance](/pages/proxmox/operations/update-maintenance). This page is the workload runbook that sits on top of those decisions.
@@ -399,6 +401,8 @@ The source guide also kept an alternate shape for the moment when the combined c
 
 If Open WebUI and Ollama deserve different lifecycles, different memory budgets, or cleaner GPU ownership, split them.
 
+That split does not have to stop at the inference layer. If the next step is moving the browser UI out as well, use [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc) for the frontend-only container and migration flow.
+
 ### Container Sizing (Standalone)
 
 | Setting | Value | Rationale |
@@ -613,6 +617,7 @@ systemctl cat ollama.service
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where the lab-wide update order and GPU driver version discipline live.
 - [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — the place to watch GPU health and service behavior once this stack is in use.
 - [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — handy when model downloads or package pulls should keep moving without flattening the rest of the network.
+- [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc) — the follow-on page when inference stays remote and the UI deserves its own lightweight guest.
 
 [^1]: Open WebUI documents both the bundled-Ollama path and the "Ollama on a different server" path in its quick start guide, and notes that the first account created becomes the administrator for that instance: [Open WebUI Quick Start](https://docs.openwebui.com/getting-started/quick-start/).
 [^2]: The Community-Scripts build framework defines the install menu, the 28-step Advanced wizard, the App Defaults file path, and the GPU passthrough flow that detects devices and writes `dev[n]` entries into the LXC config: [Community-Scripts build.func](https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func).

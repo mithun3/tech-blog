@@ -1,0 +1,525 @@
+---
+title: "Open WebUI Standalone Frontend On Proxmox"
+description: "Run Open WebUI in a lightweight Proxmox LXC, keep inference on remote Ollama or llama.cpp nodes, and move the browser layer out of the heavier combined stack."
+publishedAt: "2025-01-31"
+updatedAt: "2025-01-31"
+order: 4
+status: published
+---
+
+# Open WebUI Standalone Frontend On Proxmox
+
+This is the split-frontend path.
+
+The inference box already exists. Maybe it is a dedicated Ollama container. Maybe it is a llama.cpp server you want to keep under tighter control. Either way, the browser layer does not need to live in the same guest forever.
+
+This page keeps Open WebUI in its own small LXC, points it at remote backends, and leaves the heavy GPU work somewhere else. If you still want the shortest all-in-one path, stay with [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc). If the lab wants an assistant instead of a browser tab, continue later to [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw).
+
+This is still homelab-grade, non-production plumbing. The point here is cleaner resource boundaries, not pretending the frontend suddenly became enterprise software.
+
+## Why Split Open WebUI From Inference
+
+The combined deployment works. It is also an easy way to leave too many resources attached to the part of the stack that is only serving HTML, API glue, document indexing, and session state.
+
+Splitting makes sense when the lab already trusts the inference node and wants the interface to become lighter, easier to rebuild, and easier to move.[^1]
+
+| Benefit | Detail |
+|---------|--------|
+| **Resource efficiency** | Open WebUI needs 2-4 cores and 4 GB RAM. The inference server gets the rest. |
+| **Independent scaling** | Size the inference container for your largest model without affecting the web UI. |
+| **No GPU needed for UI** | Open WebUI does not perform inference in this layout, so there is no GPU passthrough or NVIDIA driver install in the UI container. |
+| **Cleaner upgrades** | Update Open WebUI without disturbing the runtime that actually serves tokens. |
+| **Multiple backends** | One Open WebUI instance can connect to both Ollama and llama.cpp at the same time. |
+| **Separation of concerns** | Frontend and inference have different failure modes, resource profiles, and maintenance windows. |
+
+## Target Layout
+
+The shape looks like this:
+
+```text
+Proxmox host
+  -> CT 103 Open WebUI only      (192.168.50.30:42)
+  -> CT 100 Ollama only          (192.168.50.40:58008)
+  -> remote llama.cpp endpoint   (OpenAI-compatible API)
+```
+
+If the lab already standardised on [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) or [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode), the same OpenAI-compatible connection flow applies here. The commands below keep the original remote-backend values from the source notes so the working examples stay intact.
+
+## What The Script Still Installs
+
+The Proxmox helper script still installs a full Open WebUI application environment rather than a tiny static frontend. That matters because the container stays light compared with the inference guests, but it is not empty.[^2][^3]
+
+### Installed
+
+| Component | Size (approx.) | Why It Is There |
+|-----------|----------------|-----------------|
+| Python 3.12 (via `uv`) | ~50 MB | Open WebUI is a Python/FastAPI application |
+| `open-webui[all]` | ~500 MB | The supported application install path |
+| PyTorch (CPU-only) | ~2 GB | Pulled in by Open WebUI's dependency tree |
+| `sentence-transformers` | ~100 MB | Used for RAG embeddings |
+| `faster-whisper` | ~50 MB | Speech-to-text support |
+| `chromadb` | ~50 MB | Default vector database for RAG |
+| `ffmpeg` | ~80 MB | Audio processing for uploads |
+| `zstd` | ~1 MB | Compression used by some Python packages |
+
+### Not Installed In This Layout
+
+| Component | Why It Is Skipped |
+|-----------|-------------------|
+| NVIDIA userspace libraries | No GPU passthrough, so `setup_hwaccel` is not triggered |
+| NVIDIA `.run` driver in the container | No GPU work happens here |
+| Ollama binary | Declined during the script prompt |
+| GPU device passthrough entries | Disabled in the build inputs |
+
+### What Still Works Without GPU
+
+| Feature | GPU Required? | Notes |
+|---------|---------------|-------|
+| **Chat with remote models** | No | All inference happens on remote Ollama or llama.cpp |
+| **RAG** | No | Embeddings are generated on CPU |
+| **Speech-to-text** | No | `faster-whisper` falls back to CPU |
+| **Image generation** | No | Requests are forwarded to remote APIs |
+| **OCR** | No | Runs on CPU |
+| **Web search** | No | Pure API calls |
+
+## Create The LXC Container
+
+### Container Sizing
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **103** | Keeps the UI separate from the earlier combined stack |
+| Hostname | `openwebui` | Reflects the frontend-only role |
+| **Disk Size** | **20-30 GB** | App, Python deps, SQLite data, uploaded documents |
+| **CPU Cores** | **2-4** | FastAPI web server and indexing overhead |
+| **RAM** | **4096 MiB** | Enough for the app, embeddings, and headroom |
+| OS | Debian 13 | Same default as the other current LXC guides |
+| Bridge | `vmbr0` | Same network as the inference containers |
+| **IPv4** | **192.168.50.30/24** | Keeps the browser endpoint predictable |
+| Gateway | `192.168.50.1` | Router |
+| **GPU Passthrough** | **No** | This is the key difference from the combined stack |
+| Nesting | **Enabled** | Required for systemd in Debian 13 |
+
+### Pre-Configure App Defaults
+
+The Community-Scripts framework already supports per-app defaults files. That is the cleanest way to skip the long wizard and keep the build reproducible.[^2][^3]
+
+On the Proxmox VE host shell:
+
+```bash
+# Create the directory (if it doesn't exist)
+mkdir -p /usr/local/community-scripts/defaults
+
+# Write the vars file
+cat > /usr/local/community-scripts/defaults/openwebui.vars << 'EOF'
+# OpenWebUI Standalone (Frontend Only) - App Defaults
+# No GPU, no Ollama — lightweight UI container
+var_cpu=4
+var_ram=4096
+var_disk=25
+var_unprivileged=1
+var_gpu=no
+var_brg=vmbr0
+var_net=192.168.50.30/24
+var_gateway=192.168.50.1
+var_hostname=openwebui
+var_os=debian
+var_version=13
+var_ssh=yes
+var_nesting=1
+var_protection=yes
+var_tags=ai;interface
+var_timezone=Australia/Melbourne
+var_container_storage=local-zfs
+var_template_storage=local
+EOF
+```
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `var_cpu` | CPU cores | `4` |
+| `var_ram` | RAM in MiB | `4096` |
+| `var_disk` | Disk in GB | `25` |
+| `var_unprivileged` | `1` = unprivileged, `0` = privileged | `1` |
+| `var_gpu` | GPU passthrough | `yes` / `no` |
+| `var_brg` | Network bridge | `vmbr0` |
+| `var_net` | Static IP (CIDR) | `192.168.50.30/24` |
+| `var_gateway` | Default gateway | `192.168.50.1` |
+| `var_hostname` | Container hostname | `openwebui` |
+| `var_os` | OS template | `debian` |
+| `var_version` | OS version | `13` |
+| `var_ssh` | Enable SSH | `yes` / `no` |
+| `var_nesting` | Enable nesting | `1` |
+| `var_protection` | Prevent accidental deletion | `yes` |
+| `var_tags` | Proxmox tags | `ai;interface` |
+| `var_timezone` | Timezone | `Australia/Melbourne` |
+| `var_container_storage` | Storage pool for container | `local-zfs` |
+| `var_template_storage` | Storage pool for templates | `local` |
+| `var_vlan` | VLAN tag | `50` |
+| `var_mtu` | MTU size | `1500` |
+
+### Run The Community Script
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+```
+
+Select **App Defaults**.
+
+When prompted **"Would you like to add Ollama?"** type **`N`**.
+
+Expected output should look similar to:
+
+```text
+  Using App Defaults for Open WebUI
+  GPU Passthrough: no
+  CPU Cores: 4
+  RAM Size: 4096 MiB
+  Disk Size: 25 GB
+  IPv4: 192.168.50.30/24
+  ...
+  Installed Open WebUI
+      Would you like to add Ollama? <y/N> N
+  ...
+  http://192.168.50.30:42
+```
+
+For a one-shot run without touching files:
+
+```bash
+var_cpu=4 var_ram=4096 var_disk=25 var_gpu=no var_hostname=openwebui \
+var_net=192.168.50.30/24 var_gateway=192.168.50.1 var_nesting=1 \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+```
+
+### Verify Installation
+
+```bash
+pct enter 103
+
+# Check OpenWebUI service is running
+systemctl status open-webui
+
+# Confirm no Ollama service exists
+systemctl status ollama
+# Expected: "Unit ollama.service could not be found"
+
+# Check no GPU devices are present
+ls /dev/nvidia* 2>/dev/null
+# Expected: no output (no GPU devices)
+```
+
+## Change The Listening Port
+
+Open WebUI defaults to port `8080`. The source layout moves it to `42` to reduce scanning noise and keep the UI guest distinct from the older combined examples.
+
+Edit the systemd service file inside the container:
+
+```bash
+pct enter 103
+nano /etc/systemd/system/open-webui.service
+```
+
+Find:
+
+```ini
+ExecStart=/root/.local/bin/open-webui serve
+```
+
+Change it to:
+
+```ini
+ExecStart=/root/.local/bin/open-webui serve --port 42
+```
+
+Reload and restart:
+
+```bash
+systemctl daemon-reload
+systemctl restart open-webui
+```
+
+Verify:
+
+```bash
+ss -tlnp | grep 42
+# Expected: open-webui listening on 0.0.0.0:42
+
+curl -s http://localhost:42
+# Expected: HTML response from OpenWebUI
+```
+
+## Configure Remote Backends
+
+Open WebUI can talk to remote Ollama by using the Ollama connection path, and to llama.cpp by using its OpenAI-compatible API path.[^1][^4]
+
+### Connect To Remote Ollama
+
+Method 1 uses the container environment file:
+
+```bash
+pct enter 103
+nano /root/.env
+```
+
+Add or update:
+
+```bash
+OLLAMA_BASE_URL=http://192.168.50.40:58008
+```
+
+Restart Open WebUI:
+
+```bash
+systemctl restart open-webui
+```
+
+Method 2 uses the admin UI:
+
+1. Open `http://192.168.50.30:42` in your browser.
+2. Go to **Admin Panel** -> **Settings** -> **Connections**.
+3. Under **Ollama API**, set the URL to `http://192.168.50.40:58008`.
+4. Save.
+
+Once saved in the admin UI, the database-backed setting overrides the environment variable. To force environment values to win again, set `ENABLE_PERSISTENT_CONFIG=false` in `/root/.env`.[^4]
+
+Verify the connection from inside the Open WebUI container:
+
+```bash
+curl -s http://192.168.50.40:58008/api/tags | python3 -m json.tool
+```
+
+### Connect To Remote llama.cpp
+
+llama.cpp exposes an OpenAI-compatible API, so it goes under the **OpenAI API** section instead of the Ollama section.
+
+1. Open `http://192.168.50.30:42`.
+2. Go to **Admin Panel** -> **Settings** -> **Connections**.
+3. Under **OpenAI API**, add a connection with these values:
+   - **URL:** `http://192.168.50.45:65535/v1`
+   - **API Key:** your llama-server `--api-key` value
+4. Save.
+
+Verify llama.cpp:
+
+```bash
+curl -s -H "Authorization: Bearer <your-api-key>" \
+  http://192.168.50.45:65535/v1/models | python3 -m json.tool
+```
+
+If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
+
+### Useful Environment Variables
+
+| Variable | Default | Recommended | Purpose |
+|----------|---------|-------------|---------|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | `http://192.168.50.40:58008` | Remote Ollama endpoint |
+| `ENABLE_OLLAMA_API` | `True` | `True` | Enable Ollama API integration |
+| `AIOHTTP_CLIENT_TIMEOUT` | `300` | `300` | Timeout in seconds for inference requests |
+| `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` | `10` | `3` | Timeout for model-list fetch |
+| `ENABLE_BASE_MODELS_CACHE` | `False` | `True` | Cache model lists |
+| `MODELS_CACHE_TTL` | `300` | `300` | Cache TTL in seconds |
+
+After editing `/root/.env`, restart:
+
+```bash
+systemctl restart open-webui
+```
+
+## Migrate Data From An Existing Container
+
+If the lab started with the combined deployment from [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc), you can move the interface data rather than starting over.
+
+| Path | Contains |
+|------|----------|
+| `/root/.open-webui/` | SQLite database, users, chat history, settings, RAG data |
+| `/root/.env` | Runtime configuration |
+
+Run from the Proxmox host:
+
+```bash
+# 1. Stop OpenWebUI on the NEW container to avoid conflicts
+pct exec 103 -- systemctl stop open-webui
+
+# 2. Copy the data directory from OLD container (CT 100) to host
+pct pull 100 /root/.open-webui/ /tmp/open-webui-backup/ --recursive
+
+# 3. Push the data directory from host to NEW container (CT 103)
+pct push 103 /tmp/open-webui-backup/ /root/.open-webui/ --recursive
+
+# 4. Copy the env file
+pct pull 100 /root/.env /tmp/open-webui-env-backup
+pct push 103 /tmp/open-webui-env-backup /root/.env
+
+# 5. Update the env file on the NEW container to point to remote backends
+pct exec 103 -- sed -i 's|OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=http://192.168.50.40:58008|' /root/.env
+
+# 6. Start OpenWebUI on the NEW container
+pct exec 103 -- systemctl start open-webui
+```
+
+If `pct pull` and `pct push` with `--recursive` are unavailable on your Proxmox version, the source notes also allow the fallback `scp` path:
+
+```bash
+# From inside CT 103
+scp -r root@192.168.50.30:/root/.open-webui/ /root/.open-webui/
+scp root@192.168.50.30:/root/.env /root/.env
+```
+
+Migration checklist:
+
+- Chat history is visible in the new instance.
+- User accounts and admin credentials still work.
+- Uploaded RAG documents are available.
+- Connection settings point to remote backends instead of localhost.
+- The old container no longer auto-starts Open WebUI.
+
+## Verify And Access
+
+From inside CT 103:
+
+```bash
+# 1. OpenWebUI service is running
+systemctl is-active open-webui
+# Expected: active
+
+# 2. No GPU devices present (expected — we don't need them)
+ls /dev/nvidia* 2>/dev/null && echo "GPU found (unexpected)" || echo "No GPU (correct)"
+
+# 3. Remote Ollama is reachable
+curl -s http://192.168.50.40:58008/api/tags
+# Expected: JSON with model list
+
+# 4. Remote llama.cpp is reachable
+curl -s -H "Authorization: Bearer <your-api-key>" http://192.168.50.45:65535/v1/models
+# Expected: JSON with model list
+
+# 5. OpenWebUI port is listening
+ss -tlnp | grep 42
+# Expected: open-webui listening on 0.0.0.0:42
+```
+
+Then open:
+
+```text
+http://192.168.50.30:42
+```
+
+Verify that the login page loads, the model dropdown shows the remote backends, and chat requests return answers without local GPU errors.
+
+## Management Commands
+
+Inside the container:
+
+```bash
+# Status
+systemctl status open-webui
+
+# Restart
+systemctl restart open-webui
+
+# View logs (live)
+journalctl -u open-webui -f
+
+# View recent logs
+journalctl -u open-webui --since "10 minutes ago"
+```
+
+From the host:
+
+```bash
+# Start / Stop
+pct start 103
+pct stop 103
+
+# Enter container shell
+pct enter 103
+
+# Quick command execution
+pct exec 103 -- systemctl status open-webui
+```
+
+Update Open WebUI:
+
+```bash
+pct enter 103
+
+# Update via uv
+uv tool upgrade open-webui
+
+# Restart after update
+systemctl restart open-webui
+```
+
+## Choose A Secure Exposure Path
+
+The UI is reachable on `http://192.168.50.30:42`, but the HTTPS decision should still live in the shared exposure guides rather than being re-explained differently on every workload page.
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the decision hub for how services should leave the house.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the shortest secure path when you want outbound-only exposure.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the self-hosted reverse-proxy path when the lab wants one front door for multiple services.
+
+If you do expose this through Cloudflare Tunnel, update the ingress rule to the new internal port:
+
+```yaml
+ingress:
+  - hostname: openwebui.yourdomain.com
+    service: http://192.168.50.30:42
+```
+
+## Troubleshooting
+
+### Open WebUI Cannot Reach Remote Ollama
+
+Run this from inside the Open WebUI container:
+
+```bash
+curl -v http://192.168.50.40:58008/api/tags
+```
+
+Common causes:
+
+1. Ollama is not listening on `0.0.0.0`.
+2. The Ollama container is stopped.
+3. A firewall is blocking the port.
+4. `OLLAMA_BASE_URL` points at the wrong IP.
+
+### Models Load Slowly Or Time Out
+
+Increase the inference timeout in `/root/.env` if needed:
+
+```bash
+AIOHTTP_CLIENT_TIMEOUT=600
+```
+
+Use a shorter model-list timeout for faster failure when a backend is unhealthy:
+
+```bash
+AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST=3
+```
+
+### RAG Embedding Is Slow
+
+That is expected in this shape. The default embedding model runs on CPU in the UI container. The tradeoff is slower first-time indexing in exchange for not tying Open WebUI to a GPU-enabled guest.
+
+### High Memory Usage
+
+If 4 GB is too tight, increase it:
+
+```bash
+# From Proxmox host (container must be stopped)
+pct set 103 -memory 6144
+pct start 103
+```
+
+## Related Topics
+
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the combined path first, plus the dedicated Ollama follow-on when you still want Open WebUI living with the runtime.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level OpenAI-compatible backend when you want tighter runtime control.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the cleaner multi-model backend once one model no longer feels like enough.
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the assistant layer when the same local model estate should power Telegram, Discord, and scheduled workflows instead of only a browser UI.
+
+[^1]: Open WebUI documents both the bundled-Ollama path and the "Ollama on a different server" path, and notes that the first account created becomes the administrator for that instance: [Open WebUI Quick Start](https://docs.openwebui.com/getting-started/quick-start/).
+[^2]: The Community-Scripts build framework defines the install menu, App Defaults precedence, and the variables used by each application entrypoint: [Community-Scripts build.func](https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func).
+[^3]: The current Open WebUI Community-Scripts entrypoint installs Open WebUI with `uv`, creates `open-webui.service`, stores data in `/root/.open-webui`, and exposes `/root/.env` for runtime overrides: [Community-Scripts openwebui.sh](https://github.com/community-scripts/ProxmoxVE/raw/refs/heads/main/ct/openwebui.sh).
+[^4]: Open WebUI documents the environment variables used for backend connection behaviour, including persistent config and request timeouts: [Open WebUI Environment Variables](https://docs.openwebui.com/getting-started/env-configuration).
