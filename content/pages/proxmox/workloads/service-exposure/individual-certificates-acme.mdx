@@ -2,7 +2,7 @@
 title: "Individual Certificates On Proxmox With acme.sh"
 description: "Issue and install one certificate per service with acme.sh when a wildcard certificate no longer feels like the right blast radius for the lab."
 publishedAt: "2025-01-09"
-order: 5
+order: 6
 status: published
 ---
 
@@ -13,6 +13,8 @@ This is the maximum-separation certificate path.
 Instead of one wildcard certificate covering the whole service family, each service gets its own certificate and key pair. That raises the management overhead, but it also narrows the operational and security blast radius when something goes wrong.
 
 This page assumes the reverse-proxy guest already exists. If it does not, build that first in [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc).
+
+If wildcard feels too broad but one certificate per service still feels like more certificate inventory than the lab wants, stop first at [SAN Certificates On Proxmox With Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot).
 
 ## Why Use Individual Certificates
 
@@ -355,6 +357,7 @@ done
 
 - [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the subsection overview and decision hub.
 - [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the wildcard-certificate path that usually comes first.
+- [SAN Certificates On Proxmox With Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot) - the grouped-certificate middle ground between one wildcard and one certificate per service.
 - [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) - the container-native alternative when certificate automation should follow container metadata.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the no-port-forwarding alternative.
 

@@ -14,6 +14,8 @@ You keep the reverse proxy on your own infrastructure, terminate TLS in one dedi
 
 If you do not want to forward inbound ports or maintain certificates yourself, use [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead.
 
+If one wildcard certificate feels too broad but one certificate per service feels excessive, continue later to [SAN Certificates On Proxmox With Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot).
+
 ## Recommended Container Shape
 
 | Setting | Value | Rationale |
@@ -581,6 +583,7 @@ Path-based routing can work when you control the app and can maintain `basePath`
 ## Related Topics
 
 - [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the overview page for the subsection.
+- [SAN Certificates On Proxmox With Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot) - the grouped-certificate middle ground when one wildcard no longer feels like the right blast radius.
 - [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path when wildcard stops feeling right.
 - [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) - the container-native alternative when routing should follow labels instead of static site files.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the no-port-forwarding alternative.

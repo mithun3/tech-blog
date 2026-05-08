@@ -1,0 +1,341 @@
+---
+title: "SAN Certificates On Proxmox With Certbot"
+description: "Use grouped SAN certificates with Certbot on the Nginx reverse-proxy guest when one wildcard feels too broad but one certificate per service feels too noisy."
+publishedAt: "2025-01-12"
+order: 5
+status: published
+---
+
+# SAN Certificates On Proxmox With Certbot
+
+This is the middle-ground certificate path.
+
+One wildcard certificate is operationally easy, but it gives one certificate a very wide blast radius. One certificate per service fixes that, but it also turns the proxy guest into a larger certificate inventory project.
+
+SAN certificates split the difference. You group related services onto a few certificates, renew those groups together, and keep failures isolated to one slice of the estate instead of the whole thing.
+
+This page assumes the reverse-proxy guest already exists. If it does not, build that first in [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc). For the broader decision tree, start with [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure).
+
+This is best when the lab has roughly 5-20 services, wants a cleaner separation than one wildcard, and still does not want the full overhead of one certificate per hostname.
+
+## Why Use SAN Certificates
+
+The point is not theoretical purity. The point is keeping the certificate model proportional to the size of the lab.
+
+| Benefit | Detail |
+|---------|--------|
+| **Fewer certificates** | You renew a few grouped certificates instead of one per service. |
+| **Tighter blast radius than wildcard** | If the AI-services certificate needs replacement, the admin or infrastructure groups are unaffected. |
+| **Cleaner grouping** | Related services can share a lifecycle, ownership boundary, or maintenance window. |
+| **Easier audit story** | Grouped certificates are easier to explain than one wildcard covering everything. |
+
+## Example Grouping
+
+The source notes grouped services like this:
+
+```text
+SAN Cert #1: AI Services
+  openwebui.sysya.org
+  llamacpp.sysya.org
+  ollama.sysya.org
+
+SAN Cert #2: Core Infrastructure
+  pihole.sysya.org
+  nextcloud.sysya.org
+  plex.sysya.org
+
+SAN Cert #3: Admin And Utility Services
+  pgadmin.sysya.org
+  portainer.sysya.org
+  syncthing.sysya.org
+```
+
+The concrete command examples below keep the smaller, validated grouping from the source document. The pattern is what matters: decide the groups first, then issue certificates against those groups intentionally.[^1]
+
+## Step 1: Plan Your SAN Groups
+
+```bash
+# AI/ML Services
+CERT1_DOMAINS="openwebui.sysya.org,llamacpp.sysya.org"
+
+# Infrastructure Services
+CERT2_DOMAINS="pihole.sysya.org,nextcloud.sysya.org"
+
+# Admin Services
+CERT3_DOMAINS="pgadmin.sysya.org,portainer.sysya.org,syncthing.sysya.org"
+```
+
+## Step 2: Issue SAN Certificates With Certbot
+
+Certbot supports multiple `-d` flags on a single certificate request, so every name listed below becomes a Subject Alternative Name on that certificate.[^1]
+
+### Certificate #1: AI Services
+
+```bash
+certbot certonly --standalone \
+  -d openwebui.sysya.org \
+  -d llamacpp.sysya.org \
+  --agree-tos \
+  -m admin@example.com
+
+# Or with DNS challenge (more reliable):
+certbot certonly --manual \
+  -d openwebui.sysya.org \
+  -d llamacpp.sysya.org \
+  --preferred-challenges dns \
+  -m admin@example.com
+
+# You'll be prompted to add TXT records to DNS for each domain
+# Follow the prompts, then press Enter
+```
+
+### Certificate #2: Infrastructure Services
+
+```bash
+certbot certonly --manual \
+  -d pihole.sysya.org \
+  -d nextcloud.sysya.org \
+  --preferred-challenges dns \
+  -m admin@example.com
+```
+
+### Certificate #3: Admin Services
+
+```bash
+certbot certonly --manual \
+  -d pgadmin.sysya.org \
+  -d portainer.sysya.org \
+  -d syncthing.sysya.org \
+  --preferred-challenges dns \
+  -m admin@example.com
+```
+
+Verify what Certbot created:
+
+```bash
+certbot certificates
+
+# Output:
+# Found the following certs:
+#   Certificate Name: openwebui.sysya.org
+#     Domains: openwebui.sysya.org, llamacpp.sysya.org
+#     Expiry date: 2026-05-10
+#   Certificate Name: pihole.sysya.org
+#     Domains: pihole.sysya.org, nextcloud.sysya.org
+#     Expiry date: 2026-05-10
+#   Certificate Name: pgadmin.sysya.org
+#     Domains: pgadmin.sysya.org, portainer.sysya.org, syncthing.sysya.org
+#     Expiry date: 2026-05-10
+```
+
+## Step 3: Create The Nginx Configuration For SAN Certificates
+
+The source configuration keeps one server block per grouped certificate and routes to the right backend by hostname. That keeps the certificate grouping explicit in the config, which is the whole point of this approach.
+
+```bash
+cat > /etc/nginx/sites-available/san-services.conf << 'EOF'
+# HTTP redirect for all domains
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# SAN Certificate #1: AI Services (openwebui, llamacpp)
+server {
+    listen 443 ssl http2;
+    server_name openwebui.sysya.org llamacpp.sysya.org;
+    
+    # One certificate covers both domains
+    ssl_certificate /etc/letsencrypt/live/openwebui.sysya.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/openwebui.sysya.org/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+    ssl_prefer_server_ciphers on;
+    
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # Route to correct backend based on host
+    location / {
+        if ($host = "openwebui.sysya.org") {
+            proxy_pass http://192.168.50.30:42;
+        }
+        if ($host = "llamacpp.sysya.org") {
+            proxy_pass http://192.168.50.45:65535;
+        }
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+    }
+}
+
+# SAN Certificate #2: Infrastructure (pihole, nextcloud)
+server {
+    listen 443 ssl http2;
+    server_name pihole.sysya.org nextcloud.sysya.org;
+    
+    # One certificate covers both domains
+    ssl_certificate /etc/letsencrypt/live/pihole.sysya.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pihole.sysya.org/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+    
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    location / {
+        if ($host = "pihole.sysya.org") {
+            proxy_pass http://192.168.50.10:80;
+        }
+        if ($host = "nextcloud.sysya.org") {
+            proxy_pass http://192.168.50.33:80;
+        }
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# SAN Certificate #3: Admin (pgadmin, portainer, syncthing)
+server {
+    listen 443 ssl http2;
+    server_name pgadmin.sysya.org portainer.sysya.org syncthing.sysya.org;
+    
+    # One certificate covers all three
+    ssl_certificate /etc/letsencrypt/live/pgadmin.sysya.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pgadmin.sysya.org/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+    
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    location / {
+        if ($host = "pgadmin.sysya.org") {
+            proxy_pass http://192.168.50.35:80;
+        }
+        if ($host = "portainer.sysya.org") {
+            proxy_pass http://192.168.50.36:9000;
+        }
+        if ($host = "syncthing.sysya.org") {
+            proxy_pass http://192.168.50.34:8384;
+        }
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+EOF
+
+# Enable configuration
+ln -sf /etc/nginx/sites-available/san-services.conf /etc/nginx/sites-enabled/
+
+# Test and reload
+nginx -t && systemctl reload nginx
+```
+
+## Step 4: Schedule Renewal Checks
+
+Keep the renewal schedule in place, but be clear about the boundary here: certificates obtained with pure `--manual` DNS validation do not complete unattended renewals unless you add hook scripts or switch to a DNS plugin.[^1] The commands below still keep Certbot's renewal machinery active and are the same operational starting point used elsewhere in this subsection.
+
+```bash
+# Certbot auto-renewal (same as wildcard approach)
+systemctl enable certbot.timer
+systemctl start certbot.timer
+
+# Verify
+systemctl list-timers certbot
+
+# Test renewal (dry-run)
+certbot renew --dry-run
+```
+
+If the goal is fully unattended DNS renewals, reuse the hook-based pattern from [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) or move to a supported DNS plugin for your provider.[^1]
+
+## Step 5: Monitor SAN Certificates
+
+```bash
+# List all SAN certificates
+certbot certificates
+
+# Check specific SAN cert expiry
+certbot certificates --cert-name openwebui.sysya.org
+
+# All three SANs renew together
+certbot renew --cert-name openwebui.sysya.org
+
+# Or renew all at once
+certbot renew
+```
+
+## Adding A New Service To A SAN Certificate
+
+This is where SAN certificates make the tradeoff obvious. Adding a name changes the grouped certificate itself, so you are reissuing that grouped certificate rather than simply attaching one more file to the proxy.[^1][^2]
+
+```bash
+# Desired: Add homeassistant.sysya.org to AI Services group
+
+# Option 1: Revoke old cert and issue new one with additional domain
+certbot delete --cert-name openwebui.sysya.org
+
+certbot certonly --manual \
+  -d openwebui.sysya.org \
+  -d llamacpp.sysya.org \
+  -d homeassistant.sysya.org \  # NEW!
+  --preferred-challenges dns
+
+# This counts as 1 new certificate (against 50/week limit)
+
+# Option 2: Issue separate cert for new service (becomes individual cert)
+certbot certonly --manual \
+  -d homeassistant.sysya.org \
+  --preferred-challenges dns
+```
+
+## File Structure
+
+```text
+/etc/letsencrypt/live/
+  openwebui.sysya.org/  (covers openwebui, llamacpp, ollama)
+  pihole.sysya.org/     (covers pihole, nextcloud)
+  pgadmin.sysya.org/    (covers pgadmin, portainer, syncthing)
+
+/etc/nginx/sites-available/
+  san-services.conf
+```
+
+## Related Topics
+
+- [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the overview page and certificate-strategy hub.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the wildcard-first reverse-proxy path this page builds on.
+- [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter isolation path once grouped certificates still feel too broad.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the path that avoids owning public certificates on the homelab edge.
+
+[^1]: Certbot's user guide documents multi-domain certificates via repeated `-d` flags, the `certificates` and `renew` management commands, and the limits of pure `--manual` renewal without hooks: [Certbot user guide](https://eff-certbot.readthedocs.io/en/stable/using.html).
+[^2]: Let's Encrypt documents the registered-domain and exact-identifier-set rate limits that matter when grouped certificates are reissued or expanded: [Let's Encrypt rate limits](https://letsencrypt.org/docs/rate-limits/).

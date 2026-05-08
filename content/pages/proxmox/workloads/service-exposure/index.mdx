@@ -23,7 +23,7 @@ If the question is purely about DNS theory, routing, or network design, stay in 
 - comparing the practical HTTPS paths for Proxmox-hosted services
 - deciding when Cloudflare Tunnel is the better fit than a self-hosted reverse proxy
 - deciding when Traefik is worth using for container-native routing and certificate automation
-- deciding when wildcard certificates are enough and when individual certificates are worth the extra work
+- deciding when wildcard certificates are enough, when SAN groupings are a better middle ground, and when individual certificates are worth the extra work
 - keeping internet-facing components in dedicated guests instead of on the Proxmox host itself[^1]
 
 ## The Three Practical Paths
@@ -47,10 +47,10 @@ The certificate question is really a maintenance question wearing a security hat
 | Strategy | Best When | Tradeoff |
 |----------|-----------|----------|
 | Wildcard certificate | the lab has a handful of services and you want one renewal path | one certificate covers many subdomains, so one mistake has wider blast radius |
+| [SAN certificates with Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot) | you want grouped certificates for related services without putting the whole estate behind one wildcard | still more coordination than wildcard, and changing a group means reissuing that grouped certificate |
 | [Individual certificates with acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) | a service deserves tighter separation or you expect a larger service count over time | more certificate objects to track |
-| SAN certificates | you want a middle ground between wildcard simplicity and per-service isolation | grouped certificates are reasonable, but this wiki does not carry a first-class SAN runbook yet |
 
-For most small homelabs, wildcard is the practical default. For more sensitive or more crowded estates, individual certificates start to make more sense.
+For most small homelabs, wildcard is the practical default. SAN certificates are the middle ground when one wildcard feels too broad but one certificate per service still feels like overkill. For more sensitive or more crowded estates, individual certificates start to make more sense.
 
 ## Why A Dedicated Guest Still Makes Sense
 
@@ -71,6 +71,8 @@ Choose [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) i
 If that container-native stack is the new k3s cluster rather than one Docker guest, pair this subsection with [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) and [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure) so the ingress and service-IP pieces stay in the cluster instead of being improvised at the edge.
 
 Move to [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) when wildcard certificates stop feeling like the right blast radius for the lab.
+
+Move to [SAN Certificates On Proxmox With Certbot](/pages/proxmox/workloads/service-exposure/san-certificates-certbot) when wildcard certificates feel too broad, but the lab still wants a few grouped certificates instead of dozens of individual ones.
 
 ## Related Topics
 
