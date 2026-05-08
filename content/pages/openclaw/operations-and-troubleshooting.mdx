@@ -1,69 +1,186 @@
 ---
 title: "OpenClaw Operations And Troubleshooting"
-description: "Verify the assistant end to end, keep the runtime maintainable, and debug channel, gateway, model, and configuration failures in a fixed order instead of guessing."
+description: "Operate OpenClaw like a real system: validate the gateway, router, task board, heartbeats, memory layer, CalDAV, voice path, and channels in a fixed order before you start guessing."
 publishedAt: "2025-01-26"
-updatedAt: "2025-01-31"
-order: 2
+updatedAt: "2026-05-08"
+order: 3
 status: published
 ---
 
 # OpenClaw Operations And Troubleshooting
 
-Once the assistant is in use, the main risk is not installation anymore. The main risk is drift.
+Once OpenClaw becomes part of daily use, the real danger is not installation failure. The real danger is partial health.
 
-Tokens change. Config keys change. Channels fail in ways that look unrelated. The gateway is up but the model backend is down. Or the model backend is fine and the pairing state is wrong. The goal of this page is to keep that debugging order fixed so you stop losing time to random guessing.
+That is the awkward state where the gateway is up, but the router is not. Or the router is fine, but the task board API key expired. Or household still answers plain text, but voice notes silently fall back. Or every agent looks healthy except the heartbeats have stopped and the UI is lying to you.
 
-## Verification Checklist
+The fix is not more intuition. The fix is a fixed order of checks.
 
-### Infrastructure
+## Treat It Like A Stack, Not A Bot
 
-- CT 106 is running: `pct status 106`
-- network connectivity to Router Mode works: `pct exec 106 -- ping -c 1 192.168.50.45`
-- Node.js is present: `pct exec 106 -- node --version`
-- OpenClaw is installed: `pct exec 106 -- openclaw --version`
+The current OpenClaw shape has several moving parts:
 
-### LLM Integration
+- gateway on CT 106,
+- llama.cpp Router Mode on CT 102,
+- Command Center on CT 107,
+- heartbeat and memory sidecars on CT 106,
+- Radicale on CT 92 for household state,
+- optional SearXNG and other service dependencies,
+- `whisper.cpp` for voice transcription,
+- Telegram and Discord as the human-facing edge.
 
-- llama.cpp is reachable: `pct exec 106 -- curl -s http://192.168.50.45:8012/v1/models | head -5`
-- models are registered: `pct exec 106 -- openclaw models list`
-- primary model is correct: `pct exec 106 -- openclaw models status`
-- direct agent call works: `pct exec 106 -- openclaw agent --agent main --message "Say hi"`
+When something breaks, the goal is to identify which layer failed first and stop blaming everything else.
 
-### Channels And Gateway
+## Baseline Environment
 
-- Telegram replies within a few seconds
-- Discord replies within a few seconds
-- gateway health works: `curl http://192.168.50.85:18789/health`
-- daemon is running: `pct exec 106 -- systemctl status openclaw`
-- external UI path works: `https://openclaw.sysya.org`
-
-### Recovery
-
-- assistant survives `pct reboot 106`
-- service restarts after failure: `pct exec 106 -- systemctl kill openclaw`
-
-## Updating And Maintenance
-
-### Update OpenClaw
+Before running deeper checks, load the environment file so the commands use the same secrets and endpoints as the service:
 
 ```bash
-pct enter 106
+source /root/.openclaw/env
+
+export MC_URL="${MC_URL:-http://192.168.50.86:3000}"
+export RADICALE_URL="${RADICALE_URL:-http://192.168.50.92:5232}"
+```
+
+Keep secrets in env files or systemd environment blocks. Do not paste long-lived tokens or API keys back into docs or JSON config just because you are debugging quickly.
+
+## Fast Health Pass
+
+If you only have two minutes, run this order.
+
+### 1. Gateway And Router
+
+```bash
+curl -sf http://192.168.50.85:18789/health && echo "gateway ok"
+curl -sf http://192.168.50.45:8012/health && echo "router ok"
+curl -s http://192.168.50.45:8012/v1/models | jq '.data[].id'
+```
+
+If the gateway is dead, stay there. If the gateway is healthy but no models are available, the problem is upstream in Router Mode, not in Telegram, Discord, or agent prompts.
+
+### 2. Command Center And Workforce State
+
+```bash
+curl -sf -H "x-api-key: $MC_API_KEY" "$MC_URL/api/tasks" | jq 'if type == "array" then length else . end'
+curl -sf -H "x-api-key: $MC_API_KEY" "$MC_URL/api/agents" | jq '.[] | {name: .name, last_seen: .last_seen}'
+systemctl is-active mc-heartbeat.timer
+systemctl is-active memsearch-watch.service
+```
+
+This tells you whether the board is reachable, whether agent liveness data is fresh, and whether the memory indexer is still running.
+
+### 3. Household Dependencies
+
+```bash
+curl -sf http://192.168.50.45:8013/health && echo "whisper ok"
+test -x /root/.openclaw/voice/transcribe-whisper.sh && echo "transcribe script ok"
+
+curl -sf \
+  -u "$RADICALE_FAMILY_USER:$RADICALE_FAMILY_PASS" \
+  -X PROPFIND \
+  -H "Depth: 1" \
+  "$RADICALE_URL/family/shared/" | grep -q "href" && echo "radicale ok"
+```
+
+If household features are failing, these checks separate calendar state from voice state immediately.
+
+### 4. Direct Agent Roundtrip
+
+```bash
+openclaw agent --agent main --message "Reply with exactly: SMOKE_TEST_OK"
+```
+
+The exact CLI alias can change between releases, but the test idea does not: force a minimal direct response path that bypasses chat apps and proves the gateway can still talk to a model.
+
+## The Better Way To Debug: A Fixed Sequence
+
+When a quick pass is not enough, use the deeper sequence below.
+
+### Step 0. Check Service State And Recent Logs
+
+```bash
+openclaw --version
+systemctl status openclaw
+journalctl -u openclaw -n 40 --no-pager
+```
+
+This catches the embarrassing failures first: wrong binary path, service not running, recent crash loop, broken environment file.
+
+### Step 1. Prove The Gateway Is Real
+
+```bash
+curl -v http://192.168.50.85:18789/health
+ss -tlnp | grep 18789
+```
+
+If this fails, you do not have an assistant. You have a dead listener.
+
+### Step 2. Prove Inference Still Exists
+
+```bash
+curl -sf http://192.168.50.45:8012/health
+curl -s http://192.168.50.45:8012/v1/models | jq '.data[].id'
+```
+
+If the model list is empty or the health endpoint is dead, do not waste time on channel pairing, prompt files, or agent configuration.
+
+### Step 3. Prove The Control Plane Still Works
+
+```bash
+curl -sf -H "x-api-key: $MC_API_KEY" "$MC_URL/api/tasks" | jq 'type'
+curl -sf -H "x-api-key: $MC_API_KEY" "$MC_URL/api/agents" | jq '.[] | {name: .name, last_seen: .last_seen}'
+bash /root/.openclaw/scripts/mc-heartbeat.sh
+```
+
+This is where you find broken API auth, dead board endpoints, stale agent presence, or rename-related drift between agent names and queue expectations.
+
+### Step 4. Check Memory And Persistence Services
+
+```bash
+systemctl status memsearch-watch.service
+journalctl -u memsearch-watch.service -n 20 --no-pager
+```
+
+If memory retrieval feels inconsistent, do not assume the model has suddenly become forgetful. First verify the indexer is still alive and watching the right workspace paths.
+
+### Step 5. Check Household I/O Paths
+
+```bash
+curl -sf http://192.168.50.45:8013/health
+/root/.openclaw/voice/transcribe-whisper.sh /path/to/test-audio.ogg
+
+curl -sf \
+  -u "$RADICALE_FAMILY_USER:$RADICALE_FAMILY_PASS" \
+  -X PROPFIND \
+  -H "Depth: 1" \
+  "$RADICALE_URL/family/shared/"
+```
+
+These tests tell you whether the household path is failing at media transcription, calendar access, or later in the agent reasoning layer.
+
+### Step 6. Check The Real Message Path
+
+For Telegram or Discord, send a plain text probe and watch live logs:
+
+```bash
+journalctl -u openclaw -f | grep -E "telegram|discord|message|response|inference"
+```
+
+If the message arrives but inference never starts, the fault is behind the gateway. If inference completes but no reply leaves the service, the problem is in the channel path.
+
+## Operational Tasks Worth Keeping Routine
+
+### Update OpenClaw Carefully
+
+```bash
 pnpm install -g openclaw@latest
 systemctl restart openclaw
 openclaw --version
 openclaw doctor
 ```
 
-### Update Node.js
+Then rerun at least the gateway, router, and direct-agent checks before assuming the upgrade was uneventful.
 
-```bash
-node --version
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt install -y nodejs
-systemctl restart openclaw
-```
-
-### Back Up The Config And Workspace
+### Back Up Before Major Changes
 
 ```bash
 # On the Proxmox host
@@ -73,132 +190,75 @@ vzdump 106 --storage local --compress zstd --mode snapshot
 tar czf /tmp/openclaw-backup-$(date +%F).tar.gz ~/.openclaw/
 ```
 
-### Watch Disk Growth
+### Watch Growth In The Working Set
 
 ```bash
 df -h /
 du -sh ~/.openclaw/
 du -sh ~/.openclaw/agents/*/sessions/
+du -sh ~/.openclaw/workspace/*/memory/
 ```
 
-## Structured Debug Workflow
+Long-running agent systems quietly accumulate state. Disk pressure rarely announces itself gracefully.
 
-### Step 0: Check Version And Running State
+## Common Failure Patterns
 
-```bash
-pct exec 106 -- openclaw --version
-pct exec 106 -- systemctl status openclaw
-pct exec 106 -- journalctl -u openclaw -n 20 --no-pager
-```
+### Gateway Is Up, But The System Is Still Broken
 
-### Step 1: Check Gateway Health
+This usually means the health check is telling the truth about the listener, but not about the rest of the stack. Always pair gateway health with Router Mode health and at least one direct agent probe.
 
-```bash
-curl -v http://192.168.50.85:18789/health
-```
+### Voice Notes Fall Back To The Default Message
 
-If this fails, the gateway is not actually up. Stay here until that is fixed.
+That is usually not a reasoning issue. It usually means one of these is broken:
 
-### Step 2: Validate Bot Tokens Directly
+- `tools.media.audio` is missing or malformed,
+- `ffmpeg` is unavailable,
+- `jq` is unavailable,
+- `whisper.cpp` is down,
+- the transcription script is missing or not executable.
 
-```bash
-# Telegram
-curl -s "https://api.telegram.org/botyour-telegram-bot-token/getMe" | python3 -m json.tool
+Treat it as a media pipeline failure until proven otherwise.
 
-# Discord
-curl -s -X GET https://discord.com/api/v10/users/@me \
-  -H "Authorization: Bot your-discord-bot-token" | python3 -m json.tool
-```
+### Household Replies, But Calendar Or Todo Features Do Not
 
-If those fail, stop editing config files and rotate or replace the tokens first.
+That usually points to Radicale connectivity or credentials, not the LLM. Test the CalDAV path directly before editing prompts.
 
-### Step 3: Check Environment Variables And Config Surface
+### Board Tasks Look Wrong Or Agents Seem Offline
 
-```bash
-pct exec 106 -- bash -c "echo TELEGRAM_BOT_TOKEN=\$TELEGRAM_BOT_TOKEN; echo DISCORD_BOT_TOKEN=\$DISCORD_BOT_TOKEN"
-pct exec 106 -- cat ~/.openclaw/openclaw.json | grep -A20 "channels:"
-pct exec 106 -- openclaw doctor
-```
+Look at three things together:
 
-The important rule here is simple: do not put `botToken` keys back into the JSON config. Keep tokens in the systemd environment and keep the JSON focused on channel behavior.
+- Command Center API availability,
+- `mc-heartbeat.timer`,
+- whether older `mission_control` naming still exists in queue logic, scripts, or stored strings.
 
-### Step 4: Restart And Read The Logs
+In newer documentation the orchestrator is `commander`, but migration residue can still create confusing symptoms.
 
-```bash
-pct exec 106 -- systemctl restart openclaw
-pct exec 106 -- journalctl -u openclaw -n 100 --no-pager | grep -E "telegram|discord|gateway|models"
-```
+### Telegram Or Discord Works In A Shell, Then Dies After Restart
 
-Healthy startup looks like:
+That is almost always environment persistence. If a token or webhook only exists in an interactive shell, systemd will not magically inherit it later.
 
-```text
-[gateway] Initializing components...
-[models] Loading provider: llamacpp
-[telegram] Connected to Telegram Bot API
-[discord] Connected to Discord Gateway
-[gateway] Listening on 0.0.0.0:18789
-```
+### Grafana And Metrics Still Feel Fuzzy
 
-### Step 5: Test The Real Message Path
+That is because the metrics work is still partially design-stage. Do not debug a non-existent exporter. First answer the unresolved infrastructure question: where Pushgateway actually lives. Until that is settled, treat metrics as planned observability, not a broken production subsystem.
 
-For Telegram or Discord, send a simple message and watch the live logs:
+## The Useful Discipline After Every Change
 
-```bash
-pct exec 106 -- journalctl -u openclaw -f | grep -E "telegram|discord|message|response|inference"
-```
+After touching agent config, channel wiring, board scripts, or media tooling, rerun a focused smoke test instead of trusting memory.
 
-If the message is received but inference never starts, the model layer is the problem. If inference works but the channel reply never sends, the channel layer is the problem. Keep those separate.
+The minimum sensible set is:
 
-## Common Failures
+1. gateway health
+2. router health and model list
+3. task board API reachability
+4. heartbeat timer state
+5. one direct agent roundtrip
+6. one real channel message if the change touched channels
 
-### Gateway Won't Start
-
-```bash
-journalctl -u openclaw --since "5 minutes ago" --no-pager
-ss -tlnp | grep 18789
-openclaw doctor --fix
-which node
-which openclaw
-```
-
-Typical causes:
-
-- port collision on `18789`
-- missing `gateway.mode: "local"`
-- missing `controlUi.dangerouslyAllowHostHeaderOriginFallback` when binding to LAN
-- JSON5 syntax errors
-
-### Discord `4014` Privileged Intents Error
-
-If Discord logs show a `4014` gateway close, the fix is not in OpenClaw. Enable **Message Content Intent** and **Server Members Intent** in the Discord Developer Portal, then restart the service.
-
-### Invalid `groupPolicy` Or Old Token Keys
-
-If the config still uses `botToken` or sets `groupPolicy: "pairing"`, fix the schema instead of trying random restarts. The current shape is:
-
-```json5
-channels: {
-  telegram: {
-    enabled: true,
-    dmPolicy: "pairing",
-    groupPolicy: "open",
-    streaming: "off",
-  },
-  discord: {
-    enabled: true,
-    dmPolicy: "pairing",
-    groupPolicy: "open",
-    streaming: "off",
-  },
-}
-```
-
-### Environment Variables Vanish After Restart
-
-If the bot works after `export ...` but dies after `systemctl restart`, the fix is to persist the tokens in `/etc/systemd/system/openclaw.service`, reload the daemon, and restart the service.
+That order catches most regressions before they become mysterious stories.
 
 ## Related Pages
 
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows)
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
 - [OpenClaw Channels, Daemon, And Secure Exposure](/pages/proxmox/workloads/openclaw/channels-daemon-and-secure-exposure)
-- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)

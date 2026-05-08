@@ -1,0 +1,177 @@
+---
+title: "OpenClaw Architecture, Agents, And Workflows"
+description: "Understand the modern OpenClaw stack as a working system: commander orchestration, specialist agents, household routing, voice transcription, task-board flows, and the line between current behavior and planned upgrades."
+publishedAt: "2026-05-08"
+updatedAt: "2026-05-08"
+order: 1
+status: published
+---
+
+# OpenClaw Architecture, Agents, And Workflows
+
+OpenClaw has moved well past the phase where it makes sense to describe it as a single assistant with a few channel bindings.
+
+At this point it behaves more like a small operating model for the homelab: one entry surface, a planner, a specialist bench, a task board, a memory layer, and a growing set of scheduled or message-driven routines that do work without waiting for a browser tab to be open.
+
+That shift matters because older notes can look contradictory if you read them as though they all describe the same moment in time. They do not. Some are live runbooks, some are migration notes, some are draft designs, and a few are clearly preserved as history.
+
+## The Current Mental Model
+
+The cleanest way to think about the system now is this:
+
+```text
+Telegram / Discord / CLI / scheduled triggers
+                |
+                v
+           household or main
+                |
+                v
+            commander
+                |
+    +-----------+-----------+-----------+
+    |           |           |           |
+  analyst    researcher    coder      executor
+                |             |
+                |          coder2
+                |             |
+                +------ reviewer ------+
+                           |
+                      Command Center
+                      task board + API
+```
+
+The practical meaning is simple. The human-facing edge is not the same thing as the orchestration layer, and the orchestration layer is not the same thing as the specialist agents that produce code, research, summaries, or operational actions.
+
+## Naming: `commander` Replaces `mission_control`
+
+Newer OpenClaw material consistently uses **commander** for the orchestrator agent.
+
+That is the name to use going forward. If you run into `mission_control` in older notes, read it as historical naming or as a migration surface that still needs cleanup in scripts, queue payloads, or database strings. The attached rename runbook is still useful, but mainly as a map of where that old name used to leak into the system.
+
+The second naming boundary is just as important:
+
+- **Commander** is the orchestrator agent.
+- **MC Task Board** or **Command Center** is the web UI and REST API used to track work.
+
+Keeping those two concepts separate removes a lot of confusion from logs, docs, and day-to-day conversation.
+
+## Agent Roster
+
+The newer docs converge on a roster like this:
+
+| Agent | Role | What it is good at |
+|---|---|---|
+| `main` | generic front door | quick direct queries and lightweight routing |
+| `commander` | orchestrator | decomposes work, delegates to specialists, manages the board |
+| `household` | channel assistant | Telegram and Discord requests, family workflows, Radicale-backed tasks |
+| `coder` | pragmatic implementation | fast code generation, refactors, working first drafts |
+| `coder2` | correctness partner | critique, edge cases, reflexion loops, second-pass validation |
+| `researcher` | multi-source research | web lookup, synthesis, citation-backed findings |
+| `analyst` | specification and QA | briefs, structure, trade-off framing, metrics-style analysis |
+| `executor` | action runner | commands, deployments, checks, mechanical follow-through |
+| `reviewer` | internal quality gate | code review, security lens, sanity checks before completion |
+| `weather` | autonomous specialist | scheduled forecasts and environmental summaries |
+
+Hermes sits slightly outside that core list. It is described in the attached material as an independent blind reviewer on CT 108 rather than another everyday worker inside the same conversational context. That distinction is useful, because its value comes from being separate.
+
+## The Core Workflow Patterns
+
+OpenClaw's more interesting behavior does not come from any one model. It comes from how the models are arranged.
+
+### Commander As Planner, Not Hero
+
+Commander is strongest when it stays in its lane.
+
+Its job is to frame the task, decide whether it should be split, choose the right workers, and keep state coherent. It should not try to out-code the coding agents or out-research the researcher just because it can produce text quickly. When the system feels disciplined, it is usually because commander is delegating properly rather than improvising heroics.
+
+### `coder` + `coder2` Is A Real Partnership
+
+The attached partnership protocol makes an important point: model diversity is the feature, not an inconvenience.
+
+The pragmatic pattern is either:
+
+- parallel generation followed by analyst merge when several designs could work, or
+- reflexion, where one coding agent drafts and the other critiques before the next pass.
+
+That means OpenClaw is not aiming for a single magical model that never misses. It is leaning into the fact that different models miss different things.
+
+### Reviewer Is The Internal Gate
+
+Before work is treated as finished, reviewer acts as the fast, context-aware gate inside the OpenClaw loop. It understands the current task, the local conventions, and the system it is reviewing.
+
+### Hermes Is The External Gate
+
+The Hermes design pushes the next step further: a second review pass from outside the local conversation. That is especially compelling for scripts, config, and infrastructure work where groupthink is expensive.
+
+The attached notes still frame this as a draft integration, so it should be treated as a deliberate next-stage quality layer rather than a base assumption of every current workflow.
+
+## Household Is More Than A Chat Bot
+
+One of the biggest changes in the attached material is that the household agent has grown into the real front desk for everyday life around the system.
+
+It is no longer just a polite wrapper around a model. It is the layer that:
+
+- receives Telegram and Discord traffic,
+- reads voice and image-derived inputs after gateway preprocessing,
+- works against Radicale for calendars, todos, reminders, and shopping,
+- can distinguish personal todos from Command Center board tasks,
+- and can eventually deliver morning briefings, reminders, and other recurring household automations.
+
+That distinction between **personal tasking** and **board tasking** is crucial.
+
+- Personal todos live in Radicale and belong to people.
+- Board tasks live in Command Center and belong to the AI workforce.
+
+If the wording says "board", "commander", or "give the AI a task", it belongs to the board. If it sounds like ordinary household follow-up, it belongs to Radicale.
+
+## Voice Is A Gateway Feature, Not A Handler Hack
+
+The voice implementation notes close the door on one older assumption: external handler files are not the right extension surface for modern OpenClaw.
+
+The live pattern is:
+
+- OpenClaw gateway receives the audio attachment.
+- `tools.media.audio` launches a local CLI command.
+- A small script converts the media with `ffmpeg`.
+- The audio is posted to a local `whisper.cpp` server.
+- Plain text comes back into the agent conversation.
+
+That matters operationally because it moves voice support out of hand-wavy custom glue and into a concrete, testable gateway configuration.
+
+## Weather And Morning Briefings Show The Direction Of Travel
+
+The weather agent and the newer household briefing notes point in the same direction: OpenClaw is being shaped as an always-on domestic and homelab operator, not merely a reactive chat surface.
+
+The weather agent is already a good example of the pattern. It has narrow scope, a fixed schedule, a bounded set of trusted sources, and a clear output destination. That is the right way to add autonomy. Give an agent a specific job, a narrow tool belt, and an observable routine.
+
+The newer household briefing design extends that same idea into daily coordination: calendar context, reminders, shopping, inventory, news, weather, and voice-first interaction, all staying local where practical.
+
+## Research: Use The Newer Researcher Material, Not The Archaeology
+
+The attached researcher notes include both a current setup guide and an explicitly deprecated document.
+
+That is a useful reminder to be selective.
+
+The current direction is the unified researcher agent with multi-source search, synthesis, and ranking. The deprecated file is still valuable for tracing earlier decisions, but it should not be allowed to quietly become source of truth again just because it is still sitting in the docs folder.
+
+The same rule applies to backup files. Preserve them if they are useful, but do not let them outrank the newer voice-first or renamed-system material.
+
+## What Looks Current, And What Still Looks Planned
+
+The attached material splits fairly cleanly into three buckets:
+
+| Area | Read it as | Why |
+|---|---|---|
+| commander naming, household routing, voice path, weather role, researcher direction | current system shape | multiple newer documents converge on the same model |
+| smoke tests and operational verification | current operator practice | concrete checks, real endpoints, and clear failure handling |
+| Hermes blind review, Grafana metrics, some enhancement-plan items | planned or partially settled | the docs still describe open questions or blocked decisions |
+
+The main operational lesson is to avoid flattening those buckets together. The wiki should describe the live system confidently, but it should label pending work as pending instead of presenting ambition as fact.
+
+## Where To Read Next
+
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting)
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
+
+If the question is how the container is built or exposed, stay with the Proxmox pages. If the question is how the OpenClaw system thinks, routes, validates, and grows, stay in this section.

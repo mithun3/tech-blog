@@ -1,29 +1,33 @@
 ---
 title: "OpenClaw"
-description: "Project-specific notes on OpenClaw architecture, workflows, research, and operations."
+description: "Project-specific notes on how OpenClaw actually works now: agent architecture, household and voice workflows, task-board operations, validation, and the boundaries between live behavior and future upgrades."
 publishedAt: "2024-12-21"
+updatedAt: "2026-05-08"
 order: 4
 status: published
 ---
 
 # OpenClaw
 
-This section is reserved for OpenClaw itself.
+OpenClaw now has enough moving parts that it deserves its own map.
 
-The goal is to keep OpenClaw-specific material in one place instead of scattering it across infrastructure notes just because some of it happens to run on Proxmox.
+This section is where the project-specific logic lives: the orchestrator, the specialist agents, household workflows, voice and media handling, the task board, validation discipline, and the small but important distinction between what is already live and what is still planned.
+
+The goal is to keep that material together instead of scattering it across infrastructure pages just because some of the containers happen to run on Proxmox.
 
 ## In This Section
 
-- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases) - shape the workspace, teach the assistant about the homelab, and decide which tasks actually belong to it.
-- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting) - verification, maintenance, structured debugging, and the configuration failures worth recognizing quickly.
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows) - the current system view: commander, specialist agents, household routing, voice, board tasks, and how the pieces fit.
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases) - shape the per-agent workspace, choose the right extension surface, and decide which jobs belong in prompts, skills, or scripts.
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting) - validate the gateway, router, board, heartbeats, memory, CalDAV, voice path, and channels in a fixed order.
 
-## Planned Focus
+## What This Section Covers
 
-- architecture and system boundaries
-- agent workflows and command patterns
-- research pipelines and retrieval design
-- metrics, testing, and quality gates
-- project evolution and operator-facing notes
+- current agent architecture and role boundaries
+- household, weather, voice, and other automation patterns
+- task-board usage and operator-facing workflows
+- smoke tests, troubleshooting order, and runtime maintenance
+- draft versus live features, so older notes do not quietly become source of truth again
 
 ## Related Platform Guides
 
@@ -31,4 +35,4 @@ The goal is to keep OpenClaw-specific material in one place instead of scatterin
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the model-serving layer OpenClaw depends on.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the external access path for the control UI when it should leave the LAN.
 
-If the main question is how to deploy or operate the surrounding infrastructure, that content belongs in [Proxmox](/pages/proxmox) or the relevant platform section. If the main question is how OpenClaw itself works, it belongs here.
+If the main question is how to deploy or expose the surrounding infrastructure, that content still belongs in [Proxmox](/pages/proxmox). If the main question is how OpenClaw behaves once it is alive, this section is the right home.

@@ -1,131 +1,207 @@
 ---
 title: "OpenClaw Workspace, Skills, And Use Cases"
-description: "Shape OpenClaw's workspace, teach it about the homelab, install skills carefully, and decide which real workloads belong to the assistant instead of staying as one-off chats."
+description: "Shape the real OpenClaw system: per-agent instructions, skills, scripts, voice tooling, household workflows, and the difference between a reusable capability and a one-off clever prompt."
 publishedAt: "2025-01-25"
-updatedAt: "2025-01-31"
-order: 1
+updatedAt: "2026-05-08"
+order: 2
 status: published
 ---
 
 # OpenClaw Workspace, Skills, And Use Cases
 
-Once OpenClaw is running, the real question stops being whether the gateway starts and becomes whether the assistant behaves like your assistant instead of a generic local model wearing a chatbot costume.
+Once OpenClaw is installed, the important question changes.
 
-That behavior lives in the workspace.
+The question is no longer "does the gateway run". The question is whether the system has been shaped into something that actually fits your lab, your household, and your way of working.
 
-## Workspace Shape
+That shaping happens through the workspace, the agent configs, the scripts around them, and the discipline to keep each part doing only the job it should do.
 
-```text
-~/.openclaw/workspace/
-├── AGENTS.md
-├── SOUL.md
-├── TOOLS.md
-└── skills/
-    ├── homelab-monitor/
-    │   └── SKILL.md
-    ├── daily-briefing/
-    │   └── SKILL.md
-    └── ...
-```
+## The Practical Layout
 
-## Shape The Assistant With `AGENTS.md`
-
-Edit the main behavioral file:
-
-```bash
-nano ~/.openclaw/workspace/AGENTS.md
-```
-
-Example starting point:
-
-```markdown
-# Homelab Assistant
-
-You are a personal AI assistant running on a Proxmox VE homelab.
-
-## Environment
-
-- Host: Proxmox VE 8.x on Ryzen 9 5950X, 64 GB RAM, dual RTX 3090
-- Your container: CT 106 at 192.168.50.85
-- LLM backend: llama.cpp Router Mode at 192.168.50.45:8012
-- Available models: Qwen3-8B, GLM-4-9B, DeepSeek-R1-Qwen3-8B, GPT-OSS-20B
-- Other services:
-  - OpenWebUI: 192.168.50.30:42
-  - Pi-hole: 192.168.50.10 and 192.168.50.11
-  - Grafana: 192.168.50.80:3000
-  - Prometheus: 192.168.50.80:9090
-  - TrueNAS: 192.168.50.50
-  - Proxmox host: 192.168.50.20:8006
-
-## Capabilities
-
-- Answer questions about the homelab setup
-- Help troubleshoot network, GPU, container, and storage issues
-- Suggest Linux, Proxmox, Docker, and ZFS commands with explanation
-- Draft technical documentation in the lab's markdown style
-- Manage reminders and recurring briefings
-
-## Style
-
-- Be concise and direct
-- Use technical terminology accurately
-- Prefer practical steps over theory-first explanations
-```
-
-## Practical Use Cases
-
-### Quick Homelab Assistant
+The older one-file mental model is too small for the newer setup. A more truthful shape looks like this:
 
 ```text
-You: What's the command to check GPU memory usage on the Proxmox host?
-Bot: `nvidia-smi` — run it on 192.168.50.20. For continuous watching: `watch -n 1 nvidia-smi`
-
-You: How do I restart the llama.cpp service?
-Bot: SSH into CT 102 and run `systemctl restart llama-server`
+~/.openclaw/
+├── openclaw.json
+├── env
+├── agents/
+│   ├── commander/agent/config.json
+│   ├── household/agent/config.json
+│   ├── weather/agent/config.json
+│   └── ...
+├── workspace/
+│   ├── main/
+│   │   ├── AGENTS.md
+│   │   └── memory/
+│   ├── commander/
+│   │   ├── AGENTS.md
+│   │   ├── SOUL.md
+│   │   └── skills/
+│   ├── household/
+│   ├── researcher/
+│   ├── coder/
+│   └── ...
+├── scripts/
+└── config/
 ```
 
-### Daily Briefing
+That layout reflects a useful separation of concerns:
 
-Use the assistant as a scheduled briefing surface rather than a passive bot. The practical value is that status summaries arrive where you already are instead of waiting behind one browser tab you forget to reopen.
+- `openclaw.json` wires the gateway, channels, media processing, and global behavior.
+- `agents/*/agent/config.json` defines the runtime behavior and tool surface of each agent.
+- `workspace/*/AGENTS.md` and `SOUL.md` shape each agent's judgment, tone, and operating boundaries.
+- `skills/` captures repeatable procedures that deserve their own reusable prompt contract.
+- `scripts/` handles the boring, testable glue that should not live as prompt theater.
 
-### Command Builder And Explainer
+## Supported Extension Points Matter
 
-```text
-You: Build me a curl command to test whether the llama.cpp endpoint is healthy.
-Bot: `curl -s -o /dev/null -w "%{http_code}" http://192.168.50.45:8012/health`
-```
+One of the clearest lessons in the attached material is that OpenClaw rewards working with its real surfaces instead of inventing imaginary ones.
 
-### Documentation Drafter
+For example, the voice implementation notes make it explicit that the old `handlers/` idea is a dead end for the current binary. The supported path is gateway media config through `tools.media.audio`, backed by a real script and a real `whisper.cpp` service.
 
-OpenClaw works well as a first-draft assistant for troubleshooting notes, change logs, or runbook sections, especially when the workspace already teaches it the structure and tone of the homelab docs.
+That is a good rule for the whole system:
 
-### Reminder And Task Management
+- if behavior belongs at the gateway, configure the gateway,
+- if behavior belongs to one agent, teach that agent,
+- if behavior is reusable procedure, make it a skill,
+- if behavior depends on real I/O, use a script and make it observable.
 
-This is where the assistant starts justifying its existence. A browser chat can answer questions. An assistant that remembers to message you about kernel updates, scrub results, or follow-up checks is doing a different job.
+## What Belongs In `AGENTS.md`, `SOUL.md`, And `config.json`
 
-### Log Analysis And Debugging
+These files overlap, but they are not interchangeable.
 
-Switch to a heavier model when the input becomes structured logs rather than short questions. The fast model is for replies. The heavier model is for diagnosis.
+### `AGENTS.md`
 
-## Skills
+Use this for role, scope, environment, and the kind of practical context the model should treat as background truth.
 
-Search carefully instead of installing everything that sounds clever.
+Examples:
+
+- hostnames and container roles,
+- service locations,
+- what the agent is allowed to do,
+- what kind of requests should be escalated,
+- what tone or structure is expected in outputs.
+
+### `SOUL.md`
+
+Use this for decision-making posture rather than environment facts.
+
+This is where the attached OpenClaw material gets more mature. The better agents are not just told what they can access. They are told how to think about trade-offs, when to push back, what counts as acceptable evidence, and how to self-check before declaring success.
+
+### `config.json`
+
+Use this for model choice, tool permissions, system prompt wiring, and integration details that need to be machine-enforced rather than merely suggested.
+
+If you find yourself putting secrets or brittle environment-specific values directly into prompt files, stop. Those belong in env files, scripts, or service configuration, not in the prose layer.
+
+## When To Create A Skill
+
+Skills are worth the trouble when the pattern repeats and the steps matter.
+
+Good candidates:
+
+- a weather reporting routine with fixed sources and output structure,
+- a smoke-test procedure with a reliable pass or fail sequence,
+- a quality-gate handoff to an external reviewer,
+- a research workflow that has to gather, rank, and synthesize sources consistently.
+
+Bad candidates:
+
+- one-off preferences,
+- identity and tone,
+- facts about your environment that should live in the workspace,
+- brittle command snippets that belong in shell scripts instead.
+
+The practical test is whether you want the behavior to survive model swaps and prompting style changes. If yes, it probably wants a stronger contract than a casual paragraph in `AGENTS.md`.
+
+## The Real Use Cases Now
+
+The attached docs make it clear that OpenClaw is no longer just a question-answering surface. It has several distinct workload families.
+
+### 1. Commander-Led Build Work
+
+This is the part most people picture first: task decomposition, specialist delegation, coding, critique, execution, and review.
+
+The important detail is that the best results come from preserving the split between roles. Commander plans. Analyst sharpens the brief. Coder and coder2 produce and critique. Reviewer applies the internal gate. Executor performs the mechanical follow-through.
+
+That separation is not bureaucracy. It is how the system avoids one fast model confidently doing every job badly.
+
+### 2. Household Assistant Work
+
+Household is the most human-facing slice of the system.
+
+It sits behind Telegram and Discord, handles family-oriented workflows, talks to Radicale for calendars and todos, and increasingly acts as the bridge between ordinary daily requests and the more structured AI workforce.
+
+This is also where language discipline matters. Personal todos belong to Radicale. Board tasks belong to Command Center. The attached task-command design notes are useful mainly because they force that distinction to stay explicit.
+
+### 3. Voice-First Interaction
+
+Voice is not an add-on anymore. It is part of the input pipeline.
+
+If that pipeline is healthy, a voice note becomes plain text before the household agent ever reasons about it. That makes the rest of the system simpler, because the specialized logic still works on text while the gateway handles media conversion and transcription.
+
+### 4. Scheduled Specialists
+
+The weather agent is the clean example here. It has a narrow brief, trusted sources, and a schedule. Morning briefings use the same philosophy at a broader lifestyle level.
+
+This is worth copying. Scheduled agents should feel like appliances: predictable, narrow, and easy to inspect when they drift.
+
+### 5. Research And Synthesis
+
+The researcher notes show a healthy evolution away from vague "go search the web" behavior and toward a repeatable multi-source method.
+
+That is the kind of workload OpenClaw does well when it is constrained properly: gather, rank, compare, cite, and say what is still uncertain.
+
+## Keep The Boring Parts Outside The Prompt
+
+The most reliable OpenClaw setups put real mechanics into scripts.
+
+Examples from the attached material include:
+
+- task-board API wrappers,
+- heartbeat scripts,
+- transcription helpers,
+- deployment helpers,
+- smoke-test commands,
+- future metrics exporters.
+
+That is the right instinct. Prompts are where you teach judgment. Scripts are where you preserve exactness.
+
+## Practical Guidance For Growing The System
+
+If you are deciding where a new feature belongs, use this rule of thumb:
+
+| If the new thing is mainly... | Put it in... |
+|---|---|
+| agent personality and scope | `AGENTS.md` / `SOUL.md` |
+| enforced runtime behavior | agent `config.json` |
+| gateway or channel behavior | `openclaw.json` |
+| repeatable specialist procedure | a skill |
+| external API, shell, or file workflow | a script |
+
+The mistake to avoid is letting every new idea become prompt text. That feels fast at first, but it turns the system into folklore.
+
+## Skills: Install Less, Teach Better
+
+The older advice still holds: search carefully instead of installing everything that sounds impressive.
 
 ```bash
 openclaw skills search "homelab"
 openclaw skills search "monitoring"
-openclaw skills search "reminder"
+openclaw skills search "review"
 
 openclaw skills install <skill-name>
 openclaw skills list
 ```
 
-Many community skills assume large hosted models. Test them one at a time and be ready to switch to a heavier local model when the skill needs more reasoning than an 8-9B assistant should be asked to fake.
+Many community skills assume roomy hosted models, clean SaaS APIs, or workflows that do not match a local-first homelab. Test them one at a time, and keep the bar high. If a skill makes the system noisier, more brittle, or less understandable, it is not an upgrade.
 
 ## Where The Infrastructure Pages Still Matter
 
-If you need to rebuild the container, change channel auth, or re-expose the control surface, go back to the Proxmox workload pages:
+When the question becomes container build, daemon wiring, channel auth, or exposure through Cloudflare Tunnel, step back out to the deployment guides:
 
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows)
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
 - [OpenClaw LXC Build And llama.cpp Integration](/pages/proxmox/workloads/openclaw/lxc-build-and-llamacpp-integration)
 - [OpenClaw Channels, Daemon, And Secure Exposure](/pages/proxmox/workloads/openclaw/channels-daemon-and-secure-exposure)
+
+Use those pages for the plumbing. Use this page for the operating model that sits on top of it.
