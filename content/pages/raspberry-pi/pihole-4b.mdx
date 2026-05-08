@@ -1,0 +1,603 @@
+---
+title: "Pi-hole On Raspberry Pi 4B"
+description: "Deploy Pi-hole on a dedicated Raspberry Pi 4B with Pi OS Lite, SSH hardening, backups, and the Pi-side steps for active-passive DNS redundancy."
+publishedAt: "2026-02-01"
+updatedAt: "2026-04-13"
+order: 1
+status: published
+---
+
+# Pi-hole On Raspberry Pi 4B
+
+This page owns the Raspberry Pi side of the Pi-hole story.
+
+It does not try to explain why Pi-hole belongs in the homelab at all, and it does not repeat the Proxmox container build. Those already have canonical homes.
+
+- For the networking role, redundancy model, and upstream DNS choices, start with [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab).
+- For the Proxmox-backed secondary node, use [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc).
+
+What this page covers is the dedicated-Pi path: Raspberry Pi OS Lite, SSH access, security hardening, backup, and the Pi-side work needed when this node becomes the primary DNS server in an active-passive pair.
+
+## Hardware And Storage
+
+### Hardware Required
+
+```text
+✅ Raspberry Pi 4B (4GB minimum, 8GB recommended for Pi-hole)
+✅ 32GB+ microSD card (UHS-U3 or faster for reliability)
+✅ Wired Ethernet connection (gigabit, avoid Wi-Fi)
+✅ Power supply: USB-C 5.1V 3A minimum
+✅ Case with passive cooling (Pi-hole runs 24/7)
+✅ Another computer to prepare the microSD card
+```
+
+### Why 32 GB Or More
+
+```text
+Pi-hole Data Growth Per Day:
+├─ Small homelab (50 devices): ~80 MB/day of query logs
+├─ Medium homelab (150 devices): ~400 MB/day
+├─ Large homelab (300+ devices): ~800 MB/day
+│
+Storage Usage:
+├─ OS (Raspberry Pi OS Lite): ~2 GB after updates
+├─ Pi-hole application: ~500 MB
+├─ Log retention (24 hours): 80-800 MB
+├─ Total needed: 5-10 GB minimum
+└─ Recommended: 32 GB (leaves room for updates, backups)
+```
+
+If reliability matters more than cost, an SSD is still better than microSD. The optional SSD notes are at the end of this page.
+
+## Prepare Raspberry Pi OS Lite
+
+### Use Raspberry Pi Imager
+
+Download it from https://www.raspberrypi.com/software/
+
+In the imager:
+
+1. Choose device: Raspberry Pi 4.
+2. Choose OS: Raspberry Pi OS Lite (64-bit).
+3. Choose storage: your microSD card.
+
+Then configure the advanced options before writing.
+
+### Recommended Imager Settings
+
+- Hostname: `pihole`
+- Enable SSH: yes
+- Prefer public-key authentication if you already use SSH keys
+- Wi-Fi: leave unconfigured if Ethernet is the plan
+- Timezone and keyboard: set correctly now so logs and cron behave sanely later
+
+The source notes were explicit here for good reason: wired Ethernet is the right answer for a DNS server. Do not build core DNS on flaky Wi-Fi unless you enjoy avoidable ambiguity.
+
+## First Boot And SSH Access
+
+Find the Pi's IP address from the router or with a subnet scan, then connect:
+
+```bash
+ssh pi@<pihole-ip>
+```
+
+Update the system before installing Pi-hole:
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+## Install Pi-hole
+
+Use the official installer:
+
+```bash
+curl -sSL https://install.pi-hole.net | bash
+```
+
+During the installer:
+
+- choose a reliable upstream provider unless you already know you want Unbound somewhere else in the design
+- enable the web interface
+- keep query logging on unless you have a specific privacy reason to reduce visibility
+
+### Privacy Mode Guidance
+
+The installer asks about Pi-hole privacy mode. For a personal homelab, the sensible default is still the most useful one.
+
+| Mode | Best For | Recommendation |
+|------|----------|----------------|
+| Show Everything | personal homelab, troubleshooting, visibility | Recommended |
+| Hide Domains | partial privacy with some device visibility | Rarely the best final choice |
+| Hide Domains and Clients | shared household where visibility is sensitive | Reasonable compromise |
+| Anonymous Mode | maximum privacy, minimal diagnostics | Avoid unless you really mean it |
+
+You can change it later in the web UI under `Settings -> Privacy`.
+
+At the end of installation, save the admin password the installer prints.
+
+## Network Configuration
+
+### Recommended: Let The Router Keep DHCP
+
+The cleanest setup is still:
+
+- router handles DHCP
+- Pi-hole handles DNS
+- router advertises the Pi-hole IP to clients
+
+Use DHCP reservation or MAC binding in the router so the Pi always gets the same address.
+
+Then set the router DNS values to:
+
+- primary DNS: the Pi-hole IP
+- secondary DNS: the fallback or second Pi-hole IP for your final design
+
+Verify from another machine:
+
+```bash
+nslookup google.com
+```
+
+### Advanced: Pi-hole As DHCP Server
+
+Only do this if the router cannot hand out the DNS settings you need.
+
+```bash
+pihole -a -i local <pihole-ip> <gateway-ip> <netmask>
+```
+
+## Security Hardening
+
+### Move The Web UI To A Non-Default Port
+
+Edit the Pi-hole config:
+
+```bash
+ssh raspi@192.168.50.10
+
+sudo nano /etc/pihole/pihole.toml
+```
+
+Set:
+
+```toml
+[webserver]
+port = "31415s"
+```
+
+Then restart FTL:
+
+```bash
+# SSH into the Pi
+ssh root@192.168.50.10
+
+# Restart the web service
+systemctl restart pihole-FTL
+
+# Check if port 31415 is listening
+ss -tulnp | grep ':31415'
+
+# View recent errors
+tail -50 /var/log/pihole/FTL.log
+```
+
+### Change The Admin Password
+
+Do it immediately after installation from the web UI under `Settings -> Admin`.
+
+### Enable UFW
+
+```bash
+# SSH into Pi-hole
+ssh pi@<pihole-ip>
+
+# Install UFW
+sudo apt install ufw -y
+
+# Initialize firewall (reset to defaults)
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Allow specific ports
+sudo ufw allow 22/tcp    # SSH (enable before activating!)
+sudo ufw allow 53/tcp    # DNS TCP
+sudo ufw allow 53/udp    # DNS UDP
+sudo ufw allow 67/udp    # DHCP (if using Pi-hole DHCP)
+sudo ufw allow 68/udp    # DHCP client
+sudo ufw allow 80/tcp    # HTTP web UI
+sudo ufw allow 443/tcp   # HTTPS web UI (optional)
+
+# Enable firewall
+sudo ufw enable
+
+# Verify
+sudo ufw status
+```
+
+### Move SSH To Keys
+
+From your computer:
+
+```bash
+# macOS/Linux
+ssh-keygen -t ed25519 -C "pihole@home" -f ~/.ssh/pihole
+```
+
+Copy the key over:
+
+```bash
+ssh-copy-id -i ~/.ssh/pihole.pub pi@<pihole-ip>
+```
+
+Then on the Pi:
+
+```bash
+ssh pi@<pihole-ip>
+
+# Edit SSH config
+sudo nano /etc/ssh/sshd_config
+
+# Find and change these lines:
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitRootLogin no
+
+# Restart SSH
+sudo systemctl restart ssh
+```
+
+### Add `fail2ban`
+
+```bash
+ssh pi@<pihole-ip>
+
+# Install fail2ban
+sudo apt install fail2ban -y
+
+# Copy default config
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+
+# Edit configuration
+sudo nano /etc/fail2ban/jail.local
+```
+
+In the `sshd` section:
+
+```text
+enabled = true
+maxretry = 3
+findtime = 600
+bantime = 3600
+```
+
+Then:
+
+```bash
+sudo systemctl restart fail2ban
+sudo systemctl enable fail2ban
+
+# Check status
+sudo fail2ban-client status sshd
+```
+
+### Enable Automatic Security Updates
+
+```bash
+# Enable automatic security updates
+sudo apt install unattended-upgrades -y
+sudo dpkg-reconfigure -plow unattended-upgrades
+
+# Verify
+sudo nano /etc/apt/apt.conf.d/50unattended-upgrades
+
+# Enable
+sudo systemctl enable unattended-upgrades
+```
+
+## Performance And Storage Hygiene
+
+Check disk usage and database growth periodically:
+
+```bash
+# Check current disk usage
+df -h
+
+# Monitor Pi-hole database growth
+du -sh /etc/pihole/
+
+# Check logs
+tail -f /var/log/pihole.log
+```
+
+If you want to tune the DNS cache:
+
+```bash
+# Edit dnsmasq config
+sudo nano /etc/dnsmasq.d/05-pihole-custom-cname.conf
+
+# Add cache optimization:
+cache-size=10000
+
+# Also add:
+dns-forward-max=5000
+
+# Restart dnsmasq
+sudo systemctl restart dnsmasq
+```
+
+Watch resource usage directly:
+
+```bash
+# Check CPU usage
+top -o %CPU
+
+# Check memory
+free -h
+
+# Check temperature
+vcgencmd measure_temp
+```
+
+## Backup And Recovery
+
+Create a simple backup script on the Pi:
+
+```bash
+ssh pi@<pihole-ip>
+
+# Create backup directory
+sudo mkdir -p /home/pi/pihole-backups
+
+# Create backup script
+sudo nano /home/pi/backup-pihole.sh
+```
+
+Use this script:
+
+```bash
+#!/bin/bash
+
+# Pi-hole Backup Script
+BACKUP_DIR="/home/pi/pihole-backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/pihole-backup-$DATE.tar.gz"
+
+echo "[$(date)] Starting Pi-hole backup..."
+
+# Backup critical files
+sudo tar -czf "$BACKUP_FILE" \
+  /etc/pihole/ \
+  /etc/dnsmasq.d/ \
+  /home/pi/.ssh/ \
+  2>&1 | tee -a "$BACKUP_DIR/backup.log"
+
+# Verify backup
+if [ -f "$BACKUP_FILE" ]; then
+  echo "[$(date)] ✅ Backup completed: $BACKUP_FILE"
+  
+  # Keep only last 7 backups (remove oldest)
+  ls -t "$BACKUP_DIR"/pihole-backup-*.tar.gz | tail -n +8 | xargs rm -f
+else
+  echo "[$(date)] ❌ Backup failed!"
+  exit 1
+fi
+```
+
+Make it executable and schedule it:
+
+```bash
+# Make executable
+sudo chmod +x /home/pi/backup-pihole.sh
+
+# Edit crontab
+sudo crontab -e
+
+# Add this line (backs up at 2 AM daily):
+0 2 * * * /home/pi/backup-pihole.sh
+```
+
+To restore:
+
+```bash
+# SSH into Pi
+ssh pi@<pihole-ip>
+
+# Extract backup
+sudo tar -xzf /home/pi/pihole-backups/pihole-backup-YYYYMMDD_HHMMSS.tar.gz -C /
+
+# Restart Pi-hole services
+sudo systemctl restart pihole-FTL
+sudo systemctl restart dnsmasq
+sudo systemctl restart lighttpd
+
+# Verify
+curl http://localhost/admin/
+```
+
+## High Availability From The Raspberry Pi Side
+
+This is where the attachment had the most overlap with the rest of the wiki, so this page stays disciplined.
+
+It does not repeat the Proxmox secondary deployment or Docker alternative. Those already have their own canonical homes.
+
+What stays here is the Pi-side active-passive model: the Pi as a dedicated primary node, gravity-sync, DNS TTL choices, and failover testing.
+
+### Router DNS For An Active-Passive Pair
+
+Configure the router to advertise both DNS servers:
+
+- primary DNS: the Raspberry Pi node
+- secondary DNS: the secondary node, often the Proxmox-backed instance
+
+Keep DHCP on the router. That remains the cleanest model for this lab.
+
+### Reduce TTL So Failover Is Not Glacial
+
+On both Pi-hole instances:
+
+```bash
+sudo nano /etc/dnsmasq.d/05-pihole-custom-cname.conf
+
+# Add this line:
+local-ttl=300
+
+# Also add:
+min-cache-ttl=300
+max-cache-ttl=3600
+
+# Save and restart
+sudo systemctl restart dnsmasq
+```
+
+That keeps cache behavior sane while still allowing clients to recover within a few minutes when the primary disappears.
+
+### Install `gravity-sync` On The Secondary Pi-Based Node
+
+If the second instance is also Pi-based, the Pi-side sync workflow is:
+
+```bash
+# SSH into secondary
+ssh pi@pihole-2-ip
+
+# Download and install gravity-sync
+cd /opt
+sudo git clone https://github.com/vmstan/gravity-sync.git
+cd gravity-sync
+sudo chmod +x gravity-sync.sh
+
+# Create symlink
+sudo ln -s /opt/gravity-sync/gravity-sync.sh /usr/local/bin/gravity-sync
+```
+
+Set up SSH keys from primary to secondary:
+
+```bash
+# Generate SSH key with no passphrase (for automation)
+ssh-keygen -t ed25519 -f ~/.ssh/gravity-sync -N "" -C "gravity-sync"
+
+# Copy to secondary
+ssh-copy-id -i ~/.ssh/gravity-sync.pub pi@192.168.x.11
+```
+
+Initialize:
+
+```bash
+# Run interactive setup
+sudo gravity-sync config
+```
+
+Test the pull:
+
+```bash
+# Manual sync (pull from primary)
+sudo gravity-sync pull
+```
+
+Automate it hourly:
+
+```bash
+# Edit crontab
+sudo crontab -e
+
+# Add this line (sync every hour):
+0 * * * * /usr/local/bin/gravity-sync pull >/var/log/gravity-sync.log 2>&1
+```
+
+### Failover Test
+
+To verify the active-passive model really works:
+
+```bash
+# On the Raspberry Pi — temporarily stop Pi-hole
+pihole disable 120
+
+# From a client — DNS should still resolve via the secondary
+nslookup google.com
+```
+
+Or explicitly stop the services on the primary during a controlled test:
+
+```bash
+sudo systemctl stop pihole-FTL
+sudo systemctl stop dnsmasq
+```
+
+Then confirm clients fail over to the secondary and return to the primary when it comes back.
+
+### Monitor HA Health
+
+Create a simple local health check:
+
+```bash
+# Save as /home/pi/pihole-health-check.sh
+sudo nano /home/pi/pihole-health-check.sh
+```
+
+Use:
+
+```bash
+#!/bin/bash
+
+# Pi-hole Health Check
+
+# Check local DNS
+LOCAL_DNS=$(dig @127.0.0.1 google.com +short)
+if [ -z "$LOCAL_DNS" ]; then
+  echo "❌ Local DNS not responding!"
+  exit 1
+else
+  echo "✅ Local DNS responding"
+fi
+
+# Check disk space
+DISK_USAGE=$(df /etc/pihole | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ $DISK_USAGE -gt 80 ]; then
+  echo "⚠️  Disk usage high: ${DISK_USAGE}%"
+fi
+
+echo "Health check complete: $(date)"
+```
+
+Schedule it hourly:
+
+```bash
+0 * * * * /home/pi/pihole-health-check.sh >> /var/log/health-check.log 2>&1
+```
+
+## Optional: Move Pi-hole Data To SSD
+
+If you want to reduce dependence on microSD wear:
+
+```bash
+# Connect SSD via USB 3.0
+
+# Create mount point
+sudo mkdir -p /mnt/pihole-ssd
+
+# Identify USB device
+lsblk
+
+# Format device (WARNING: destroys data!)
+sudo mkfs.ext4 /dev/sda1
+
+# Mount permanently
+sudo nano /etc/fstab
+
+# Add this line:
+/dev/sda1  /mnt/pihole-ssd  ext4  defaults  0  2
+
+# Apply
+sudo mount -a
+
+# Move Pi-hole data to SSD
+sudo cp -r /etc/pihole /mnt/pihole-ssd/
+sudo mount --bind /mnt/pihole-ssd/pihole /etc/pihole
+```
+
+## Related Topics
+
+- [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) — the networking role, upstream DNS strategy, and redundancy model.
+- [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) — the Proxmox-backed secondary node instead of a second Pi-based deployment.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — the broader backup discipline that should still shape how you think about DNS infrastructure.

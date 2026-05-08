@@ -144,6 +144,40 @@ These components are available in every `.mdx` page without importing:
 - **Directory name = section slug**: `networking/` → `/pages/networking`
 - **File name = page slug**: `router-firmware.mdx` → `/pages/networking/router-firmware`
 
+## Content Ownership For Cross-Domain Topics
+
+Some subjects naturally span more than one section.
+
+Pi-hole is a networking topic, but "how do I run it in an LXC on Proxmox?" is a Proxmox topic.
+
+GPU passthrough is tied to GPU and AI workloads, but the actual host and guest procedure is still a Proxmox guide.
+
+The right answer in this wiki is not duplication. It is one canonical page plus deliberate cross-links.
+
+### Use This Rule
+
+| Reader question | Canonical home | Example |
+|-----------------|----------------|---------|
+| What is this? Why does it matter? | The domain section | DNS concepts in `networking/`, GPU ideas in `gpu-ai/` |
+| How do I run this on Proxmox? | The Proxmox section | Pi-hole on LXC, GPU passthrough, service deployment runbooks |
+| How does this work in general? | The conceptual section | VM/LXC theory in `virtualization/` |
+
+### Practical Rules
+
+- Keep one source of truth for a guide. Do not copy the same procedure into multiple sections.
+- Use landing pages to surface related content from other sections.
+- Use the opening of a how-to page to link back to the conceptual page that explains why the guide exists.
+- Preserve command blocks and validated procedural content exactly when porting older notes into the wiki.
+
+### Proxmox Section Shape
+
+Use these subsection boundaries when adding Proxmox content:
+
+- `proxmox/basics/` — conceptual platform sequence
+- `proxmox/setup/` — host bring-up and installation
+- `proxmox/operations/` — storage, backups, updates, notifications, troubleshooting
+- `proxmox/workloads/` — LXC/VM deployments, passthrough, and Proxmox-specific workload guides
+
 ---
 
 ## Nesting Beyond Two Levels

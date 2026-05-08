@@ -1,0 +1,291 @@
+---
+title: "Pi-hole LXC On Proxmox"
+description: "Deploy a secondary Pi-hole inside a Proxmox LXC container without mixing the platform-specific build steps into the broader networking design."
+publishedAt: "2026-02-08"
+updatedAt: "2026-02-08"
+order: 1
+status: published
+---
+
+# Pi-hole LXC On Proxmox
+
+This page is for the moment when the Pi-hole question stops being architectural and becomes operational on Proxmox.
+
+You already know why the lab wants a second DNS sinkhole. What you need now is a clean Proxmox deployment path that does not bury the networking decisions under container mechanics.
+
+The networking-side design lives in [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab). The dedicated Pi build lives in [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b). This page only covers the Proxmox workload layer.
+
+## Before You Start
+
+The original deployment notes below use `CT 102` because that was the validated secondary Pi-hole build at the time.
+
+If your current lab already uses a different container ID, keep the working ID you already have. Do not renumber a stable deployment just to make the documents look tidy.
+
+## Recommended Container Shape
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **102** | Next available after the earlier AI containers in the original build |
+| Hostname | `pihole-2` | Distinguishes the secondary instance |
+| **Disk Size** | **4 GB** | Enough room for logs and the query database |
+| **CPU Cores** | **1** | Pi-hole is lightweight |
+| **RAM** | **512 MiB** | Adequate for a small home network |
+| OS | Debian 13 | Consistent with the original container layout |
+| Bridge | `vmbr0` | Same LAN as the rest of the services |
+| **IPv4** | **192.168.50.11/24** | Static IP for the secondary DNS node |
+| Gateway | `192.168.50.1` | Router IP |
+| GPU Passthrough | **No** | Not relevant here |
+| Nesting | **Enabled** | Required for systemd in this Debian 13 LXC setup |
+
+## Fastest Path: Community Script With App Defaults
+
+If you want the cleanest repeatable build, pre-write the app defaults file and then let the community script create the container with those values.
+
+### Create The App Defaults File
+
+On the Proxmox host:
+
+```bash
+# Create the directory (if it doesn't exist)
+mkdir -p /usr/local/community-scripts/defaults
+
+# Write the vars file
+cat > /usr/local/community-scripts/defaults/pihole.vars << 'EOF'
+# Pi-hole (Secondary DNS Server) - App Defaults
+# Lightweight DNS sinkhole — no GPU needed
+var_cpu=1
+var_ram=512
+var_disk=4
+var_unprivileged=1
+var_brg=vmbr0
+var_net=192.168.50.11/24
+var_gateway=192.168.50.1
+var_hostname=pi-hole-2
+var_os=debian
+var_version=13
+var_ssh=yes
+var_nesting=1
+var_protection=yes
+var_tags=dns;adblock
+var_timezone=Australia/Melbourne
+var_container_storage=local-zfs
+var_template_storage=local
+EOF
+```
+
+### Run The Community Script
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/pihole.sh)"
+```
+
+Select **App Defaults** so the container uses the values you already wrote.
+
+When the script asks about Unbound, answer based on the networking design you chose on [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab):
+
+- no if you want third-party upstream DNS
+- yes if you want local recursive Unbound
+- yes plus forwarding if you want Unbound with DNS-over-TLS
+
+### Verify The Container After Creation
+
+```bash
+# List all containers
+pct list
+
+# Enter the container
+pct enter 102
+
+# Verify networking
+hostname -I
+# Expected: 192.168.50.11
+
+ping -c 3 192.168.50.1
+# Expected: replies from gateway
+
+# Check Pi-hole status
+pihole status
+# Expected: FTL is running, DNS service active
+
+exit  # Return to host shell
+```
+
+## Manual Path: Create The LXC Yourself
+
+If you would rather own the container creation directly, the original manual path is below.
+
+### Step 1: Download The Template
+
+```bash
+# On the Proxmox host — check available Debian templates
+pveam available | grep debian-12-standard
+
+# Download the template
+pveam download local debian-12-standard_12.12-1_amd64.tar.zst
+
+# Verify download
+pveam list local | grep debian
+```
+
+### Step 2: Create The Container
+
+```bash
+pct create 102 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname pihole-2 \
+  --password \
+  --rootfs local-zfs:4 \
+  --cores 1 \
+  --memory 512 \
+  --swap 256 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.11/24,gw=192.168.50.1 \
+  --nameserver 1.1.1.1 \
+  --unprivileged 1 \
+  --features nesting=1 \
+  --onboot 1 \
+  --start 0
+```
+
+### Step 3: Start And Enter The Container
+
+```bash
+pct start 102
+pct enter 102
+```
+
+### Step 4: Install Pi-hole
+
+```bash
+# Update system
+apt update && apt upgrade -y
+
+# Install prerequisites
+apt install -y curl
+
+# Run the Pi-hole installer
+curl -sSL https://install.pi-hole.net | bash
+```
+
+After installation completes:
+
+```bash
+# Set the web admin password
+pihole setpassword
+
+# Verify Pi-hole is running
+pihole status
+
+exit  # Return to host shell
+```
+
+### Step 5: Verify From The Host
+
+```bash
+# Test DNS resolution via the new Pi-hole
+dig @192.168.50.11 example.com
+
+# Test ad blocking
+dig @192.168.50.11 ads.google.com
+# Expected: 0.0.0.0
+```
+
+## Dashboard And Service Checks
+
+Set the admin password if you have not already:
+
+```bash
+# From the Proxmox host
+pct exec 102 -- pihole setpassword
+```
+
+Useful day-one checks from the host:
+
+```bash
+# Start / Stop / Restart
+pct start 102
+pct stop 102
+pct restart 102
+
+# Enter container shell
+pct enter 102
+
+# Quick command execution without entering
+pct exec 102 -- pihole status
+pct exec 102 -- pihole -up
+pct exec 102 -- pihole -g
+
+# Check container resource usage
+pct exec 102 -- free -h
+pct exec 102 -- df -h
+```
+
+## Proxmox-Native Backup And Rollback
+
+This is the part that properly belongs here instead of in the networking concept page.
+
+### Snapshots
+
+```bash
+# Create a snapshot
+pct snapshot 102 pre-update --description "Before Pi-hole update"
+
+# List snapshots
+pct listsnapshot 102
+
+# Rollback if something breaks
+pct rollback 102 pre-update
+```
+
+### Full Container Backup
+
+```bash
+# Backup to local storage (compressed)
+vzdump 102 --storage local --compress zstd
+
+# Restore from backup
+pct restore 102 /var/lib/vz/dump/vzdump-lxc-102-*.tar.zst --storage local-zfs
+```
+
+### Pi-hole Settings Export
+
+Pi-hole's Teleporter export still matters even though the container itself can be snapshotted.
+
+Use it when you want a Pi-hole-native backup of blocklists, settings, and custom entries independent of the Proxmox backup layer.
+
+## Troubleshooting Checks
+
+```bash
+# Check if Pi-hole FTL is running
+pct exec 102 -- pihole status
+
+# Verify port 53 is listening
+pct exec 102 -- ss -tulnp | grep ':53'
+
+# Test from inside the container
+pct exec 102 -- dig example.com @127.0.0.1
+# If this fails: FTL is not running or misconfigured
+
+# Check container networking
+pct exec 102 -- ping -c 3 192.168.50.1
+# If this fails: container network config issue
+```
+
+```bash
+# Check if the web server is running (Pi-hole v6 uses embedded web server in FTL)
+pct exec 102 -- systemctl status pihole-FTL
+
+# Check if port 80 is in use by something else
+pct exec 102 -- ss -tulnp | grep ':80'
+
+# Restart FTL
+pct exec 102 -- systemctl restart pihole-FTL
+
+# Check FTL log for errors
+pct exec 102 -- tail -50 /var/log/pihole/FTL.log
+```
+
+## Related Topics
+
+- [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) — the networking-side architecture, failover, and upstream DNS decisions.
+- [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) — the dedicated Pi deployment path when the DNS node should live on its own hardware.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — the broader Proxmox backup routines around containers and workloads.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where this container fits into the regular host maintenance window.

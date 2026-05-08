@@ -1,0 +1,470 @@
+---
+title: "GPU Passthrough On Proxmox"
+description: "Install NVIDIA drivers on the Proxmox host, expose GPUs into LXC containers, and keep single- or dual-GPU AI workloads stable inside the Proxmox stack."
+publishedAt: "2026-02-06"
+updatedAt: "2026-02-25"
+order: 2
+status: published
+---
+
+# GPU Passthrough On Proxmox
+
+This is the platform-specific side of the GPU story.
+
+The question here is no longer whether a dedicated GPU is worth having. The question is how to make Proxmox behave properly once the GPU exists: host driver, persistence, device exposure, and the specific container mechanics that make AI workloads feel native instead of awkward.
+
+If you want the hardware and workload reasoning first, start with [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai).
+
+## Scope
+
+This guide assumes:
+
+- a Proxmox host already exists
+- the machine includes at least one NVIDIA GPU intended for AI workloads
+- you want to expose that GPU into one or more LXC containers
+
+If your homelab does not include a dedicated GPU, skip this page entirely.
+
+## Host Preparation
+
+SSH into Proxmox and install dependencies:
+
+```bash
+ssh root@192.168.1.100
+
+# Update system
+apt update && apt upgrade -y
+
+# Install required packages
+apt install -y \
+  g++ \
+  freeglut3-dev \
+  build-essential \
+  libx11-dev \
+  libxmu-dev \
+  libxi-dev \
+  libglu1-mesa-dev \
+  libfreeimage-dev \
+  libglfw3-dev \
+  wget \
+  htop \
+  btop \
+  nvtop \
+  nano \
+  glances \
+  git \
+  pciutils \
+  cmake \
+  curl \
+  libcurl4-openssl-dev \
+  dkms \
+  make
+
+# Install Proxmox-specific kernel headers
+apt install -y pve-headers-$(uname -r)
+
+# Update initramfs
+update-initramfs -u
+
+# Reboot
+reboot
+```
+
+## Download And Install The NVIDIA Driver
+
+```bash
+# Assuming driver version 580.126.09 (check current latest)
+cd /tmp
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
+
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+```
+
+Install on the host:
+
+```bash
+# Install driver with DKMS support
+./NVIDIA-Linux-x86_64-580.126.09.run --dkms
+
+# Installation prompts:
+# - Register DKMS module: YES
+# - Install 32-bit libraries: NO (optional)
+# - Modify /etc/X11/xorg.conf: NO (not needed for server)
+# - Update initramfs: YES
+
+# Verify installation
+nvidia-smi
+```
+
+### If You Hit The `.run` Versus Debian Package Conflict
+
+```bash
+# 1. Remove all Debian-packaged NVIDIA drivers
+apt purge -y 'nvidia-*' 'libnvidia-*'
+apt autoremove -y
+
+# 2. Verify nothing is left
+dpkg -l | grep -i nvidia
+# Should return no results
+
+# 3. Reboot to clear any loaded modules
+reboot
+
+# 4. After reboot, install with the .run file
+cd /tmp
+./NVIDIA-Linux-x86_64-580.126.09.run --dkms
+```
+
+## Enable Persistence Mode
+
+```bash
+# Enable persistence
+nvidia-smi -pm 1
+
+# Set power limit (RTX 3090 max is 350W, set to 250W for stability)
+nvidia-smi -pl 250
+
+# Verify settings
+nvidia-smi -q -d POWER
+
+# Make persistent across reboots (add to crontab)
+# First, create a script
+cat > /usr/local/bin/nvidia-persist.sh << 'EOF'
+#!/bin/bash
+nvidia-smi -pm 1
+nvidia-smi -pl 250
+EOF
+
+chmod +x /usr/local/bin/nvidia-persist.sh
+
+# Add to crontab
+(crontab -l 2>/dev/null; echo "@reboot /usr/local/bin/nvidia-persist.sh") | crontab -
+```
+
+Monitor the host GPU:
+
+```bash
+# Real-time GPU monitoring
+nvtop
+
+# One-time status check
+nvidia-smi
+
+# Check GPU temperatures (safe operating range: 0-85°C)
+nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader -l 1
+
+# View power consumption
+nvidia-smi --query-gpu=power.draw,power.limit --format=csv -l 1
+```
+
+## GPU Passthrough To LXC Containers
+
+LXC containers do not inherit direct GPU access automatically. They share the host kernel, but device files still have to be exposed intentionally.
+
+That is the whole point of the passthrough step below.
+
+### Push The Driver Into The Container
+
+```bash
+pct push 100 NVIDIA-Linux-x86_64-580.126.09.run /tmp/NVIDIA-Linux-x86_64-580.126.09.run
+```
+
+Inside the container:
+
+```bash
+# Enter container console, where 100 is the container ID where the driver was pushed and needs to be installed.
+pct enter 100
+
+cd /tmp
+
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run 
+
+# Install without kernel modules (host provides them). Which means we only install the userspace libraries and tools, not the kernel module which is shared from the host.
+./NVIDIA-Linux-x86_64-580.126.09.run --no-kernel-module
+```
+
+Alternative invocation if the warning is noisy:
+
+```bash
+./NVIDIA-Linux-x86_64-580.126.09.run \
+  --no-kernel-module \
+  --no-opengl-files \
+  --no-glvnd-egl-client \
+  --no-glvnd-glx-client
+```
+
+### Identify GPU Devices On The Host
+
+```bash
+# List GPU device files
+ls -la /dev/nvidia*
+```
+
+### Add Devices To The Container Config
+
+```bash
+# Edit container config directly
+nano /etc/pve/lxc/100.conf
+
+# Add these lines at the end (replace 100 with your container ID):
+
+# GPU device passthrough (Proxmox native syntax)
+# Exposes individual GPU device files to the container
+dev0: /dev/nvidia0
+dev1: /dev/nvidiactl
+dev2: /dev/nvidia-uvm
+dev3: /dev/nvidia-uvm-tools
+dev4: /dev/nvidia-caps/nvidia-cap1
+dev5: /dev/nvidia-caps/nvidia-cap2
+```
+
+Restart and verify:
+
+```bash
+# Or via CLI:
+pct restart 100  # Replace 100 with container ID
+```
+
+```bash
+# Enter container console
+pct exec 100 bash
+
+# Inside container, install NVIDIA driver (no kernel modules)
+# Download same driver version as host:
+cd /tmp
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
+
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+
+# Install without kernel modules (host provides them)
+./NVIDIA-Linux-x86_64-580.126.09.run --no-kernel-module
+
+# Verify GPU is accessible
+nvidia-smi
+
+# Exit container
+exit
+```
+
+### Troubleshooting GPU Passthrough
+
+```bash
+# If GPU not detected in container:
+
+# 1. Verify GPU still works on host
+nvidia-smi  # On Proxmox host
+
+# 2. Check container has proper permissions
+cat /etc/pve/lxc/100.conf | grep nvidia
+
+# 3. Verify device files exist in container
+pct exec 100 ls -la /dev/nvidia*
+
+# 4. Check dmesg for errors
+pct exec 100 dmesg | tail -20
+
+# 5. Restart container (not just reboot)
+pct stop 100
+pct start 100
+
+# 6. Force device re-detection
+pct exec 100 nvidia-smi -L
+```
+
+## Dual GPU Setup
+
+If a second identical GPU is added, Proxmox and the NVIDIA stack will treat it as a second independent device. No special multi-GPU mode is required just to make both cards visible.
+
+### Verify Both GPUs
+
+```bash
+# List all NVIDIA devices on the PCI bus
+lspci | grep -i nvidia
+
+# Confirm driver sees both GPUs
+nvidia-smi
+
+# List GPU device files — you should now see nvidia0 and nvidia1
+ls -la /dev/nvidia*
+```
+
+### Verify IOMMU Groups
+
+```bash
+# Check IOMMU groups for all PCI devices
+find /sys/kernel/iommu_groups -type l | sort -V | while read f; do
+  device=$(basename "$f")
+  group=$(echo "$f" | grep -oP 'iommu_groups/\K[0-9]+')
+  echo "Group $group: $(lspci -nns $device 2>/dev/null)"
+done | grep -i nvidia
+```
+
+### Persistence Script For Two GPUs
+
+```bash
+cat > /usr/local/bin/nvidia-persist.sh << 'EOF'
+#!/bin/bash
+# GPU 0: MSI RTX 3090
+nvidia-smi -i 0 -pm 1
+nvidia-smi -i 0 -pl 250
+
+# GPU 1: EVGA RTX 3090
+nvidia-smi -i 1 -pm 1
+nvidia-smi -i 1 -pl 250
+EOF
+
+chmod +x /usr/local/bin/nvidia-persist.sh
+
+# Apply immediately
+/usr/local/bin/nvidia-persist.sh
+
+# Verify both GPUs
+nvidia-smi -q -d POWER | grep -A4 "GPU 0\|GPU 1\|Power Management\|Power Limit"
+```
+
+### Strategy A: One GPU Per Container
+
+Container 100:
+
+```bash
+# Edit container 100 config
+nano /etc/pve/lxc/100.conf
+
+# Add GPU 0 devices only:
+dev0: /dev/nvidia0
+dev1: /dev/nvidiactl
+dev2: /dev/nvidia-uvm
+dev3: /dev/nvidia-uvm-tools
+dev4: /dev/nvidia-caps/nvidia-cap1
+dev5: /dev/nvidia-caps/nvidia-cap2
+```
+
+Container 101:
+
+```bash
+# Edit container 101 config
+nano /etc/pve/lxc/101.conf
+
+# Add GPU 1 device only (nvidia1):
+dev0: /dev/nvidia1
+dev1: /dev/nvidiactl
+dev2: /dev/nvidia-uvm
+dev3: /dev/nvidia-uvm-tools
+dev4: /dev/nvidia-caps/nvidia-cap1
+dev5: /dev/nvidia-caps/nvidia-cap2
+```
+
+Verify:
+
+```bash
+# Container 100
+pct exec 100 nvidia-smi
+
+# Container 101
+pct exec 101 nvidia-smi
+```
+
+### Strategy B: Both GPUs In One Container
+
+```bash
+# Edit container 100 config
+nano /etc/pve/lxc/100.conf
+
+# Pass both GPUs to the same container:
+dev0: /dev/nvidia0
+dev1: /dev/nvidia1
+dev2: /dev/nvidiactl
+dev3: /dev/nvidia-uvm
+dev4: /dev/nvidia-uvm-tools
+dev5: /dev/nvidia-caps/nvidia-cap1
+dev6: /dev/nvidia-caps/nvidia-cap2
+```
+
+```bash
+# Inside container 100
+nvidia-smi
+```
+
+### Restrict Processes With `CUDA_VISIBLE_DEVICES`
+
+```bash
+# Pin a process to GPU 0 only
+CUDA_VISIBLE_DEVICES=0 ollama serve
+
+# Pin a process to GPU 1 only
+CUDA_VISIBLE_DEVICES=1 ./llama-server -m model.gguf
+
+# Use both GPUs (default when variable is unset or set to "all")
+CUDA_VISIBLE_DEVICES=0,1 python train.py
+
+# Check which GPU a running process is using
+nvidia-smi pmon -s u  # Real-time per-GPU process monitor
+```
+
+## Common Recovery Paths
+
+### Secure Boot Blocking The Driver
+
+```bash
+# Remove failed installation completely
+apt remove --purge nvidia-driver-* nvidia-dkms-* 2>/dev/null
+apt autoremove -y
+apt clean
+
+# Update system
+apt update && apt upgrade -y
+
+# Reinstall kernel headers
+apt install -y pve-headers-$(uname -r)
+
+# Download and install fresh driver
+cd /tmp
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+
+# Install with DKMS (should work now without Secure Boot)
+./NVIDIA-Linux-x86_64-580.126.09.run --dkms
+
+# Verify successful installation
+nvidia-smi
+```
+
+### DKMS Mismatch After A Kernel Update
+
+```bash
+# Install headers for the NEW kernel
+apt install -y pve-headers-$(uname -r)
+
+# Rebuild NVIDIA module for new kernel (replace version if different)
+dkms install nvidia/580.126.09 -k $(uname -r)
+
+# Verify it installed
+dkms status
+
+# Load the modules
+modprobe nvidia
+modprobe nvidia-uvm
+modprobe nvidia-modeset
+
+# Verify devices appeared
+ls -la /dev/nvidia*
+
+# Restore persistence settings
+/usr/local/bin/nvidia-persist.sh
+```
+
+### GPU Running Too Hot
+
+```bash
+# Check current temperature
+nvidia-smi --query-gpu=temperature.gpu --format=csv
+
+# Reduce power limit to lower heat
+nvidia-smi -pl 200  # Reduce from 350W to 200W
+```
+
+## Related Topics
+
+- [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai) — the conceptual side of model sizing, VRAM, and workload tradeoffs.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — how GPU containers and driver versions fit into the broader maintenance window.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — GPU telemetry and alerting once the host is running real workloads.

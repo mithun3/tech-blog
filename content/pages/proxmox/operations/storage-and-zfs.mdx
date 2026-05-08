@@ -1,0 +1,292 @@
+---
+title: "Storage And ZFS"
+description: "Day-two storage work on Proxmox: understanding rpool, secondary pools, compression, scrubs, and the risky-but-sometimes-necessary pool expansion tasks that happen after the install." 
+publishedAt: "2026-02-05"
+updatedAt: "2026-02-06"
+order: 1
+status: published
+---
+
+# Storage And ZFS
+
+Storage looks tidy during installation because the installer hides most of the consequences behind a few sensible defaults.
+
+The consequences still arrive later.
+
+This page is for that later stage: when the host already exists and you need to understand what lives on `rpool`, where backup storage should sit, how scrubs and compression fit into routine operations, and how to make changes without turning storage into the most fragile part of the lab.
+
+If you want the conceptual storage overview first, start with [Storage And Snapshots](/pages/proxmox/basics/storage-and-snapshots). This page is the operational layer on top of that model.
+
+## Understand The Pool Shape First
+
+Proxmox's root storage is not just a single lump of disk.
+
+The core shape looks like this:
+
+```text
+rpool (root pool - for OS and VMs)
+├── pve-root (root filesystem)
+├── pve-data (VM storage pool)
+└── pve-swap (swap partition)
+```
+
+That is the foundation the rest of the lab is built on.
+
+Before you make changes, inspect it directly:
+
+```bash
+# SSH into Proxmox (use IP from installation, e.g., 192.168.50.20)
+ssh root@192.168.50.20
+
+# List pools
+zpool list
+
+# Detailed pool status
+zpool status rpool
+
+# View datasets
+zfs list
+```
+
+## Secondary Storage Pools
+
+The host becomes much easier to operate once backups and bulk data stop competing with the root pool.
+
+### Backup Mirror
+
+```bash
+# Create mirror pool from two 1TB SATA drives
+zpool create -f backup mirror /dev/sda /dev/sdb
+
+# Verify
+zpool list backup
+
+# Create dataset for backups
+zfs create backup/proxmox-backups
+```
+
+### NAS-Style Pool
+
+The original notes use a host-side `naspool`, even though a later TrueNAS VM may replace it.
+
+```bash
+# Create RAID-Z1 pool from two 8TB SATA drives
+# RAID-Z1 = one drive failure tolerance
+zpool create -f naspool raidz1 /dev/sdc /dev/sdd
+
+# Or create mirror for higher safety (at cost of capacity)
+# zpool create -f naspool mirror /dev/sdc /dev/sdd
+
+# Verify
+zpool list naspool
+
+# Create datasets for different purposes
+zfs create naspool/media          # Video/audio storage
+zfs create naspool/documents      # Document archives
+zfs create naspool/vm-backups     # VM backup storage
+```
+
+If the lab is moving toward a dedicated NAS VM or separate NAS hardware, treat `naspool` as an intermediate stage, not a sacred endpoint.
+
+## Compression And Health Checks
+
+Compression is one of the easy wins that should be set deliberately instead of left vague.
+
+```bash
+# Enable compression on data pools (reduces disk usage 20-40%)
+zfs set compression=zstd rpool/pve-data
+zfs set compression=zstd backup/proxmox-backups
+zfs set compression=zstd naspool
+```
+
+And scrubs are not optional theater. They are the routine way to catch latent trouble before it becomes visible damage.
+
+```bash
+# Daily health check
+zpool scrub rpool
+
+# Check progress
+zpool status rpool
+
+# Edit crontab: crontab -e
+# Schedule weekly scrubs (add to crontab)
+0 2 * * 0 /usr/sbin/zpool scrub rpool
+0 2 * * 0 /usr/sbin/zpool scrub backup
+0 2 * * 0 /usr/sbin/zpool scrub naspool
+```
+
+## When You Need More Space On `rpool`
+
+This is one of those jobs that is absolutely possible and still deserves respect.
+
+If the installer left a large chunk of NVMe space unused, you can reclaim it, but only if you record the existing partition layout correctly and recreate the ZFS partition from the exact same start sector.
+
+### Safety First
+
+```bash
+# Snapshot all VMs (repeat for each VM ID)
+# Auto-snapshot all QEMU VMs
+for vmid in $(qm list | awk 'NR>1 {print $1}'); do
+    echo "Snapshotting VM $vmid..."
+    qm snapshot "$vmid" pre-expand --description "Before rpool partition resize"
+done
+
+# Auto-snapshot all LXC containers
+for ctid in $(pct list | awk 'NR>1 {print $1}'); do
+    echo "Snapshotting container $ctid..."
+    pct snapshot "$ctid" pre-expand --description "Before rpool partition resize"
+done
+
+# Verify snapshots were created
+echo "--- VM snapshots ---"
+for vmid in $(qm list | awk 'NR>1 {print $1}'); do
+    qm listsnapshot "$vmid"
+done
+
+echo "--- Container snapshots ---"
+for ctid in $(pct list | awk 'NR>1 {print $1}'); do
+    pct listsnapshot "$ctid"
+done
+
+# Confirm pool is healthy — no errors before proceeding
+zpool status rpool
+zpool scrub rpool          # wait for completion
+zpool status rpool         # confirm: 0 errors, scan: scrub repaired 0B
+```
+
+### Record The Partition Start Sector
+
+```bash
+# CRITICAL: Record the exact Start sector of p3 on BOTH drives before any changes
+sgdisk -p /dev/nvme0n1
+sgdisk -p /dev/nvme1n1
+```
+
+### Resize The ZFS Partition Entries
+
+```bash
+# Delete partition entry only (ZFS data remains on disk)
+sgdisk -d 3 /dev/nvme0n1
+
+# Recreate p3 from the SAME start sector to end of disk (0 = last sector)
+# Replace <P3_START_SECTOR> with the value recorded in Phase 2
+sgdisk -n "3:<P3_START_SECTOR>:0" -t 3:bf01 /dev/nvme0n1
+# bf01 = Solaris/ZFS partition type GUID
+
+# Inform kernel of partition table change
+partprobe /dev/nvme0n1
+```
+
+```bash
+# Same process for the second mirror leg
+sgdisk -d 3 /dev/nvme1n1
+sgdisk -n "3:<P3_START_SECTOR>:0" -t 3:bf01 /dev/nvme1n1
+partprobe /dev/nvme1n1
+```
+
+### Tell ZFS To Expand
+
+```bash
+# Enable autoexpand on the pool
+zpool set autoexpand=on rpool
+
+# Tell ZFS to re-read the new partition size for each vdev
+# (use exact by-id paths from: zpool status rpool)
+zpool online -e rpool nvme-Force_MP600_20148230000128563050-part3
+zpool online -e rpool nvme-nvme.1e4b-323530333237373535323030313738-53504343204d2e32205043496520535344-00000001-part3
+```
+
+### Verify The Result
+
+```bash
+# Confirm pool size increased to ~1.8–2.0 TiB
+zpool list rpool
+
+# Confirm all datasets intact
+zfs list -r rpool
+
+# Confirm Proxmox storage shows updated size
+pvesm status
+```
+
+## Accessing Data From Guests
+
+If the host is exporting NAS-style datasets, containers can mount them directly.
+
+```bash
+# NAS pool is directly accessible
+ls -la /naspool/media/
+ls -la /naspool/documents/
+
+# Mount via NFS for other systems (share with other machines):
+zfs set sharenfs=on naspool/media
+zfs set sharenfs=on naspool/documents
+
+# Check NFS shares
+zfs get sharenfs naspool
+```
+
+```bash
+# Inside container or VM, mount NFS share
+# Example: Mount NAS media share to container
+pct exec 100 mkdir -p /mnt/nas-media
+pct exec 100 mount -t nfs4 192.168.50.20:/naspool/media /mnt/nas-media
+
+# Verify mount
+pct exec 100 mount | grep nas-media
+```
+
+## Common Storage Failures
+
+### Pool Is `DEGRADED`
+
+```bash
+# Check which disk is failing
+zpool status rpool
+
+# If one disk shows OFFLINE/FAULTED:
+# For RAID1: System continues working, but no redundancy
+# For RAID0: System fails if any disk fails (critical!)
+
+# Replace failed disk:
+# 1. Power off and physically replace disk
+# 2. Run:
+zpool replace rpool /dev/nvme0n1  # (or appropriate device)
+# 3. Monitor resilver:
+watch -n 5 'zpool status rpool'
+```
+
+### Out Of Disk Space
+
+```bash
+# Check which pool is full
+zfs list
+df -h /
+
+# For root pool (rpool):
+# 1. Delete old snapshots: zfs destroy rpool@old-backup
+# 2. Delete old backups: rm /backup/proxmox-backups/old-*
+# 3. Compress data: zfs set compression=zstd rpool/pve-data
+# 4. Add disk using RAID1 expansion (must match size)
+```
+
+### Slow Disk Performance
+
+```bash
+# Check if disk is heavily used
+iostat -x 5  # Monitor I/O statistics
+
+# Check for errors
+zpool status rpool
+smartctl -a /dev/nvme0n1
+
+# Performance tuning:
+# 1. Enable compression (if not already):
+zfs set compression=zstd rpool/pve-data
+```
+
+## Related Topics
+
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — what to do once the storage layout is healthy enough to trust with backups.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where scrub cadence, snapshots, and GPU-safe maintenance windows intersect.
+- [Storage And Snapshots](/pages/proxmox/basics/storage-and-snapshots) — the conceptual storage explanation before the operational layer.

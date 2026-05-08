@@ -1,0 +1,331 @@
+---
+title: "Homelab Installation"
+description: "Install Proxmox on a homelab host with the right BIOS settings, storage choices, and installer decisions before the rest of the lab begins to depend on them."
+publishedAt: "2026-02-05"
+order: 1
+status: published
+---
+
+# Homelab Installation
+
+By the time Proxmox boots cleanly for the first time, most of the expensive mistakes are already behind you.
+
+That is why this page spends time on the boring part.
+
+The BIOS toggles, storage layout, installer path, and first network choices are not glamorous, but they decide whether the host feels steady later or whether every passthrough, ZFS change, and guest deployment starts with "I probably should have done this differently on day one."
+
+If you want the conceptual picture first, start with [Proxmox Basics](/pages/proxmox/basics). If you are already at the keyboard with a machine to build, this is the page.
+
+## Target System
+
+This guide assumes a specific homelab host shape:
+
+| Component | Specification | Purpose |
+|-----------|---------------|---------|
+| **Motherboard** | MSI MAG X570 TOMAHAWK WIFI | Base platform |
+| **CPU** | AMD Ryzen 9 5950X (16-core) | Virtualization host |
+| **RAM** | 64GB DDR4 ECC | VM allocation & ZFS ARC cache |
+| **GPU** | NVIDIA RTX 3090 | AI inference |
+| **M.2_1** | 2TB NVMe | Proxmox OS root filesystem RAID1 |
+| **M.2_2** | 2TB NVMe | Proxmox OS root filesystem RAID1 |
+| **SATA 1** | 1TB HDD | Backup/secondary storage |
+| **SATA 2** | 1TB HDD | Backup/secondary storage |
+| **SATA 3** | 8TB WD RED NAS HDD | TrueNAS NAS storage (mirror leg 1) |
+| **SATA 4** | 8TB WD RED NAS HDD | TrueNAS NAS storage (mirror leg 2) |
+| **SATA 5** | 8TB WD RED NAS HDD | TrueNAS NAS storage (hot spare) |
+
+That exact hardware is not required, but the decisions below assume the same kind of host: one Proxmox box expected to run real services, not just throwaway experiments.
+
+## The Hardware Shape That Matters
+
+What matters most here is not brand loyalty. It is capability.
+
+- SVM must be available for KVM virtualization.
+- IOMMU must be enabled if you ever want passthrough.
+- Storage should be planned around ZFS early instead of treated like an afterthought.
+- The host should have enough memory that ZFS and guests are not immediately fighting over scraps.
+
+If that foundation is wrong, everything after it becomes compensating behavior.
+
+## BIOS Configuration
+
+Before you install Proxmox, get the firmware side into a sane state.
+
+### Virtualization And CPU Features
+
+**Path:** `Advanced > CPU Features`
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| SVM (Secure Virtual Machine) | **ENABLED** | Required for KVM hypervisor |
+| SMT (Simultaneous Multithreading) | **ENABLED** | Utilizes all 32 vCPU threads |
+| Core Performance Boost | **ENABLED** | Dynamic frequency scaling |
+| Precision Boost | **ENABLED** | Improves clock speeds under load |
+
+### IOMMU Configuration
+
+**Path:** `Advanced > AMD CBS` (or `Advanced > Chipset`)
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| AMD-Vi (IOMMU) | **ENABLED** | Critical for GPU/device passthrough |
+| IOMMU Multicast Address Filtering | **ENABLED** | Better VM network performance |
+
+### GPU Passthrough Settings
+
+**Path:** `Advanced > Integrated Peripherals`
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| CSM (Compatibility Support Module) | **DISABLED** | Use UEFI only for GPU passthrough |
+| Secure Boot | **DISABLED** | Simplifies GPU OVMF boot + NVIDIA driver installation |
+| Above 4G Decoding | **ENABLED** | Allocates PCIe memory above 4GB |
+
+**Important note on Secure Boot:** Proxmox plus NVIDIA is easier to reason about with Secure Boot disabled. If you want Secure Boot later, treat that as a second task after the host is stable.
+
+**Path:** `Advanced > PCI Subsystem`
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| PCIe Generation | **GEN4** or Auto | X570 native PCIe 4.0 support |
+| PCIe Power Management | **DISABLED** | Prevents GPU sleep states |
+| ASPM (Active State Power Management) | **DISABLED** | Ensures stable GPU operation |
+
+### Power Management For 24/7 Operation
+
+**Path:** `Advanced > Power Management`
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Global C-State Control | **DISABLED** | Prevents CPU power states |
+| CPU Enhanced Halt (C1E) | **DISABLED** | Keeps CPU active for VMs |
+| Package C-State | **C0 (Disabled)** | No deep sleep states |
+| APM (Advanced Power Management) | **DISABLED** | Disables suspend/hibernation |
+| ErP (Energy-Related Products) | **DISABLED** | Can interfere with boot |
+| Wake on LAN | **DISABLED** | Not needed for server mode |
+
+### Storage Controller Configuration
+
+**Path:** `Advanced > Onboard Devices`
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| M.2 Mode (Slot 1) | **NVMe** | Auto-detected for NVMe drives |
+| SATA Mode | **AHCI** | Standard storage protocol |
+| SATA Hot Swap | **ENABLED** | Allows hot-swap (optional) |
+| AHCI Prefetch | **ENABLED** | Improves small file performance |
+
+### BIOS Verification Checklist
+
+After Proxmox is installed, confirm the firmware choices actually landed:
+
+```bash
+# After Proxmox installation, verify BIOS settings took effect:
+
+# Check IOMMU is enabled
+dmesg | grep -i iommu
+
+# Expected output:
+# AMD-Vi: Found IOMMU at 0000:00:00.2 cap 0x40
+# AMD-Vi: Found IOMMU at 0000:10:00.2 cap 0x40
+
+# Verify virtualization support
+grep -o 'svm' /proc/cpuinfo | head -1
+
+# Check PCIe GPU detection
+lspci | grep -i nvidia
+
+# View IOMMU groups (critical for passthrough)
+for g in $(find /sys/kernel/iommu_groups -maxdepth 1 -mindepth 1 -type d | sort -V); do
+    echo "IOMMU group $(basename $g):"
+    lspci -nns $(cat $g/devices/*/uevent | grep PCI_SLOT_NAME | cut -d= -f2) 2>/dev/null
+done
+```
+
+## Pre-Installation Checklist
+
+### Hardware Preparation
+
+- [ ] BIOS updated to latest version
+- [ ] Both NVMe drives physically present if you are targeting RAID1 later
+- [ ] SATA drives connected if backup or NAS storage will follow soon after install
+- [ ] RTX 3090 installed in the primary PCIe slot if GPU work is part of the plan
+- [ ] 64GB RAM recognized correctly in BIOS
+- [ ] Network cable connected
+
+### Network Planning
+
+| Item | Value | Notes |
+|------|-------|-------|
+| Static IP Address | `192.168.x.x` | Outside DHCP range |
+| Netmask | `255.255.255.0` | Standard /24 subnet |
+| Gateway | `192.168.x.1` | Router IP |
+| DNS Primary | `8.8.8.8` or `1.1.1.1` | Temporary until infrastructure DNS changes later |
+| FQDN Hostname | `pve.home.lan` | Example only |
+
+### Storage Planning
+
+Think about the storage story before you click through the installer.
+
+**Current configuration (single-drive style):**
+
+- one 2TB NVMe as the active Proxmox root filesystem
+- ZFS selected from the start
+- enough free space intentionally left for sane pool behavior
+
+**Target configuration (mirrored host storage):**
+
+- two matching 2TB NVMe drives
+- ZFS RAID1 for the Proxmox root pool
+- roughly 2TB usable with redundancy instead of more raw risk
+
+If you know a mirror is coming, plan for it now even if you install on one disk first.
+
+## Create The Installer
+
+### Windows
+
+Use **Rufus**.
+
+- Device: your USB drive
+- Boot selection: Proxmox ISO
+- Partition scheme: GPT recommended
+- Click **START** and confirm data will be erased
+
+### macOS
+
+**Option A: Raspberry Pi Imager**
+
+```bash
+# Download from https://www.raspberrypi.com/software/
+# Open application, select:
+# - Choose device: No filtering (or leave generic)
+# - Choose OS: Use custom image
+# - Select Proxmox ISO file
+# - Insert USB and write
+```
+
+**Option B: Command Line**
+
+```bash
+# Insert USB drive (≥4GB)
+diskutil list
+
+# Unmount USB (replace diskX with your USB disk number)
+diskutil unmountDisk /dev/diskX
+
+# Write ISO to USB (this erases the USB)
+sudo dd if=~/Downloads/proxmox-ve_8.4-1.iso of=/dev/rdiskX bs=4m
+
+# OR with progress:
+
+sudo dd if=~/Downloads/proxmox-ve_8.4-1.iso of=/dev/rdiskX bs=4m status=progress
+
+# Wait for completion, then eject USB
+diskutil eject /dev/diskX
+```
+
+If you are not comfortable with `dd`, do not pretend. Use the graphical tool and move on.
+
+## Boot The Installer
+
+1. Insert the bootable USB.
+2. Boot the machine and use **F11** or the BIOS boot selector.
+3. Choose **Install Proxmox VE** from the boot menu.
+
+## If The Graphical Installer Hangs
+
+This is a real-world annoyance on some X570 boards. Treat it as normal troubleshooting, not as a sign that the build is doomed.
+
+### Option A: Add A Boot Parameter
+
+1. Highlight **Install Proxmox VE** at the GRUB screen.
+2. Press `e`.
+3. Find the line starting with `linux /boot/linux26`.
+4. Add `nomodeset` to the end.
+5. Boot with **Ctrl+X** or **F10**.
+
+If that is not enough, use one of these instead:
+
+```text
+nomodeset iommu=pt video=efifb:off
+```
+
+Or AMD-specific:
+
+```text
+nomodeset amd_iommu=on iommu=pt
+```
+
+### Option B: Use The Console Installer
+
+If the graphical path keeps fighting you, switch to **Install Proxmox VE (Console)** and continue. The objective is a working host, not aesthetic loyalty to the graphical installer.
+
+## Installation Choices That Matter
+
+### Target Disk And Filesystem
+
+**For a current single-drive style install:**
+
+1. Filesystem: `zfs (RAID0)`
+2. Harddisk 0: your active NVMe drive
+3. Harddisk 1: `-- do not use --`
+4. Compression: `zstd`
+
+If you want the compression tradeoff spelled out plainly:
+
+| Method   | Speed     | Ratio      | CPU Usage | Best For                    |
+|----------|-----------|------------|-----------|------------------------------|
+| `lz4`    | Very Fast | Low-Medium | Low       | General use, default choice  |
+| `zstd`   | Fast      | High       | Medium    | Best balance                 |
+| `gzip`   | Slow      | High       | High      | Maximum compression          |
+| `lzjb`   | Fast      | Low        | Low       | Legacy systems               |
+| `off`    | N/A       | None       | None      | SSDs with limited writes     |
+
+**Advanced options:**
+
+- `disksize`: `1800` GB
+- `swapsize`: `8` GB
+- `minfree`: `10`
+
+**For a future mirrored host install:**
+
+1. Filesystem: `zfs (RAID1)`
+2. Harddisk 0: first 2TB NVMe
+3. Harddisk 1: second matching 2TB NVMe
+4. Compression: `zstd`
+
+### Hostname And Network
+
+- Hostname example: `pve.home.lan`
+- IP address example: `192.168.1.100`
+- Netmask: `255.255.255.0`
+- Gateway: router IP
+- DNS server: temporary public DNS until the internal DNS story is in place
+
+### Password And Email
+
+- Set a strong root password and keep it somewhere real.
+- The email address can start as a placeholder if needed, but you should expect to replace it later.
+
+That later step lives in [Email Notifications](/pages/proxmox/operations/email-notifications).
+
+## After Installation
+
+Once the installer finishes:
+
+1. Reboot into Proxmox.
+2. Remove the USB drive.
+3. Confirm the host reaches its static address.
+4. Use the web UI for the next stage of bring-up.
+
+From here, the right next move depends on what kind of lab you are building.
+
+- If the host still needs operational discipline, continue into [Proxmox Operations](/pages/proxmox/operations).
+- If the next step is GPU or service deployment, continue into [Proxmox Workloads](/pages/proxmox/workloads).
+
+## Related Topics
+
+- [Proxmox Basics](/pages/proxmox/basics) — the platform-level explanation before the install path.
+- [Proxmox Operations](/pages/proxmox/operations) — what happens after the host exists and needs maintenance.
+- [Proxmox Workloads](/pages/proxmox/workloads) — where the guest and passthrough guides will live.

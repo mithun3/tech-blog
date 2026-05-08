@@ -1,0 +1,27 @@
+---
+title: "Raspberry Pi"
+description: "Platform-specific Raspberry Pi guides for homelab infrastructure, starting with Pi-hole on a dedicated Pi node."
+publishedAt: "2026-05-08"
+order: 6
+status: published
+---
+
+# Raspberry Pi
+
+This section is for Raspberry Pi guides where the platform itself matters.
+
+That distinction matters for the same reason it mattered in Proxmox.
+
+General networking concepts should stay under [Networking](/pages/networking). General Pi-hole architecture should stay under [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab). Proxmox-specific deployment steps should stay under [Proxmox Workloads](/pages/proxmox/workloads).
+
+What belongs here is the Raspberry Pi execution layer: imaging the OS, hardening the box, managing its storage, and using it as a small always-on infrastructure node.
+
+## In This Section
+
+- [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) - build a dedicated Pi-hole node on Raspberry Pi OS Lite and handle the Pi-side backup, hardening, and HA tasks without duplicating the Proxmox deployment guide.
+
+## How To Use It
+
+Read the page below when the answer to "where should this DNS node live?" is "on a small dedicated Pi" instead of inside the Proxmox host.
+
+If you are still deciding where Pi-hole belongs in the network, start with [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) first.

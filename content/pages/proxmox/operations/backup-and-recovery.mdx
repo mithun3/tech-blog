@@ -1,0 +1,152 @@
+---
+title: "Backup And Recovery"
+description: "How to layer ZFS snapshots, vzdump jobs, and restore practice so Proxmox recovery is routine instead of improvised."
+publishedAt: "2026-02-05"
+updatedAt: "2026-02-06"
+order: 2
+status: published
+---
+
+# Backup And Recovery
+
+The job of backups in a homelab is not to make you feel responsible. It is to make recovery boring.
+
+That only happens when backups exist in layers.
+
+Snapshots help with fast rollbacks. `vzdump` gives you guest-level backups. Remote copies cover the day the host itself is the problem. This page is about using those layers together instead of assuming one mechanism will solve every failure mode.
+
+## The Three Backup Layers
+
+### 1. ZFS Snapshots
+
+Fast, cheap, and ideal before changes.
+
+They are the first rollback tool, not the only one.
+
+### 2. `vzdump` Guest Backups
+
+These are the portable Proxmox backups you actually want when a guest needs to be restored elsewhere or rebuilt cleanly.
+
+### 3. Remote Copies
+
+If everything only exists on the Proxmox box, then your backup strategy is still too local.
+
+## Automatic Snapshot Retention
+
+The original host used this cleanup script to keep auto snapshots from growing indefinitely:
+
+```bash
+cat > /usr/local/bin/zfs-snapshot-cleanup.sh << 'EOF'
+#!/bin/bash
+/usr/sbin/zfs list -t snapshot -o name -H | grep '@auto-' | while read snap; do
+  snap_date=$(echo "$snap" | grep -oP 'auto-\K[0-9]{8}')
+  snap_epoch=$(date -d "$snap_date" +%s 2>/dev/null || echo 0)
+  now_epoch=$(date +%s)
+  age=$(( (now_epoch - snap_epoch) / 86400 ))
+  [ "$age" -gt 14 ] && /usr/sbin/zfs destroy "$snap"
+done
+EOF
+
+chmod +x /usr/local/bin/zfs-snapshot-cleanup.sh
+```
+
+## Scheduled Backup Rhythm
+
+This is the clean crontab block from the operations guide. It intentionally combines `vzdump`, daily snapshots, cleanup, and weekly scrubs in one place.
+
+```bash
+# ============================================
+# Automated Backup & Snapshot Strategy
+# ============================================
+
+# --- vzdump backups (weekly, 14-day retention) ---
+# Sunday 3 AM — full backup of all critical containers
+# Requires SMTP setup first — see PROXMOX-8-EMAIL-NOTIFICATIONS.md
+# Change --mailnotification failure → always for success + failure emails
+# Uncomment when backup storage is ready:
+# 0 3 * * 0 /usr/sbin/vzdump 100 --storage backup --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+# 0 3 * * 0 /usr/sbin/vzdump 101 --storage backup --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+# 0 3 * * 0 /usr/sbin/vzdump 103 --storage backup --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+
+# --- ZFS snapshots (daily, 14-day retention) ---
+0 2 * * * /usr/sbin/zfs snapshot rpool@auto-$(date +\%Y\%m\%d)
+0 2 * * * /usr/sbin/zfs snapshot naspool@auto-$(date +\%Y\%m\%d)
+
+# --- Cleanup: delete ZFS snapshots older than 14 days ---
+30 2 * * * /usr/local/bin/zfs-snapshot-cleanup.sh
+
+# --- Weekly ZFS scrubs (Sunday 2 AM) ---
+0 2 * * 0 /usr/sbin/zpool scrub rpool
+0 2 * * 0 /usr/sbin/zpool scrub backup
+0 2 * * 0 /usr/sbin/zpool scrub naspool
+```
+
+The `--mailnotification` flag is legacy, but these are the validated lines from the original host. If you are building fresh today, pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) and decide whether you want to keep the legacy mail flag or move fully to the notification system.
+
+## Manual Backup And Restore
+
+For the days when you do not want to wait for cron:
+
+```bash
+# Create manual VM backup
+vzdump 100 --storage backup --mode snapshot --compress zstd
+
+# List backups
+ls -lah /backup/proxmox-backups/
+
+# Restore VM from backup
+qmrestore /backup/proxmox-backups/vzdump-*.tar.zst 101  # Creates new container ID 101
+
+# Create ZFS snapshot before major changes
+zfs snapshot rpool/pve-data@before-upgrade
+
+# Restore from snapshot
+zfs rollback rpool/pve-data@before-upgrade
+```
+
+## Safe Update Practice
+
+Before changing packages, kernels, or major workload components, snapshot first.
+
+```bash
+# Create snapshots for rollback
+pct snapshot 100 pre-update-2026-02-09
+pct snapshot 101 pre-update-2026-02-09
+pct snapshot 103 pre-update-2026-02-09
+
+# Or backup to external storage
+vzdump 100 --storage backup --compress zstd
+```
+
+That is the difference between a cautious maintenance window and a blind one.
+
+## Remote Backup Options
+
+If the lab matters, at least one copy should leave the host.
+
+```bash
+# Send ZFS snapshots to remote system
+# zfs send rpool@backup-20260205 | ssh backup-server zfs receive backup/proxmox-daily
+
+# Or use rsync for files
+# rsync -avz --delete /naspool/documents/ backup-server:/backups/documents/
+```
+
+## Recovery Mindset
+
+Backups are not complete until you know what recovery feels like.
+
+That means occasionally verifying:
+
+- snapshots actually exist and can be listed
+- the backup storage target is readable
+- restore commands point at real files and destinations
+- workload-specific exports are kept when they matter
+
+For example, Pi-hole still benefits from Teleporter exports even when the container itself is backed up. Proxmox protects the guest. The application may still need its own clean export format.
+
+## Related Topics
+
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the storage layer that these backups depend on.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) — the part that makes backup failures visible.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where pre-update snapshots and validation loops fit into regular host care.

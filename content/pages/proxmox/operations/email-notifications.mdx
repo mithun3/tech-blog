@@ -1,0 +1,322 @@
+---
+title: "Email Notifications"
+description: "Configure Proxmox to send real email for backups and system events instead of quietly keeping alerts on the host."
+publishedAt: "2026-02-10"
+order: 3
+status: published
+---
+
+# Email Notifications
+
+Email feels minor right up until the day a backup fails and the only place that fact exists is inside the machine that just had the problem.
+
+That is the whole point of this page.
+
+It is not about making Proxmox look polished. It is about making sure failures, warnings, and routine system events actually leave the host and arrive somewhere you will see them.
+
+If the host is not installed yet, start with [Homelab Installation](/pages/proxmox/setup/homelab-installation). If you are already running backups and updates, this page closes the loop so those workflows can report back.
+
+## Why This Does Not Work Out Of The Box
+
+Proxmox installs Postfix during setup, but the default behavior is local delivery.
+
+That means the host can generate mail without actually getting that mail to your inbox.
+
+The result is familiar and slightly dangerous:
+
+- backup jobs can try to notify you
+- the address you entered during installation can exist on paper
+- nothing visibly errors
+- the message still never leaves the box
+
+The clean fix is to configure a real SMTP target in Proxmox's notification system.
+
+## Step 1: Update The Proxmox Email Address
+
+If the installation used a placeholder email, replace it first.
+
+### Via GUI
+
+1. Log in to Proxmox web UI (`https://<host-ip>:8006`)
+2. Navigate to **Datacenter → Permissions → Users**
+3. Select **`root@pam`**
+4. Click **Edit**
+5. Change the **Email** field to your real address
+6. Click **OK**
+
+### Via CLI
+
+```bash
+pveum user modify root@pam -email yourname@gmail.com
+```
+
+Verify:
+
+```bash
+pveum user list | grep root
+```
+
+## Step 2: Create A Gmail App Password
+
+This guide uses Gmail as the example because it is common and the failure mode is predictable.
+
+1. Enable 2-Step Verification.
+2. Open the App Passwords page.
+3. Create a password named `Proxmox`.
+4. Copy the generated password immediately.
+
+The common mistake here is simple and stupid enough to be worth stating clearly: Google shows the password in grouped blocks, but Proxmox wants it without spaces.
+
+## Step 3: Configure An SMTP Notification Target
+
+This is the preferred path because it uses the modern Proxmox notification system directly instead of treating Postfix as the only route.
+
+### Via GUI
+
+1. Navigate to **Datacenter → Notifications**
+2. Click **Add → SMTP**
+3. Fill in:
+
+| Field | Value (Gmail example) |
+|-------|----------------------|
+| **Target Name** | `gmail` |
+| **Server** | `smtp.gmail.com` |
+| **Port** | `587` |
+| **Encryption** | `STARTTLS` |
+| **Username** | `yourname@gmail.com` |
+| **Password** | Your App Password |
+| **From Address** | `yourname@gmail.com` |
+| **Recipient(s)** | `yourname@gmail.com` |
+| **Comment** | `Gmail SMTP relay` |
+
+4. Click **Add**
+5. Select the new target and click **Test**
+
+### If The Test Fails With Authentication Errors
+
+The first thing to check is still the password formatting.
+
+- Wrong: `abcd efgh ijkl mnop`
+- Correct: `abcdefghijklmnop`
+
+Then confirm:
+
+- 2-Step Verification is actually enabled
+- the Gmail account matches the SMTP username
+- you are using the App Password, not the main account password
+
+### Via Config Files
+
+**Target definition** — `/etc/pve/notifications.cfg`:
+
+```ini
+smtp: gmail
+    mailto-user root@pam
+    mailto yourname@gmail.com
+    from-address yourname@gmail.com
+    username yourname@gmail.com
+    server smtp.gmail.com
+    mode starttls
+    port 587
+    comment Gmail SMTP relay
+```
+
+**Password** — `/etc/pve/priv/notifications.cfg`:
+
+```ini
+smtp: gmail
+    password abcd-efgh-ijkl-mnop
+```
+
+## Step 4: Point The Default Matcher At The SMTP Target
+
+This is the step people miss.
+
+If the default matcher still points at `mail-to-root`, Proxmox can be correctly configured and still behave as though nothing changed.
+
+### Via GUI
+
+1. Open **Datacenter → Notifications**
+2. Select **`default-matcher`**
+3. Click **Edit**
+4. Change the target from `mail-to-root` to your SMTP target
+5. Save
+
+### Via Config File
+
+```ini
+matcher: default-matcher
+    target gmail
+    comment Route all notifications to Gmail
+```
+
+Once that is in place, rerun a test event and check that the output says it notified the SMTP target instead of `mail-to-root`.
+
+## Step 5: Backup Notifications
+
+Older backup jobs often use the legacy mail flag:
+
+```bash
+# Current (failure only):
+vzdump 100 --storage backup --mode snapshot --compress zstd --mailnotification failure --prune-backups keep-weekly=2
+
+# To receive both success AND failure:
+vzdump 100 --storage backup --mode snapshot --compress zstd --mailnotification always --prune-backups keep-weekly=2
+```
+
+The more future-proof route is the notification system:
+
+```bash
+vzdump 100 --storage backup --mode snapshot --compress zstd --notification-mode notification-system --prune-backups keep-weekly=2
+```
+
+That keeps the alert path consistent with the rest of the host.
+
+## Step 6: Test Delivery
+
+### Method 1: GUI Test
+
+Use the **Test** button on the SMTP target.
+
+### Method 2: Trigger A Backup Event
+
+```bash
+vzdump 100 --mode snapshot --compress zstd --notification-mode notification-system
+```
+
+### Method 3: Postfix Relay Test
+
+```bash
+echo "Test email from Proxmox host" | mail -s "Proxmox Test" yourname@gmail.com
+```
+
+This third option only applies if you also configure Postfix as a relay.
+
+### Check Delivery Logs
+
+```bash
+# Postfix mail log (if using Postfix relay)
+tail -f /var/log/mail.info
+
+# Systemd journal
+journalctl -u postfix -f
+
+# Check Postfix mail queue
+mailq
+```
+
+## Optional: Configure Postfix As A Relay
+
+This matters when other tools use the local `sendmail` path instead of the Proxmox notification system.
+
+### Install SASL Support
+
+```bash
+apt-get install -y libsasl2-modules
+```
+
+### Configure Postfix
+
+Edit `/etc/postfix/main.cf`:
+
+```bash
+nano /etc/postfix/main.cf
+```
+
+Add or modify these lines:
+
+```ini
+relayhost = [smtp.gmail.com]:587
+smtp_use_tls = yes
+smtp_sasl_auth_enable = yes
+smtp_sasl_security_options = noanonymous
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+```
+
+Create credentials:
+
+```bash
+nano /etc/postfix/sasl_passwd
+```
+
+Add:
+
+```text
+[smtp.gmail.com]:587    yourname@gmail.com:APP_PASSWORD_HERE
+```
+
+Apply and restart:
+
+```bash
+chmod 600 /etc/postfix/sasl_passwd
+postmap /etc/postfix/sasl_passwd
+systemctl restart postfix
+```
+
+Test relay delivery:
+
+```bash
+echo "Test from Postfix relay" | mail -s "Postfix Test" yourname@gmail.com
+```
+
+And inspect the result:
+
+```bash
+tail -20 /var/log/mail.info
+```
+
+## Troubleshooting
+
+### Mail Queued But Never Delivered
+
+```bash
+# Check the queue
+mailq
+
+# Force delivery attempt
+postqueue -f
+
+# Check why it's stuck
+tail -50 /var/log/mail.info
+```
+
+### Authentication Failed (535)
+
+Treat this as a credentials problem first, not as a Proxmox mystery.
+
+Check the obvious things in order:
+
+1. 2-Step Verification is enabled.
+2. The username matches the account that created the App Password.
+3. The password was pasted without spaces.
+4. You are using an App Password and not the regular Gmail password.
+
+### Connection Timed Out On Port 587
+
+If outbound port 587 is blocked, move to port 465 with TLS.
+
+### The Backup Output Still Says `mail-to-root`
+
+That means the matcher is still wrong.
+
+Once fixed, you should see:
+
+```text
+INFO: notified via target `gmail`
+```
+
+### View The Active Notification Configuration
+
+```bash
+# Targets and matchers
+cat /etc/pve/notifications.cfg
+
+# Secrets (root only)
+cat /etc/pve/priv/notifications.cfg
+```
+
+## Related Topics
+
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) — where the initial email field first appears during install.
+- [Proxmox Operations](/pages/proxmox/operations) — the larger day-two operating context around alerts, backups, and maintenance.

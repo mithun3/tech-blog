@@ -1,0 +1,141 @@
+---
+title: "GPUs For Local AI"
+description: "Why dedicated GPUs matter for local AI, how VRAM changes what models are practical, and where the line sits between hardware planning and platform-specific deployment."
+publishedAt: "2026-02-06"
+updatedAt: "2026-02-25"
+order: 1
+status: published
+---
+
+# GPUs For Local AI
+
+The fastest way to misunderstand local AI is to treat the GPU as an optional accelerator that simply makes everything nicer.
+
+For serious model serving, the GPU is usually the difference between a system that feels usable and one that feels like a long apology.
+
+That is why this page lives under GPU & AI.
+
+The question here is not how to bind `/dev/nvidia0` into a container. The question is why GPUs matter for inference in the first place, what kind of workloads actually benefit, and how to think about VRAM, model size, and multi-GPU tradeoffs before you commit to a platform-specific setup.
+
+If you are already at the Proxmox stage, continue to [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough).
+
+## Why GPUs Matter So Much
+
+Most AI inference workloads collapse into matrix operations at scale.
+
+That is exactly the kind of work GPUs are built to do well.
+
+The difference is not subtle:
+
+- CPUs are optimized for a small number of complex sequential tasks
+- GPUs are optimized for enormous numbers of simpler operations in parallel
+- large language models and image generation pipelines reward throughput far more than elegant single-thread behavior
+
+The practical outcome in a homelab is simple. A CPU-only setup can prove that a model runs. A real GPU often decides whether it runs at a speed any human would willingly use.
+
+## CPU Versus GPU In Practice
+
+| Hardware | Strength | Weakness |
+|----------|----------|----------|
+| CPU | flexible, general-purpose, excellent control flow | poor fit for large parallel tensor workloads |
+| GPU | huge parallel throughput, far better memory bandwidth for AI workloads | less flexible, more power and thermal cost |
+
+That is why the same prompt can feel wildly different depending on where the model runs.
+
+The real comparison is not academic. It is experiential.
+
+- CPU-only inference can mean waiting tens of seconds for a response
+- a capable GPU can turn the same interaction into a few seconds and a steady token stream
+
+## VRAM Is Often The Real Constraint
+
+Compute matters, but VRAM is usually what decides which models are actually comfortable to run.
+
+For local AI, that makes memory capacity more important than people expect.
+
+### A Useful Mental Model
+
+| Model Class | Typical VRAM Demand | Practical Outcome |
+|-------------|---------------------|-------------------|
+| Small models | low | easy to run almost anywhere |
+| Mid-sized instruct models | moderate | best homelab value zone |
+| Larger high-quality models | high | where a 24 GB card starts to matter |
+| Very large frontier-scale models | extreme | outside single-GPU homelab territory |
+
+With an RTX 3090-style 24 GB card, the sweet spot is that middle band where models are large enough to feel useful but still fit comfortably with room for context and runtime overhead.
+
+## Inference Versus Training
+
+This is another distinction worth keeping explicit.
+
+### Inference
+
+Inference is what most homelabs actually care about.
+
+You load a model, pass prompts through it, and get responses back.
+
+That maps very well to a strong consumer GPU because the workload is mostly repeated forward passes with fixed weights.
+
+### Training Or Fine-Tuning
+
+Training is different.
+
+Now you are storing activations, gradients, optimizer state, and the rest of the memory overhead that makes even modest models much hungrier.
+
+That does not make training impossible in a homelab. It just moves it into a more constrained, more deliberate category of work.
+
+## What A 24 GB GPU Changes
+
+A card in the RTX 3090 class sits in a particularly useful homelab tier.
+
+It is not enterprise hardware, but it is enough GPU to make several local AI patterns practical instead of aspirational.
+
+That includes:
+
+- running mid-sized instruct models at good quality
+- keeping useful context windows without immediately running out of memory
+- serving local chat or automation workloads at interactive speeds
+- handling image-generation workloads that would feel miserable on CPU alone
+
+This is why 24 GB cards keep showing up in serious hobby and self-hosted AI builds. They are not cheap, but they change the feasible model range in a way smaller cards often do not.
+
+## Single-GPU Versus Dual-GPU Thinking
+
+A second GPU is not automatically better. It is better when the workload actually has a reason to use it.
+
+### One GPU Is Usually Enough When
+
+- you want a single reliable inference box
+- you mostly serve one model at a time
+- you value simpler cooling, power, and configuration
+
+### Two GPUs Start Making Sense When
+
+- you want to isolate workloads across separate services
+- you need more aggregate VRAM for larger inference jobs
+- you want one card busy while the other stays available for another queue
+
+The important part is that the second GPU should solve an actual constraint rather than just satisfy the urge to make the machine look more impressive.
+
+## Where The Platform Split Happens
+
+This concept page owns:
+
+- why GPUs matter for local AI
+- how to think about VRAM and model size
+- inference versus training tradeoffs
+- whether single or dual GPU design makes sense at all
+
+The Proxmox page owns:
+
+- host driver installation
+- persistence mode and power tuning
+- LXC passthrough mechanics
+- dual-GPU container allocation on Proxmox
+
+That workload guide is here: [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough).
+
+## Related Topics
+
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the Proxmox-specific implementation path.
+- [Proxmox Workloads](/pages/proxmox/workloads) — where host-specific AI and service deployment guides belong.

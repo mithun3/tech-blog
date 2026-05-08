@@ -1,0 +1,511 @@
+---
+title: "Update And Maintenance"
+description: "A practical maintenance rhythm for updating the Proxmox host, LXC containers, and service workloads without turning a quiet Sunday into a rebuild session."
+publishedAt: "2026-02-19"
+order: 4
+status: published
+---
+
+# Update And Maintenance
+
+Homelab failures often arrive during maintenance windows, not during the quiet weeks in between them.
+
+That is why update work needs its own discipline.
+
+This page is the operating rhythm behind a Proxmox host that runs real services: host first, containers second, applications after that, and GPU changes treated as their own category instead of casually folded into everything else.
+
+If alerts are not set up yet, do [Email Notifications](/pages/proxmox/operations/email-notifications) first. If the host still needs initial bring-up work, go back to [Homelab Installation](/pages/proxmox/setup/homelab-installation).
+
+## Golden Rules
+
+1. Always snapshot before updating.
+2. Update the host first and containers second.
+3. Dry-run before committing.
+4. Do not update GPU components and the host kernel blindly in one motion.
+5. Keep NVIDIA driver versions aligned between host and GPU containers.
+6. Update during low-usage windows.
+7. Verify each stage before moving to the next one.
+
+Just as important is knowing what not to do.
+
+| Mistake | Why It Hurts |
+|---------|--------------|
+| `apt upgrade` instead of `apt full-upgrade` | Proxmox expects the full dependency resolution path. |
+| Updating containers before the host | Guests can end up assuming a newer base than the running host provides. |
+| Skipping snapshots | Rollback turns into restore-or-rebuild work instead of a quick unwind. |
+| Updating NVIDIA versions out of sync | GPU workloads fail in frustrating ways that look bigger than they are. |
+| Running `apt autoremove` without reading it | It is occasionally too enthusiastic. |
+
+## Recommended Update Order
+
+```
+1. Proxmox VE Host
+2. Non-GPU Containers
+3. GPU Containers
+4. Application Services
+5. NVIDIA Driver Changes (only when actually needed)
+```
+
+That order is conservative on purpose.
+
+## Pre-Update Checklist
+
+Run this on the host before you touch anything else:
+
+```bash
+# === PRE-UPDATE CHECKLIST ===
+echo "=== 1. Current Proxmox Version ==="
+pveversion -v
+
+echo -e "\n=== 2. ZFS Pool Health ==="
+zpool status -x
+# Should say: "all pools are healthy"
+
+echo -e "\n=== 3. Disk Space ==="
+df -h / /var
+zfs list -o name,used,avail rpool
+
+echo -e "\n=== 4. Container Status ==="
+pct list
+
+echo -e "\n=== 5. GPU Status ==="
+nvidia-smi --query-gpu=name,driver_version,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader
+# Check: GPU utilization should be 0% (no active inference)
+
+echo -e "\n=== 6. NVIDIA DKMS Status ==="
+dkms status
+
+echo -e "\n=== 7. Running Services ==="
+systemctl is-active pveproxy pvedaemon nvidia-persistenced
+
+echo -e "\n=== 8. Last Backup Date ==="
+ls -lt /backup/dump/ 2>/dev/null | head -5 || echo "No backups found in /backup/dump/"
+
+echo -e "\n=== PRE-UPDATE CHECK COMPLETE ==="
+```
+
+If ZFS is not healthy, disk space is tight, or the GPU is busy, stop there and fix the condition first.
+
+## Snapshot Before You Start
+
+```bash
+# Generate date stamp
+DATE=$(date +%Y-%m-%d)
+
+# Snapshot all containers
+for CTID in 100 102 103 105 200 201; do
+  echo "Snapshotting CT $CTID..."
+  pct snapshot $CTID pre-update-$DATE --description "Pre-update snapshot $DATE"
+done
+
+echo "All snapshots created."
+pct listsnapshot 100  # Verify one of them
+```
+
+For high-risk work such as kernel or NVIDIA changes, take an extra backup of the GPU containers too.
+
+## Step 1: Update The Proxmox Host
+
+### Dry-Run First
+
+```bash
+# Refresh package lists
+apt update
+
+# Preview what will be upgraded (DRY RUN — no changes made)
+apt full-upgrade -s
+```
+
+Read that output like it matters, because it does.
+
+### Apply The Update
+
+```bash
+# Apply all updates
+apt full-upgrade -y
+
+# Clean up
+apt autoremove --purge -y
+apt autoclean
+```
+
+### Reboot If The Kernel Changed
+
+```bash
+# Check if a reboot is required
+[ -f /var/run/reboot-required ] && echo "REBOOT REQUIRED" || echo "No reboot needed"
+
+# If reboot required:
+reboot
+```
+
+### Verify After Reboot
+
+```bash
+# Verify Proxmox is running
+pveversion -v
+systemctl status pveproxy pvedaemon
+
+# Verify NVIDIA driver survived the kernel update
+nvidia-smi
+dkms status
+# Expected: nvidia/<version>, <kernel-version>, x86_64: installed
+
+# Verify all containers auto-started
+pct list
+```
+
+### If DKMS Did Not Rebuild
+
+```bash
+# Check DKMS status
+dkms status
+
+# Force rebuild for current kernel
+NVIDIA_VERSION=$(dkms status | grep nvidia | head -1 | awk -F'[, ]' '{print $2}')
+KERNEL_VERSION=$(uname -r)
+dkms install nvidia/$NVIDIA_VERSION -k $KERNEL_VERSION
+
+# Reload modules
+modprobe nvidia
+modprobe nvidia_uvm
+
+# Verify
+nvidia-smi
+```
+
+## Step 2: Update LXC Container OS Packages
+
+Non-GPU containers go first. GPU containers come later after the host has already proven it is healthy.
+
+```bash
+# Non-GPU containers first (low risk)
+for CTID in 103 105 200 201; do
+  echo "=========================================="
+  echo "Updating CT $CTID ($(pct config $CTID | grep hostname | awk '{print $2}'))..."
+  echo "=========================================="
+  pct exec $CTID -- bash -c "apt update && apt full-upgrade -y && apt autoremove --purge -y && apt autoclean"
+  echo "CT $CTID done."
+  echo ""
+done
+
+# GPU containers last
+for CTID in 100 102; do
+  echo "=========================================="
+  echo "Updating CT $CTID ($(pct config $CTID | grep hostname | awk '{print $2}'))..."
+  echo "=========================================="
+  pct exec $CTID -- bash -c "apt update && apt full-upgrade -y && apt autoremove --purge -y && apt autoclean"
+  echo "CT $CTID done."
+  echo ""
+done
+
+echo "All container OS packages updated."
+```
+
+Verify the result:
+
+```bash
+# Quick health check — all containers should be running
+pct list
+
+# Check GPU access in GPU containers
+pct exec 100 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader
+pct exec 102 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader
+# Both should show the same driver version as the host
+```
+
+## Step 3: Update Application Services
+
+This is where the lab starts to feel cross-domain.
+
+Pi-hole may belong to networking conceptually. GPU inference may belong to GPU & AI conceptually. But if the question today is "what do I update on this Proxmox host and in what order?" then they all belong here for the duration of the maintenance window.
+
+### Ollama (CT 100)
+
+```bash
+# Check current version
+pct exec 100 -- ollama --version
+
+# Update Ollama
+pct exec 100 -- bash -c "curl -fsSL https://ollama.com/install.sh | sh"
+
+# Restart the service
+pct exec 100 -- systemctl restart ollama
+
+# Verify
+pct exec 100 -- ollama --version
+pct exec 100 -- systemctl status ollama --no-pager
+pct exec 100 -- nvidia-smi
+```
+
+```bash
+pct exec 100 -- curl -s http://localhost:58008/api/tags | head -20
+# Should list your downloaded models
+```
+
+### llama.cpp (CT 102)
+
+```bash
+# Check current version (commit hash)
+pct exec 102 -- bash -c "cd ~/llama.cpp && git log --oneline -1"
+
+# Stop the service before rebuilding
+pct exec 102 -- systemctl stop llama-server
+
+# Pull latest changes and rebuild
+pct exec 102 -- bash -c "cd ~/llama.cpp && git pull && cmake -S . -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON && cmake --build build --config Release -j\$(nproc)"
+
+# Restart the service
+pct exec 102 -- systemctl restart llama-server
+
+# Verify
+pct exec 102 -- systemctl status llama-server --no-pager
+pct exec 102 -- bash -c "cd ~/llama.cpp && git log --oneline -1"
+```
+
+```bash
+# Check the server is responsive
+curl -s http://192.168.50.45:8012/health
+# Should return: {"status":"ok"}
+```
+
+### Open WebUI (CT 103)
+
+```bash
+# Check current version
+pct exec 103 -- open-webui version 2>/dev/null || pct exec 103 -- pip show open-webui 2>/dev/null | grep Version
+
+# Update Open WebUI
+pct exec 103 -- uv tool upgrade open-webui
+
+# Restart the service
+pct exec 103 -- systemctl restart open-webui
+
+# Verify
+pct exec 103 -- systemctl status open-webui --no-pager
+```
+
+```bash
+# Check the web interface is responding
+curl -s -o /dev/null -w "%{http_code}" http://192.168.50.30:42
+# Should return: 200
+```
+
+### Pi-hole (CT 105)
+
+```bash
+# Check current version
+pct exec 105 -- pihole version
+
+# Update Pi-hole (core + web + FTL)
+pct exec 105 -- pihole -up
+
+# Verify
+pct exec 105 -- pihole version
+pct exec 105 -- pihole status
+```
+
+```bash
+# Test DNS resolution through Pi-hole
+dig @192.168.50.11 google.com +short
+# Should return IP addresses
+
+# Check the admin interface
+curl -s -o /dev/null -w "%{http_code}" http://192.168.50.11/admin/
+# Should return: 200 or 301
+```
+
+After updating the secondary Pi-hole, resynchronise it:
+
+```bash
+pct exec 105 -- gravity-sync pull
+```
+
+## Step 4: NVIDIA Driver Updates
+
+Do this only when you actually need a new driver version.
+
+### Preparation
+
+```bash
+# Record current driver version
+nvidia-smi --query-gpu=driver_version --format=csv,noheader
+# e.g., 580.126.09
+
+# Stop ALL GPU-dependent services
+pct exec 100 -- systemctl stop ollama
+pct exec 102 -- systemctl stop llama-server
+
+# Verify GPU is idle
+nvidia-smi
+# Should show "No running processes found"
+```
+
+### Update Host Driver
+
+```bash
+# Download new driver .run file (replace version as needed)
+cd /root
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/NEW_VERSION/NVIDIA-Linux-x86_64-NEW_VERSION.run
+chmod +x NVIDIA-Linux-x86_64-NEW_VERSION.run
+
+# Install with DKMS support
+./NVIDIA-Linux-x86_64-NEW_VERSION.run --dkms --no-opengl-files --no-questions
+
+# Verify
+nvidia-smi
+dkms status
+```
+
+### Update Container Drivers
+
+```bash
+# Copy the .run file to each GPU container
+for CTID in 100 102; do
+  pct push $CTID /root/NVIDIA-Linux-x86_64-NEW_VERSION.run /root/NVIDIA-Linux-x86_64-NEW_VERSION.run
+  pct exec $CTID -- chmod +x /root/NVIDIA-Linux-x86_64-NEW_VERSION.run
+  pct exec $CTID -- /root/NVIDIA-Linux-x86_64-NEW_VERSION.run --no-kernel-module --no-opengl-files --no-questions
+done
+```
+
+### Verify Version Match
+
+```bash
+# Compare versions
+echo "=== Host ===" && nvidia-smi --query-gpu=driver_version --format=csv,noheader
+echo "=== CT 100 (Ollama) ===" && pct exec 100 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader
+echo "=== CT 102 (llama-cpp) ===" && pct exec 102 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader
+```
+
+### Restart GPU Services
+
+```bash
+# Restart GPU services
+pct exec 100 -- systemctl start ollama
+pct exec 102 -- systemctl start llama-server
+
+# Verify services and GPU access
+pct exec 100 -- systemctl status ollama --no-pager
+pct exec 102 -- systemctl status llama-server --no-pager
+
+# Quick inference test
+pct exec 100 -- ollama list
+curl -s http://192.168.50.45:8012/health
+```
+
+## Post-Update Verification
+
+```bash
+# === POST-UPDATE VERIFICATION ===
+echo "=== 1. Proxmox VE Version ==="
+pveversion -v | head -5
+
+echo -e "\n=== 2. ZFS Health ==="
+zpool status -x
+
+echo -e "\n=== 3. Container Status ==="
+pct list
+
+echo -e "\n=== 4. GPU Status ==="
+nvidia-smi --query-gpu=name,driver_version,temperature.gpu --format=csv,noheader
+
+echo -e "\n=== 5. NVIDIA Driver Match ==="
+echo "Host: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader)"
+echo "CT100: $(pct exec 100 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "CT102: $(pct exec 102 -- nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo 'N/A')"
+
+echo -e "\n=== 6. Service Health ==="
+echo "Ollama:     $(pct exec 100 -- systemctl is-active ollama 2>/dev/null || echo 'unknown')"
+echo "llama-srv:  $(pct exec 102 -- systemctl is-active llama-server 2>/dev/null || echo 'unknown')"
+echo "Open WebUI: $(pct exec 103 -- systemctl is-active open-webui 2>/dev/null || echo 'unknown')"
+echo "Pi-hole:    $(pct exec 105 -- systemctl is-active pihole-FTL 2>/dev/null || echo 'unknown')"
+echo "Nginx:      $(pct exec 200 -- systemctl is-active nginx 2>/dev/null || echo 'unknown')"
+echo "Cloudflared:$(pct exec 201 -- systemctl is-active cloudflared 2>/dev/null || echo 'unknown')"
+
+echo -e "\n=== 7. Endpoint Tests ==="
+echo "Ollama API:    $(curl -s -o /dev/null -w '%{http_code}' http://192.168.50.40:58008/api/tags 2>/dev/null || echo 'FAIL')"
+echo "llama.cpp:     $(curl -s -o /dev/null -w '%{http_code}' http://192.168.50.45:8012/health 2>/dev/null || echo 'FAIL')"
+echo "Open WebUI:    $(curl -s -o /dev/null -w '%{http_code}' http://192.168.50.30:42 2>/dev/null || echo 'FAIL')"
+echo "Pi-hole admin: $(curl -s -o /dev/null -w '%{http_code}' http://192.168.50.11/admin/ 2>/dev/null || echo 'FAIL')"
+echo "Nginx HTTPS:   $(curl -sk -o /dev/null -w '%{http_code}' https://192.168.50.60 2>/dev/null || echo 'FAIL')"
+
+echo -e "\n=== 8. DNS Resolution ==="
+dig @192.168.50.11 google.com +short | head -1
+
+echo -e "\n=== POST-UPDATE VERIFICATION COMPLETE ==="
+```
+
+### Clean Up Snapshots Later
+
+```bash
+DATE=$(date +%Y-%m-%d)
+for CTID in 100 102 103 105 200 201; do
+  pct delsnapshot $CTID pre-update-$DATE 2>/dev/null && echo "Deleted snapshot for CT $CTID" || echo "No snapshot found for CT $CTID"
+done
+```
+
+Keep those snapshots for at least a day or two if the services matter.
+
+## Common Failure Modes
+
+### Proxmox Wants To Remove `proxmox-ve`
+
+Stop immediately and inspect the repositories.
+
+```bash
+# Verify repos — see PROXMOX-3-OPERATIONS.md for correct config
+cat /etc/apt/sources.list.d/pve-no-subscription.list
+cat /etc/apt/sources.list.d/debian.sources
+
+# Should show "trixie" in both files
+# Re-run: apt update && apt full-upgrade -s
+```
+
+### GPU Not Available Inside Containers After Reboot
+
+```bash
+# Verify persistence daemon is running
+systemctl status nvidia-persistenced
+
+# If not running:
+systemctl enable --now nvidia-persistenced
+
+# Check device nodes exist
+ls -la /dev/nvidia*
+
+# Restart the container (sometimes device passthrough needs a fresh start)
+pct reboot 100
+pct reboot 102
+```
+
+### Pi-hole Update Fails
+
+```bash
+# Check DNS resolution inside the container
+pct exec 105 -- dig github.com +short
+
+# If DNS fails, the container may be using itself as DNS (circular dependency)
+pct exec 105 -- cat /etc/resolv.conf
+# Temporarily set external DNS:
+pct exec 105 -- bash -c "echo 'nameserver 1.1.1.1' > /etc/resolv.conf"
+pct exec 105 -- pihole -up
+# Restore Pi-hole DNS after update completes
+```
+
+### Roll Back A Container Snapshot
+
+```bash
+# List available snapshots
+pct listsnapshot <CTID>
+
+# Roll back to pre-update snapshot
+pct rollback <CTID> pre-update-2026-02-19
+
+# Start the container
+pct start <CTID>
+```
+
+## Related Topics
+
+- [Email Notifications](/pages/proxmox/operations/email-notifications) — make maintenance visible instead of silent.
+- [Proxmox Workloads](/pages/proxmox/workloads) — the service and platform guides that sit behind many of these update routines.

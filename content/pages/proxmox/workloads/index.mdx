@@ -1,0 +1,32 @@
+---
+title: "Proxmox Workloads"
+description: "Service and workload guides that depend on Proxmox mechanics: LXC deployments, passthrough, and application setups that live on top of the host."
+publishedAt: "2026-05-08"
+order: 4
+status: published
+---
+
+# Proxmox Workloads
+
+This section is where the platform stops being abstract and starts doing jobs.
+
+Some services belong conceptually to Networking. Some belong conceptually to GPU and AI. Some are really application stacks with their own logic. But when the question becomes "how do I run this on Proxmox?" this is the right home.
+
+## What Belongs Here
+
+- LXC or VM deployment guides that are specific to Proxmox
+- hardware passthrough workflows tied to Proxmox guests
+- application stacks whose instructions depend on Proxmox storage, networking, or guest management
+
+## In This Section
+
+- [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - NVIDIA host setup, LXC passthrough, and the single- or dual-GPU layouts that make local AI workloads practical on Proxmox.
+
+## What Does Not
+
+Pure concepts still belong in their own sections.
+
+DNS theory belongs in [Networking](/pages/networking). GPU compute concepts belong in [GPU & AI](/pages/gpu-ai). General virtualization theory belongs in [Virtualization](/pages/virtualization).
+
+This section exists for the Proxmox-specific execution layer on top of those ideas.

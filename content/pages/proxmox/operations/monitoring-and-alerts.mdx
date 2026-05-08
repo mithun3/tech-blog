@@ -1,0 +1,496 @@
+---
+title: "Monitoring And Alerts"
+description: "Monitor the Proxmox host and its workloads with daily checks, Prometheus, Grafana, SMART telemetry, GPU metrics, and alerting that reaches you before a quiet failure becomes a bigger story."
+publishedAt: "2026-02-24"
+updatedAt: "2026-02-25"
+order: 5
+status: published
+---
+
+# Monitoring And Alerts
+
+Healthy homelabs do not stay healthy because their owners are lucky.
+
+They stay healthy because the host is being watched, the important services emit signals, and failures have a way to leave the machine before they turn into a Saturday rebuild.
+
+This page covers both ends of that spectrum:
+
+- the lightweight manual checks you can do from the shell
+- the proper monitoring stack for when the lab is mature enough to justify Prometheus and Grafana
+
+Pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) so alerts have somewhere useful to go.
+
+## Start With The Simple Checks
+
+Before building a dashboard, know the host well enough to inspect it directly.
+
+```bash
+# SSH into Proxmox
+ssh root@192.168.50.20
+
+# Check system health
+proxmox-ve-hello
+
+# View system load and memory
+top -b -n 1 | head -20
+
+# Check disk usage
+df -h /
+zpool list
+zfs list
+
+# Monitor GPU
+nvidia-smi
+
+# Check for errors in logs
+tail -50 /var/log/syslog | grep -i error
+dmesg | tail -20
+```
+
+That will not replace a monitoring system, but it will sharpen your intuition about what normal looks like.
+
+## The Monitoring Stack Shape
+
+The full stack documented here uses:
+
+- `node_exporter` for host metrics
+- `nvidia_gpu_exporter` for GPU metrics
+- a SMART textfile collector for disk health
+- Prometheus for scraping and storage
+- Grafana for dashboards and alerting
+- optional `pve-exporter` for Proxmox API visibility
+
+## Create The Monitoring LXC
+
+On the Proxmox host:
+
+```bash
+pct create 400 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname monitoring \
+  --cores 2 \
+  --memory 2048 \
+  --swap 512 \
+  --rootfs local-zfs:30 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.80/24,gw=192.168.50.1 \
+  --nameserver 192.168.50.10 \
+  --searchdomain lan \
+  --unprivileged 1 \
+  --features nesting=1 \
+  --onboot 1 \
+  --start 0 \
+  --password
+```
+
+Then:
+
+```bash
+pct start 400
+pct enter 400
+
+# Update packages
+apt update && apt upgrade -y
+
+# Install essentials
+apt install -y curl wget gnupg2 apt-transport-https software-properties-common lsb-release ca-certificates
+```
+
+## Install `node_exporter` On The Host
+
+```bash
+# Check latest version at https://github.com/prometheus/node_exporter/releases
+NODE_EXPORTER_VERSION="1.10.2"
+
+cd /tmp
+wget https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz
+
+tar xzf node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz
+cp node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64/node_exporter /usr/local/bin/
+chmod +x /usr/local/bin/node_exporter
+```
+
+```bash
+useradd --no-create-home --shell /usr/sbin/nologin node_exporter
+mkdir -p /var/lib/node_exporter/textfile_collector
+chown node_exporter:node_exporter /var/lib/node_exporter/textfile_collector
+```
+
+```bash
+cat > /etc/systemd/system/node_exporter.service << 'EOF'
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter \
+  --collector.textfile.directory=/var/lib/node_exporter/textfile_collector \
+  --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)" \
+  --collector.hwmon \
+  --collector.cpu.info \
+  --collector.meminfo \
+  --collector.diskstats \
+  --collector.netdev \
+  --collector.thermal_zone \
+  --collector.loadavg \
+  --collector.pressure \
+  --web.listen-address=:9100
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now node_exporter
+
+# Test the metrics endpoint
+curl -s http://localhost:9100/metrics | head -20
+```
+
+## Install NVIDIA Metrics On The Host
+
+```bash
+# Check latest version at https://github.com/utkuozdemir/nvidia_gpu_exporter/releases
+NVIDIA_EXPORTER_VERSION="1.4.1"
+
+cd /tmp
+wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v${NVIDIA_EXPORTER_VERSION}/nvidia_gpu_exporter_${NVIDIA_EXPORTER_VERSION}_linux_x86_64.tar.gz
+
+tar xzf nvidia_gpu_exporter_${NVIDIA_EXPORTER_VERSION}_linux_x86_64.tar.gz
+cp nvidia_gpu_exporter /usr/local/bin/
+chmod +x /usr/local/bin/nvidia_gpu_exporter
+```
+
+```bash
+cat > /etc/systemd/system/nvidia_gpu_exporter.service << 'EOF'
+[Unit]
+Description=NVIDIA GPU Exporter for Prometheus
+Documentation=https://github.com/utkuozdemir/nvidia_gpu_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nvidia_gpu_exporter --web.listen-address=:9835
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now nvidia_gpu_exporter
+
+# Test — should show GPU metrics
+curl -s http://localhost:9835/metrics | grep -E "nvidia_gpu_(temperature|fan|memory|power|utilization)" | head -30
+```
+
+## Install SMART Monitoring
+
+```bash
+apt install -y smartmontools
+```
+
+```bash
+cat > /usr/local/bin/smartmon.sh << 'EOF'
+#!/bin/bash
+# SMART monitoring script for Prometheus node_exporter textfile collector
+# Supports both traditional SATA/SAS and NVMe drives with temperature extraction
+
+set -u
+
+get_disks() {
+    lsblk -d -n -o NAME,TYPE | awk '$2 == "disk" {print "/dev/" $1}'
+}
+
+parse_nvme_smart() {
+    local disk=$1
+    local output
+    
+    output=$(smartctl -a "$disk" 2>&1)
+    
+    # Extract temperature
+    temp=$(echo "$output" | grep "^Temperature:" | head -1 | awk '{print $(NF-1)}')
+    if [[ -n "$temp" ]] && [[ "$temp" =~ ^[0-9]+$ ]]; then
+        echo "smartmon_temperature_celsius_value{disk=\"$disk\",type=\"nvme\"} $temp"
+    fi
+}
+
+echo "# HELP smartmon_temperature_celsius_value SMART metric temperature_celsius_value"
+echo "# TYPE smartmon_temperature_celsius_value gauge"
+
+for disk in $(get_disks); do
+    if smartctl -i "$disk" &>/dev/null; then
+        parse_nvme_smart "$disk"
+    fi
+done
+EOF
+
+chmod +x /usr/local/bin/smartmon.sh
+```
+
+```bash
+cat > /etc/cron.d/smartmon-prometheus << 'EOF'
+# Collect SMART metrics for Prometheus node_exporter textfile collector
+PATH=/usr/sbin:/usr/bin:/bin
+*/5 * * * * root /usr/local/bin/smartmon.sh > /var/lib/node_exporter/textfile_collector/smartmon.prom 2>/dev/null && chmod 644 /var/lib/node_exporter/textfile_collector/smartmon.prom
+EOF
+```
+
+```bash
+# Force an immediate run
+/usr/local/bin/smartmon.sh > /var/lib/node_exporter/textfile_collector/smartmon.prom && chmod 644 /var/lib/node_exporter/textfile_collector/smartmon.prom
+
+# Verify node_exporter exposes the metrics
+curl -s http://localhost:9100/metrics | grep "smartmon_temperature_celsius_value"
+```
+
+## Install Prometheus
+
+Inside CT 400:
+
+```bash
+useradd --no-create-home --shell /usr/sbin/nologin prometheus
+```
+
+```bash
+PROMETHEUS_VERSION="3.2.1"
+
+cd /tmp
+wget https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
+
+tar xzf prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
+cd prometheus-${PROMETHEUS_VERSION}.linux-amd64
+
+# Install binaries
+cp prometheus promtool /usr/local/bin/
+chown prometheus:prometheus /usr/local/bin/prometheus /usr/local/bin/promtool
+
+# Create config and data directories
+mkdir -p /etc/prometheus /var/lib/prometheus
+chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
+```
+
+```bash
+cat > /etc/prometheus/prometheus.yml << 'EOF'
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          instance: "monitoring"
+
+  - job_name: "proxmox-host"
+    static_configs:
+      - targets: ["192.168.50.20:9100"]
+        labels:
+          instance: "pve-host"
+          environment: "homelab"
+
+  - job_name: "llama-cpp"
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["192.168.50.45:9414"]
+        labels:
+          instance: "llama-cpp"
+          service: "llm"
+EOF
+```
+
+```bash
+cat > /etc/systemd/system/prometheus.service << 'EOF'
+[Unit]
+Description=Prometheus Monitoring System
+Documentation=https://prometheus.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus/ \
+  --storage.tsdb.retention.time=15d \
+  --storage.tsdb.retention.size=10GB \
+  --web.listen-address=:9090 \
+  --web.enable-lifecycle
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now prometheus
+
+# Verify web UI is accessible
+curl -s http://localhost:9090/-/healthy
+```
+
+## Optional: `pve-exporter`
+
+This is useful, but it is explicitly optional because certificate handling can be annoying in some environments.
+
+```bash
+apt install -y python3-full python3-pip
+python3 -m venv /opt/pve-exporter
+/opt/pve-exporter/bin/pip install prometheus-pve-exporter
+```
+
+On the Proxmox host:
+
+```bash
+# Create a dedicated monitoring user with read-only access
+pveum user add monitoring@pve --comment "Prometheus monitoring (read-only)"
+pveum acl modify / --user monitoring@pve --role PVEAuditor
+
+# Create an API token (no privilege separation for simplicity)
+pveum user token add monitoring@pve prometheus --privsep 0
+```
+
+Inside CT 400:
+
+```bash
+cat > /etc/prometheus/pve-exporter.yml << 'EOF'
+default:
+  user: monitoring@pve
+  token_name: prometheus
+  token_value: "YOUR_TOKEN_VALUE_HERE"
+  verify_ssl: false
+EOF
+```
+
+```bash
+cat > /etc/systemd/system/pve-exporter.service << 'EOF'
+[Unit]
+Description=Prometheus PVE Exporter
+Documentation=https://github.com/prometheus-pve/prometheus-pve-exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/opt/pve-exporter/bin/pve_exporter \
+  --config.file=/etc/prometheus/pve-exporter.yml \
+  --web.listen-address=:9221
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now pve-exporter
+
+# Verify
+curl -s "http://localhost:9221/pve?target=192.168.50.20&cluster=1&node=1" --max-time 15 | head -20
+```
+
+## Install Grafana
+
+```bash
+# Import Grafana GPG key
+mkdir -p /etc/apt/keyrings
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+
+# Add repository (OSS edition — free, open-source)
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
+  > /etc/apt/sources.list.d/grafana.list
+```
+
+```bash
+apt update
+apt install -y grafana
+```
+
+```bash
+cat >> /etc/grafana/grafana.ini << 'EOF'
+
+[server]
+http_addr = 0.0.0.0
+http_port = 3000
+domain = 192.168.50.80
+
+[security]
+admin_user = admin
+admin_password = admin
+
+[users]
+allow_sign_up = false
+
+[analytics]
+reporting_enabled = false
+check_for_updates = false
+
+[log]
+mode = console file
+level = warn
+EOF
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now grafana-server
+```
+
+Then add Prometheus as the data source at `http://localhost:9090`.
+
+## Dashboards Worth Importing
+
+The original stack used these Grafana dashboards:
+
+- `1860` — Node Exporter Full
+- `14574` — NVIDIA GPU Metrics
+- `10347` — Proxmox via Prometheus
+- `10530` — SMART Disk Monitoring for Prometheus
+
+That gives you host CPU and memory, GPU thermals and VRAM, guest visibility where `pve-exporter` works cleanly, and disk health from the SMART collector.
+
+## Alerting
+
+Grafana alerting is the simplest place to start because it can send mail through the same Gmail/App Password setup documented for the rest of the lab.
+
+Recommended alert ideas from the source guide:
+
+- high CPU usage
+- high memory usage
+- GPU overheating
+- GPU VRAM nearly full
+- low disk space
+- SMART health failure
+- target down
+
+If you want the full Prometheus-native path instead, add Alertmanager later. The important thing is not which alerting product wins. The important thing is that the lab tells you when it is drifting out of a safe state.
+
+## Related Topics
+
+- [Email Notifications](/pages/proxmox/operations/email-notifications) — the SMTP path that makes alerts useful.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where monitoring data and alerting should inform maintenance windows.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the workload page that introduces the GPU telemetry this page watches.

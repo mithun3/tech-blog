@@ -1,0 +1,187 @@
+---
+title: "Pi-hole In A Homelab"
+description: "Where Pi-hole fits in a homelab network, why a second instance matters, and how to think about router DHCP, upstream DNS, and failover before choosing a platform."
+publishedAt: "2026-02-08"
+updatedAt: "2026-02-08"
+order: 5
+status: published
+---
+
+# Pi-hole In A Homelab
+
+Pi-hole looks like an application until the day it stops answering queries.
+
+Then it becomes obvious that it is not just another service. It is part of the network's control plane.
+
+That is why this page lives under Networking.
+
+The question here is not "how do I build the box?" The question is what role Pi-hole should play in the lab, how many instances you want, what upstream resolver model makes sense, and where the router fits into the design.
+
+If you are ready to deploy a platform-specific instance, continue to [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) for a dedicated Pi node or [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) for the Proxmox-backed path.
+
+## What Pi-hole Is Actually Doing
+
+Pi-hole is a DNS sinkhole.
+
+Instead of filtering traffic inside every browser or every device, it blocks domains at the DNS layer. If a client never receives the real address for an ad, tracker, or known-bad endpoint, the request never gets very far.
+
+That gives Pi-hole its value in a homelab:
+
+- network-wide blocking instead of per-device setup
+- one dashboard for query logs and block decisions
+- a simple way to see which devices are especially noisy
+- a clean place to introduce DNS discipline before more complex routing or segmentation work
+
+## Why A Second Instance Matters
+
+The main reason to run a second Pi-hole is not performance. It is resilience.
+
+If the only DNS filter in the house disappears, users do not experience "ad blocking is temporarily unavailable." They experience "the internet is broken."
+
+That is why the dual-instance pattern is so common in homelabs:
+
+```text
+Router DHCP
+  -> DNS 1: primary Pi-hole
+  -> DNS 2: secondary Pi-hole
+```
+
+When one node is down for maintenance, updates, storage issues, or simple bad luck, clients still have somewhere to resolve names.
+
+In this lab shape, the natural split is:
+
+- a primary instance on a Raspberry Pi or other small always-on box
+- a secondary instance on Proxmox for redundancy and operational flexibility
+
+That keeps DNS from depending on one physical device and one failure mode.
+
+## Keep DHCP On The Router
+
+For this setup, DHCP stays on the router.
+
+That is the cleaner operational choice for a small homelab because the router remains the device handing out leases, while both Pi-hole instances only answer DNS queries.
+
+The router should advertise both Pi-hole addresses to clients. That gives you redundancy without making Pi-hole itself the DHCP dependency.
+
+The practical outcome is simple:
+
+- Pi-hole focuses on DNS filtering and visibility
+- the router remains the source of address assignment
+- rebuilding or replacing a Pi-hole instance does not mean redoing DHCP on the whole network
+
+## The Three Upstream Strategies
+
+Once Pi-hole allows a query through, it still needs an upstream resolver. This is where the tradeoff gets interesting.
+
+### Option A: Third-Party DNS Providers
+
+Examples: Cloudflare, Quad9, Google.
+
+This is the simplest model. Pi-hole forwards queries upstream and those providers resolve the names.
+
+Choose this when you want:
+
+- the fastest setup
+- predictable reliability
+- fewer moving parts inside the lab
+
+The cost is trust. A third party still sees the domains being queried.
+
+### Option B: Unbound Recursive Resolution
+
+Unbound can resolve names directly instead of forwarding them to a large public provider.
+
+Choose this when you care most about:
+
+- reducing third-party visibility
+- local control over recursive DNS
+- DNSSEC validation without outsourcing the whole problem
+
+The cost is a slightly more involved setup and slower first-query performance for uncached lookups.
+
+### Option C: Unbound With DNS-over-TLS Forwarding
+
+This sits between the other two models.
+
+Queries are still forwarded to a provider such as Cloudflare or Quad9, but the path is encrypted in transit.
+
+Choose this when you want:
+
+- encrypted DNS on the wire
+- less ISP visibility
+- simpler behavior than full recursive resolution
+
+The tradeoff is that the upstream provider still sees the queries.
+
+## Picking The Right Model
+
+| Priority | Best Fit |
+|----------|----------|
+| Easiest setup | Third-party DNS providers |
+| Strongest privacy posture | Unbound recursive |
+| Encrypted forwarding without full recursion | Unbound with DNS-over-TLS |
+
+For most homelabs, the answer is not ideological.
+
+It is operational.
+
+If you want the fewest things to maintain, use a reliable upstream provider. If you enjoy owning more of the stack and understand the maintenance cost, use Unbound.
+
+## What Failover Really Means
+
+Two Pi-hole instances do not magically become a synchronized cluster just because both IPs exist in DHCP.
+
+Clients usually choose between the provided DNS servers according to their own resolver behavior. Some will prefer the first server until it fails. Some will spread requests more aggressively. Some will appear to behave irrationally.
+
+That means the practical goal is not perfect request balancing.
+
+The goal is:
+
+- either Pi-hole can answer when the other is absent
+- both instances use a compatible blocking posture
+- both instances are easy to update independently
+
+If you want close behavioral parity, keep blocklists and major settings aligned across both nodes.
+
+## Canonical Split For This Topic
+
+This topic belongs in two places for two different reasons.
+
+### What Stays Here
+
+This networking page owns:
+
+- why Pi-hole exists in the lab at all
+- primary versus secondary instance thinking
+- router DHCP and DNS advertisement strategy
+- upstream resolver choices
+- failover expectations and operational tradeoffs
+
+### What Moves To Proxmox
+
+The Proxmox page owns:
+
+- creating the LXC container
+- choosing between community script and manual creation
+- Proxmox-side verification and container control
+- host-level snapshot and restore workflow for that instance
+
+That workload page is here: [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc).
+
+### What Moves To Raspberry Pi
+
+The Raspberry Pi page owns:
+
+- imaging Raspberry Pi OS Lite and bringing the board online cleanly
+- SSH hardening, UFW, fail2ban, and unattended updates on the Pi itself
+- Pi-specific backup scripts and storage care
+- gravity-sync and active-passive failover work from the Pi side
+
+That platform page is here: [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b).
+
+## Related Topics
+
+- [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) — the dedicated Pi deployment path for a primary or standalone Pi-hole node.
+- [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) — the Proxmox-specific deployment path for the secondary instance.
+- [Network Security](/pages/networking/homelab-architecture/network-security) — where DNS filtering fits into the broader defensive shape of the network.
+- [Network Troubleshooting](/pages/networking/homelab-architecture/network-troubleshooting) — the place to start when clients are not resolving cleanly.

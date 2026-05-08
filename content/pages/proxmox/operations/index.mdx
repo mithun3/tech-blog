@@ -1,0 +1,35 @@
+---
+title: "Proxmox Operations"
+description: "Day-two Proxmox work: storage, backups, notifications, updates, and the routines that keep the host recoverable instead of fragile."
+publishedAt: "2026-05-08"
+order: 3
+status: published
+---
+
+# Proxmox Operations
+
+This is the section for the part of Proxmox that matters after the install stops being interesting.
+
+It is where storage layout, backups, update habits, alerting, and troubleshooting stop sounding like admin chores and start looking like the reason the lab stays usable six months later.
+
+## What Belongs Here
+
+- host storage and ZFS operations
+- backup and recovery workflows
+- update and maintenance routines
+- notifications, monitoring, and operational checks
+- troubleshooting that is primarily about running the Proxmox platform itself
+
+## In This Section
+
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the operational storage layer: pool health, compression, scrubs, and the risky expansion tasks that only make sense once the host is already in service.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — snapshots, vzdump, restore paths, and the backup cadence that keeps recovery boring.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) — make sure backup failures and system events actually leave the host and reach your inbox.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — a host-first maintenance rhythm for Proxmox, LXC guests, and the services already living on top of them.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — manual health checks, Prometheus, Grafana, SMART telemetry, and alerting for a host that already matters.
+
+## How To Read It
+
+Read this section once the host exists and you care about keeping it stable.
+
+If you are still building the machine, start with [Proxmox Setup](/pages/proxmox/setup). If you are deploying services on top of the host, use [Proxmox Workloads](/pages/proxmox/workloads) for the platform-specific runbooks and come back here when those services need backup, maintenance, or recovery discipline.

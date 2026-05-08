@@ -1,6 +1,6 @@
 ---
 title: "Proxmox"
-description: "A connected Proxmox guide: why it is useful, what the fundamentals are, how the stack is layered, and how to handle storage, networking, and sizing."
+description: "A connected Proxmox guide covering platform fundamentals, host setup, day-two operations, and workload-specific runbooks."
 publishedAt: "2024-10-30"
 order: 3
 status: published
@@ -8,12 +8,25 @@ status: published
 
 # Proxmox
 
-These pages cover the Proxmox platform itself. Start with the basics section, then branch into deeper topics over time.
+These pages cover the Proxmox platform itself.
+
+The structure is split on purpose. Basics explains the platform. Setup covers bring-up. Operations covers the habits that keep the host recoverable. Workloads covers the guides that depend on Proxmox-specific LXC, VM, storage, networking, or passthrough behavior.
 
 ## In This Section
 
 - [Proxmox Basics](/pages/proxmox/basics) — the foundational sequence covering why Proxmox is useful, how the platform is layered, and the practical defaults for storage, networking, and sizing.
+- [Proxmox Setup](/pages/proxmox/setup) — host bring-up, BIOS choices, installation flow, and the early decisions that shape everything after.
+- [Proxmox Operations](/pages/proxmox/operations) — storage, backups, notifications, updates, and the routines that keep the host stable.
+- [Proxmox Workloads](/pages/proxmox/workloads) — service deployments, passthrough, and Proxmox-specific runbooks for actual workloads.
+
+## Related Sections
+
+- [Networking](/pages/networking) — DNS, routing, bridges, VLANs, and the broader network context around Proxmox guests.
+- [GPU & AI](/pages/gpu-ai) — the cross-platform ideas behind local GPU compute and AI infrastructure.
+- [Virtualization](/pages/virtualization) — the platform-agnostic concepts behind VMs, LXCs, lifecycle, and isolation.
 
 ## How To Use It
 
-Start with [Proxmox Basics](/pages/proxmox/basics). That section gives you a practical reading order from platform context to operating details.
+Start with [Proxmox Basics](/pages/proxmox/basics) if you want the shape of the platform first.
+
+Move to [Proxmox Setup](/pages/proxmox/setup) when you are building the host, [Proxmox Operations](/pages/proxmox/operations) when the host is already running and needs discipline, and [Proxmox Workloads](/pages/proxmox/workloads) when the question becomes how to run a specific service or hardware workflow on top of it.
