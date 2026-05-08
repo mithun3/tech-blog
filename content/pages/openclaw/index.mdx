@@ -12,6 +12,11 @@ This section is reserved for OpenClaw itself.
 
 The goal is to keep OpenClaw-specific material in one place instead of scattering it across infrastructure notes just because some of it happens to run on Proxmox.
 
+## In This Section
+
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases) - shape the workspace, teach the assistant about the homelab, and decide which tasks actually belong to it.
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting) - verification, maintenance, structured debugging, and the configuration failures worth recognizing quickly.
+
 ## Planned Focus
 
 - architecture and system boundaries
@@ -19,5 +24,11 @@ The goal is to keep OpenClaw-specific material in one place instead of scatterin
 - research pipelines and retrieval design
 - metrics, testing, and quality gates
 - project evolution and operator-facing notes
+
+## Related Platform Guides
+
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the deployment-side cluster for CT 106, channel wiring, and secure exposure.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the model-serving layer OpenClaw depends on.
+- [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the external access path for the control UI when it should leave the LAN.
 
 If the main question is how to deploy or operate the surrounding infrastructure, that content belongs in [Proxmox](/pages/proxmox) or the relevant platform section. If the main question is how OpenClaw itself works, it belongs here.

@@ -32,6 +32,7 @@ If the workload is common and the immediate question is just "what is the fastes
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the fastest path to a usable local AI stack when you want the interface and the inference engine online without overthinking the separation.
 - [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level single-model path when control over GGUF models, build flags, and server behavior matters more than convenience.
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the multi-model path for one Open WebUI connection, on-demand loading, and a cleaner long-term inference setup.
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the personal-assistant path that sits on top of Router Mode when the lab wants Telegram, Discord, scheduled workflows, and an always-on gateway.
 - [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) - the concrete deployment walkthrough for the dual-RTX-3090 Router Mode layout.
 
 ## AI Workloads
@@ -45,6 +46,9 @@ One is for getting something working quickly. One is for taking direct control o
 | [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) | you want the shortest route to a usable chat stack | less control over the serving layer |
 | [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) | you want direct control over GGUF models and runtime tuning | more manual setup and maintenance |
 | [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) | you want multiple models behind one endpoint and one UI connection | more planning around VRAM, presets, and lifecycle |
+| [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) | you want a mobile-first assistant that uses the local model stack through Telegram, Discord, and scheduled workflows | more channel, daemon, and exposure plumbing |
+
+Once Router Mode exists, OpenClaw is the follow-on path when the lab wants an assistant rather than one more browser tab.
 
 ## NAS And Shared Storage
 

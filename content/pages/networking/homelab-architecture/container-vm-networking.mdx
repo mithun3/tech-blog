@@ -36,6 +36,8 @@ VM virtual NIC <-> vmbr0 bridge <-> physical ethernet
 
 VMs have more isolation because they emulate a full machine, but that comes with more overhead than a container.
 
+That tradeoff is exactly why small Kubernetes clusters in this lab live in VMs rather than in host-side container experiments. [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) uses full guest boundaries so the cluster can be snapshotted, rebuilt, and upgraded without turning the hypervisor into part of the control plane.
+
 ## Performance Comparison
 
 ```text

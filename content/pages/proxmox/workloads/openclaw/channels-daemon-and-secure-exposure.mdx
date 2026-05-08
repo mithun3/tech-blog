@@ -1,0 +1,248 @@
+---
+title: "OpenClaw Channels, Daemon, And Secure Exposure"
+description: "Attach Telegram or Discord to OpenClaw, replace the broken user-daemon pattern with a system service, and expose the control UI through Cloudflare Tunnel without turning the hypervisor into the edge."
+publishedAt: "2025-01-24"
+updatedAt: "2025-01-31"
+order: 2
+status: published
+---
+
+# OpenClaw Channels, Daemon, And Secure Exposure
+
+This page handles the parts that make OpenClaw feel like an assistant instead of a local binary.
+
+That means choosing a messaging channel, persisting the required bot tokens safely, replacing the broken user-level service pattern with a system service that actually works in an unprivileged LXC, and exposing the control UI through the existing Cloudflare Tunnel layer.
+
+## Choose A Messaging Surface
+
+| Aspect | Telegram | Discord |
+|--------|----------|---------|
+| Setup complexity | simpler | slightly more steps |
+| Personal DM flow | excellent | excellent |
+| Shared/server use | weaker default fit | stronger team fit |
+| Best when | you already live in Telegram | you already live in Discord or want team channels |
+
+For a personal homelab, either is fine. Choose the app you already use.
+
+## Telegram Setup
+
+### Create The Bot
+
+1. Open Telegram and search for `@BotFather`.
+2. Send `/newbot`.
+3. Choose a display name and a username ending in `bot`.
+4. Save the bot token.
+5. Use `@userinfobot` to retrieve your numeric Telegram user ID.
+
+### Set The Token As An Environment Variable
+
+Inside CT 106:
+
+```bash
+export TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
+echo $TELEGRAM_BOT_TOKEN
+```
+
+### Configure The Telegram Channel
+
+```json5
+channels: {
+  telegram: {
+    enabled: true,
+    dmPolicy: "pairing",
+    groupPolicy: "open",
+    streaming: "off",
+  },
+}
+```
+
+### Restart And Test
+
+```bash
+systemctl restart openclaw
+systemctl status openclaw
+journalctl -u openclaw -n 30 --no-pager | tail -20
+```
+
+If the first DM returns a pairing code, approve it on the container:
+
+```bash
+openclaw pairing approve telegram ABC123XYZ
+```
+
+Send these commands from Telegram for a first-pass check: `Hello`, `/status`, `/model`, `/new`, and `/help`.
+
+## Discord Setup
+
+### Create The Bot
+
+1. Open the Discord Developer Portal.
+2. Create a new application and add a bot.
+3. Copy the bot token.
+4. Enable Developer Mode in Discord and copy your user ID.
+
+### Enable The Required Intents
+
+Under the bot settings, enable:
+
+- **Server Members Intent**
+- **Message Content Intent**
+
+Without those, the gateway fails with the classic Discord `4014` privileged-intents error.
+
+### Set The Token As An Environment Variable
+
+```bash
+export DISCORD_BOT_TOKEN="your-discord-bot-token"
+echo $DISCORD_BOT_TOKEN
+```
+
+### Configure The Discord Channel
+
+```json5
+channels: {
+  discord: {
+    enabled: true,
+    dmPolicy: "pairing",
+    groupPolicy: "open",
+    streaming: "off",
+  },
+}
+```
+
+### Add The Bot To A Dummy Server
+
+Discord requires one mutual server before direct messages work cleanly. Create a private personal server, invite the bot through the OAuth URL generator, and keep that server as the shared anchor even if you only plan to use DMs.
+
+### Restart And Pair
+
+```bash
+systemctl restart openclaw
+journalctl -u openclaw -n 30 --no-pager | tail -20
+```
+
+Approve the first pairing code from the container:
+
+```bash
+openclaw pairing approve discord ABC123XYZ
+```
+
+If you want a server channel instead of DMs, use `groupPolicy: "allowlist"` and set `allowedChannels` explicitly.
+
+## Replace The Broken User Daemon With A System Service
+
+`systemctl --user` is the wrong shape inside this unprivileged container. Use a system-level service instead.
+
+### Create The Service
+
+```bash
+which openclaw
+
+cat > /etc/systemd/system/openclaw.service << 'EOF'
+[Unit]
+Description=OpenClaw Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/.local/share/pnpm/openclaw gateway
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/root
+Environment=NODE_ENV=production
+Environment=TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
+Environment=DISCORD_BOT_TOKEN="your-discord-bot-token"
+WorkingDirectory=/root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now openclaw
+systemctl status openclaw
+ss -tlnp | grep 18789
+```
+
+The important part is persistence. Session-level `export` commands are fine for testing, but the service file is what survives restarts and reboots.
+
+### Service Management
+
+```bash
+systemctl start openclaw
+systemctl stop openclaw
+systemctl restart openclaw
+journalctl -u openclaw -f
+journalctl -u openclaw --since "1 hour ago"
+systemctl is-enabled openclaw
+```
+
+### Verify Container-Reboot Recovery
+
+```bash
+# From the Proxmox host
+pct reboot 106
+
+# After the container returns
+pct enter 106
+systemctl status openclaw
+ss -tlnp | grep 18789
+```
+
+## Cloudflare Tunnel Integration
+
+Expose the web UI and control surface through the existing tunnel in CT 201.
+
+### Add The Ingress Rule
+
+```bash
+# From the Proxmox host
+pct enter 201
+nano /etc/cloudflared/config.yml
+```
+
+Add this before the catch-all `http_status:404`:
+
+```yaml
+  - hostname: openclaw.sysya.org
+    service: http://192.168.50.85:18789
+    originRequest:
+      connectTimeout: 30s
+```
+
+### Create DNS And Restart
+
+```bash
+cloudflared tunnel route dns proxmox-ve openclaw.sysya.org
+systemctl restart cloudflared
+systemctl status cloudflared
+cloudflared tunnel info proxmox-ve
+```
+
+### Test External Access
+
+```bash
+# Inside CT 106
+openclaw dashboard --no-open
+```
+
+Use the generated URL token to authenticate to `https://openclaw.sysya.org`.
+
+If the control UI is exposed publicly, pair it with the Cloudflare Access pattern already described in [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead of leaving it as a naked internet-facing admin surface.
+
+## Tunnel Summary
+
+After adding OpenClaw, the tunnel can route:
+
+| Subdomain | Backend | Service |
+|-----------|---------|---------|
+| `openwebui.sysya.org` | `http://192.168.50.30:42` | Open WebUI |
+| `openclaw.sysya.org` | `http://192.168.50.85:18789` | OpenClaw Gateway |
+| `llamacpp.sysya.org` | `https://192.168.50.45:8012` | llama.cpp API |
+| `grafana.sysya.org` | `http://192.168.50.80:3000` | Grafana |
+| `prometheus.sysya.org` | `http://192.168.50.80:9090` | Prometheus |
+
+Once the assistant is reachable and paired, continue with the OpenClaw-specific pages:
+
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
+- [OpenClaw Operations And Troubleshooting](/pages/openclaw/operations-and-troubleshooting)

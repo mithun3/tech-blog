@@ -1,0 +1,131 @@
+---
+title: "OpenClaw Workspace, Skills, And Use Cases"
+description: "Shape OpenClaw's workspace, teach it about the homelab, install skills carefully, and decide which real workloads belong to the assistant instead of staying as one-off chats."
+publishedAt: "2025-01-25"
+updatedAt: "2025-01-31"
+order: 1
+status: published
+---
+
+# OpenClaw Workspace, Skills, And Use Cases
+
+Once OpenClaw is running, the real question stops being whether the gateway starts and becomes whether the assistant behaves like your assistant instead of a generic local model wearing a chatbot costume.
+
+That behavior lives in the workspace.
+
+## Workspace Shape
+
+```text
+~/.openclaw/workspace/
+├── AGENTS.md
+├── SOUL.md
+├── TOOLS.md
+└── skills/
+    ├── homelab-monitor/
+    │   └── SKILL.md
+    ├── daily-briefing/
+    │   └── SKILL.md
+    └── ...
+```
+
+## Shape The Assistant With `AGENTS.md`
+
+Edit the main behavioral file:
+
+```bash
+nano ~/.openclaw/workspace/AGENTS.md
+```
+
+Example starting point:
+
+```markdown
+# Homelab Assistant
+
+You are a personal AI assistant running on a Proxmox VE homelab.
+
+## Environment
+
+- Host: Proxmox VE 8.x on Ryzen 9 5950X, 64 GB RAM, dual RTX 3090
+- Your container: CT 106 at 192.168.50.85
+- LLM backend: llama.cpp Router Mode at 192.168.50.45:8012
+- Available models: Qwen3-8B, GLM-4-9B, DeepSeek-R1-Qwen3-8B, GPT-OSS-20B
+- Other services:
+  - OpenWebUI: 192.168.50.30:42
+  - Pi-hole: 192.168.50.10 and 192.168.50.11
+  - Grafana: 192.168.50.80:3000
+  - Prometheus: 192.168.50.80:9090
+  - TrueNAS: 192.168.50.50
+  - Proxmox host: 192.168.50.20:8006
+
+## Capabilities
+
+- Answer questions about the homelab setup
+- Help troubleshoot network, GPU, container, and storage issues
+- Suggest Linux, Proxmox, Docker, and ZFS commands with explanation
+- Draft technical documentation in the lab's markdown style
+- Manage reminders and recurring briefings
+
+## Style
+
+- Be concise and direct
+- Use technical terminology accurately
+- Prefer practical steps over theory-first explanations
+```
+
+## Practical Use Cases
+
+### Quick Homelab Assistant
+
+```text
+You: What's the command to check GPU memory usage on the Proxmox host?
+Bot: `nvidia-smi` — run it on 192.168.50.20. For continuous watching: `watch -n 1 nvidia-smi`
+
+You: How do I restart the llama.cpp service?
+Bot: SSH into CT 102 and run `systemctl restart llama-server`
+```
+
+### Daily Briefing
+
+Use the assistant as a scheduled briefing surface rather than a passive bot. The practical value is that status summaries arrive where you already are instead of waiting behind one browser tab you forget to reopen.
+
+### Command Builder And Explainer
+
+```text
+You: Build me a curl command to test whether the llama.cpp endpoint is healthy.
+Bot: `curl -s -o /dev/null -w "%{http_code}" http://192.168.50.45:8012/health`
+```
+
+### Documentation Drafter
+
+OpenClaw works well as a first-draft assistant for troubleshooting notes, change logs, or runbook sections, especially when the workspace already teaches it the structure and tone of the homelab docs.
+
+### Reminder And Task Management
+
+This is where the assistant starts justifying its existence. A browser chat can answer questions. An assistant that remembers to message you about kernel updates, scrub results, or follow-up checks is doing a different job.
+
+### Log Analysis And Debugging
+
+Switch to a heavier model when the input becomes structured logs rather than short questions. The fast model is for replies. The heavier model is for diagnosis.
+
+## Skills
+
+Search carefully instead of installing everything that sounds clever.
+
+```bash
+openclaw skills search "homelab"
+openclaw skills search "monitoring"
+openclaw skills search "reminder"
+
+openclaw skills install <skill-name>
+openclaw skills list
+```
+
+Many community skills assume large hosted models. Test them one at a time and be ready to switch to a heavier local model when the skill needs more reasoning than an 8-9B assistant should be asked to fake.
+
+## Where The Infrastructure Pages Still Matter
+
+If you need to rebuild the container, change channel auth, or re-expose the control surface, go back to the Proxmox workload pages:
+
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
+- [OpenClaw LXC Build And llama.cpp Integration](/pages/proxmox/workloads/openclaw/lxc-build-and-llamacpp-integration)
+- [OpenClaw Channels, Daemon, And Secure Exposure](/pages/proxmox/workloads/openclaw/channels-daemon-and-secure-exposure)

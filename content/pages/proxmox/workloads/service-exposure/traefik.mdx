@@ -12,6 +12,8 @@ This is the container-native certificate path.
 
 If your exposed services already live in Docker or another container runtime, Traefik can become the edge layer that discovers routes from labels and issues certificates without hand-editing one site file per service. That is what makes it attractive in labs that have already standardized on containers.[^1]
 
+If those services now live on the k3s cluster instead of a single Docker guest, use this page together with [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure). The cluster already has a Traefik-shaped ingress layer, so the practical question becomes where the public edge should terminate, not whether the workloads need a second hand-built routing story.
+
 If you want the shortest secure path while the origin stays on plain HTTP inside the LAN, use [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) instead. If you want a simpler self-hosted reverse proxy with explicit site files and a wildcard certificate, use [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc).
 
 ## Why This Path Exists
@@ -100,6 +102,7 @@ If the lab is mostly LXCs and VMs, Traefik usually adds abstraction faster than 
 ## Related Topics
 
 - [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) - the subsection overview and decision hub.
+- [Kubernetes Storage, Ingress, And Exposure](/pages/proxmox/workloads/kubernetes/storage-ingress-and-exposure) - the cluster-side path when Traefik is already part of the k3s service layer.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the default path when you want secure exposure without managing certificates yourself.
 - [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) - the simpler self-hosted reverse-proxy alternative with explicit config files.
 - [Individual Certificates On Proxmox With acme.sh](/pages/proxmox/workloads/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path once one wildcard or one shared resolver stops feeling right.

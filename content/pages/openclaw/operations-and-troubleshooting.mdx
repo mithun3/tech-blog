@@ -1,0 +1,204 @@
+---
+title: "OpenClaw Operations And Troubleshooting"
+description: "Verify the assistant end to end, keep the runtime maintainable, and debug channel, gateway, model, and configuration failures in a fixed order instead of guessing."
+publishedAt: "2025-01-26"
+updatedAt: "2025-01-31"
+order: 2
+status: published
+---
+
+# OpenClaw Operations And Troubleshooting
+
+Once the assistant is in use, the main risk is not installation anymore. The main risk is drift.
+
+Tokens change. Config keys change. Channels fail in ways that look unrelated. The gateway is up but the model backend is down. Or the model backend is fine and the pairing state is wrong. The goal of this page is to keep that debugging order fixed so you stop losing time to random guessing.
+
+## Verification Checklist
+
+### Infrastructure
+
+- CT 106 is running: `pct status 106`
+- network connectivity to Router Mode works: `pct exec 106 -- ping -c 1 192.168.50.45`
+- Node.js is present: `pct exec 106 -- node --version`
+- OpenClaw is installed: `pct exec 106 -- openclaw --version`
+
+### LLM Integration
+
+- llama.cpp is reachable: `pct exec 106 -- curl -s http://192.168.50.45:8012/v1/models | head -5`
+- models are registered: `pct exec 106 -- openclaw models list`
+- primary model is correct: `pct exec 106 -- openclaw models status`
+- direct agent call works: `pct exec 106 -- openclaw agent --agent main --message "Say hi"`
+
+### Channels And Gateway
+
+- Telegram replies within a few seconds
+- Discord replies within a few seconds
+- gateway health works: `curl http://192.168.50.85:18789/health`
+- daemon is running: `pct exec 106 -- systemctl status openclaw`
+- external UI path works: `https://openclaw.sysya.org`
+
+### Recovery
+
+- assistant survives `pct reboot 106`
+- service restarts after failure: `pct exec 106 -- systemctl kill openclaw`
+
+## Updating And Maintenance
+
+### Update OpenClaw
+
+```bash
+pct enter 106
+pnpm install -g openclaw@latest
+systemctl restart openclaw
+openclaw --version
+openclaw doctor
+```
+
+### Update Node.js
+
+```bash
+node --version
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt install -y nodejs
+systemctl restart openclaw
+```
+
+### Back Up The Config And Workspace
+
+```bash
+# On the Proxmox host
+vzdump 106 --storage local --compress zstd --mode snapshot
+
+# Or inside CT 106
+tar czf /tmp/openclaw-backup-$(date +%F).tar.gz ~/.openclaw/
+```
+
+### Watch Disk Growth
+
+```bash
+df -h /
+du -sh ~/.openclaw/
+du -sh ~/.openclaw/agents/*/sessions/
+```
+
+## Structured Debug Workflow
+
+### Step 0: Check Version And Running State
+
+```bash
+pct exec 106 -- openclaw --version
+pct exec 106 -- systemctl status openclaw
+pct exec 106 -- journalctl -u openclaw -n 20 --no-pager
+```
+
+### Step 1: Check Gateway Health
+
+```bash
+curl -v http://192.168.50.85:18789/health
+```
+
+If this fails, the gateway is not actually up. Stay here until that is fixed.
+
+### Step 2: Validate Bot Tokens Directly
+
+```bash
+# Telegram
+curl -s "https://api.telegram.org/botyour-telegram-bot-token/getMe" | python3 -m json.tool
+
+# Discord
+curl -s -X GET https://discord.com/api/v10/users/@me \
+  -H "Authorization: Bot your-discord-bot-token" | python3 -m json.tool
+```
+
+If those fail, stop editing config files and rotate or replace the tokens first.
+
+### Step 3: Check Environment Variables And Config Surface
+
+```bash
+pct exec 106 -- bash -c "echo TELEGRAM_BOT_TOKEN=\$TELEGRAM_BOT_TOKEN; echo DISCORD_BOT_TOKEN=\$DISCORD_BOT_TOKEN"
+pct exec 106 -- cat ~/.openclaw/openclaw.json | grep -A20 "channels:"
+pct exec 106 -- openclaw doctor
+```
+
+The important rule here is simple: do not put `botToken` keys back into the JSON config. Keep tokens in the systemd environment and keep the JSON focused on channel behavior.
+
+### Step 4: Restart And Read The Logs
+
+```bash
+pct exec 106 -- systemctl restart openclaw
+pct exec 106 -- journalctl -u openclaw -n 100 --no-pager | grep -E "telegram|discord|gateway|models"
+```
+
+Healthy startup looks like:
+
+```text
+[gateway] Initializing components...
+[models] Loading provider: llamacpp
+[telegram] Connected to Telegram Bot API
+[discord] Connected to Discord Gateway
+[gateway] Listening on 0.0.0.0:18789
+```
+
+### Step 5: Test The Real Message Path
+
+For Telegram or Discord, send a simple message and watch the live logs:
+
+```bash
+pct exec 106 -- journalctl -u openclaw -f | grep -E "telegram|discord|message|response|inference"
+```
+
+If the message is received but inference never starts, the model layer is the problem. If inference works but the channel reply never sends, the channel layer is the problem. Keep those separate.
+
+## Common Failures
+
+### Gateway Won't Start
+
+```bash
+journalctl -u openclaw --since "5 minutes ago" --no-pager
+ss -tlnp | grep 18789
+openclaw doctor --fix
+which node
+which openclaw
+```
+
+Typical causes:
+
+- port collision on `18789`
+- missing `gateway.mode: "local"`
+- missing `controlUi.dangerouslyAllowHostHeaderOriginFallback` when binding to LAN
+- JSON5 syntax errors
+
+### Discord `4014` Privileged Intents Error
+
+If Discord logs show a `4014` gateway close, the fix is not in OpenClaw. Enable **Message Content Intent** and **Server Members Intent** in the Discord Developer Portal, then restart the service.
+
+### Invalid `groupPolicy` Or Old Token Keys
+
+If the config still uses `botToken` or sets `groupPolicy: "pairing"`, fix the schema instead of trying random restarts. The current shape is:
+
+```json5
+channels: {
+  telegram: {
+    enabled: true,
+    dmPolicy: "pairing",
+    groupPolicy: "open",
+    streaming: "off",
+  },
+  discord: {
+    enabled: true,
+    dmPolicy: "pairing",
+    groupPolicy: "open",
+    streaming: "off",
+  },
+}
+```
+
+### Environment Variables Vanish After Restart
+
+If the bot works after `export ...` but dies after `systemctl restart`, the fix is to persist the tokens in `/etc/systemd/system/openclaw.service`, reload the daemon, and restart the service.
+
+## Related Pages
+
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
+- [OpenClaw Channels, Daemon, And Secure Exposure](/pages/proxmox/workloads/openclaw/channels-daemon-and-secure-exposure)
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)

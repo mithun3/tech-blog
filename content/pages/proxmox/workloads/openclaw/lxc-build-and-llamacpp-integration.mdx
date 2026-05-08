@@ -1,0 +1,360 @@
+---
+title: "OpenClaw LXC Build And llama.cpp Integration"
+description: "Create the OpenClaw container on Proxmox, install Node.js and OpenClaw, and register the existing llama.cpp Router Mode endpoint as the assistant's local model backend."
+publishedAt: "2025-01-23"
+updatedAt: "2025-01-31"
+order: 1
+status: published
+---
+
+# OpenClaw LXC Build And llama.cpp Integration
+
+This page gets the assistant online inside the homelab.
+
+By the end, CT 106 exists, OpenClaw is installed, the workspace exists, and the gateway can talk to the existing llama.cpp Router Mode endpoint without adding new GPU passthrough or a second inference stack.
+
+If Router Mode is not in place yet, start with [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) first.
+
+## Create The LXC Container
+
+### Container Sizing
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **106** | next available service container |
+| Hostname | `openclaw` | descriptive role |
+| Disk Size | **10 GB** | runtime, workspace, logs |
+| CPU Cores | **2** | enough for the gateway and tool handling |
+| RAM | **2048 MiB** | Node.js plus assistant workspace |
+| Swap | **512 MiB** | safety net |
+| OS | Debian 13 | modern stable base |
+| Bridge | `vmbr0` | same LAN as the rest of the stack |
+| IPv4 | **192.168.50.85/24** | stable internal target |
+| Gateway | `192.168.50.1` | router |
+| Unprivileged | **Yes** | cleaner security boundary |
+| Nesting | **Enabled** | needed for the service model used here |
+| Start on boot | **Yes** | assistant should survive host reboots |
+
+### Create Via CLI
+
+Run on the Proxmox host:
+
+```bash
+# Download Debian 13 template if not present
+pveam update
+pveam available | grep debian-13
+pveam download local debian-13-standard_13.1-2_amd64.tar.zst
+
+# Create the container
+# Replace local-zfs with your storage backend (check: pvesm status)
+pct create 106 local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst \
+  --hostname openclaw \
+  --memory 2048 \
+  --swap 512 \
+  --cores 2 \
+  --rootfs local-zfs:10 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.85/24,gw=192.168.50.1 \
+  --unprivileged 1 \
+  --features nesting=1 \
+  --onboot 1 \
+  --password 'your-secure-password'
+
+# Start the container
+pct start 106
+
+# Verify it's running
+pct status 106
+# Expected: status: running
+```
+
+### Verify Network Connectivity
+
+```bash
+# Enter the container
+pct enter 106
+
+# Verify network
+ping -c 3 192.168.50.1
+ping -c 3 192.168.50.45
+ping -c 3 1.1.1.1
+
+# Verify llama.cpp is reachable
+apt update && apt install -y curl
+curl -s http://192.168.50.45:8012/v1/models | head -20
+# Should return JSON with your registered models
+```
+
+## Install Node.js And OpenClaw
+
+All commands in this section run inside CT 106.
+
+### Install System Dependencies
+
+```bash
+apt update && apt upgrade -y
+apt install -y curl git ca-certificates gnupg
+```
+
+### Install Node.js 22
+
+```bash
+# Add NodeSource repository (Node.js 22.x)
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+
+# Install Node.js
+apt install -y nodejs
+
+# Verify
+node --version
+npm --version
+```
+
+### Enable Corepack And Install pnpm
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+
+# Verify
+pnpm --version
+```
+
+### Set Up pnpm Global Bin Directory
+
+```bash
+pnpm setup
+source /root/.bashrc
+
+echo $PNPM_HOME
+```
+
+### Install OpenClaw
+
+```bash
+pnpm install -g openclaw@latest
+
+# Verify installation
+openclaw --version
+```
+
+### Approve Native Build Scripts
+
+```bash
+# Show packages that need build approval and select which to allow
+pnpm approve-builds -g
+```
+
+Approve at minimum `sharp`, `koffi`, and `protobufjs`.
+
+### Run The Onboarding Wizard
+
+```bash
+openclaw onboard --install-daemon
+```
+
+Choose the custom OpenAI-compatible provider path during onboarding and point it at:
+
+- base URL: `http://192.168.50.45:8012/v1`
+- API key: the same key used by `llama-server`
+- default model: `model:qwen3-8b` or the preferred primary model in Router Mode
+
+If the wizard fails or is interrupted, continue with the manual path below.
+
+## Manual OpenClaw Configuration
+
+If the onboarding wizard does not complete, create the OpenClaw home manually:
+
+```bash
+mkdir -p ~/.openclaw/workspace
+```
+
+Create a minimal config file using the newer configuration surface where messaging tokens come from environment variables instead of JSON keys:
+
+```bash
+cat > ~/.openclaw/openclaw.json << 'OCEOF'
+{
+  agents: {
+    defaults: {
+      model: { primary: "llamacpp/model:qwen3-8b" },
+      workspace: "~/.openclaw/workspace",
+      models: {
+        "llamacpp/model:qwen3-8b":             { alias: "Qwen3-8B" },
+        "llamacpp/model:glm-4-9b":             { alias: "GLM-4-9B" },
+        "llamacpp/model:deepseek-r1-qwen3-8b": { alias: "DeepSeek-R1" },
+        "llamacpp/model:gpt-oss-20b":          { alias: "GPT-OSS-20B" },
+      },
+    },
+  },
+
+  channels: {
+    telegram: {
+      enabled: true,
+      dmPolicy: "pairing",
+      groupPolicy: "open",
+      streaming: "off",
+    },
+    discord: {
+      enabled: true,
+      dmPolicy: "pairing",
+      groupPolicy: "open",
+      streaming: "off",
+    },
+  },
+
+  gateway: {
+    mode: "local",
+    port: 18789,
+    bind: "lan",
+    controlUi: {
+      dangerouslyAllowHostHeaderOriginFallback: true,
+    },
+  },
+}
+OCEOF
+```
+
+Verify the structure:
+
+```bash
+ls -la ~/.openclaw/
+cat ~/.openclaw/openclaw.json
+openclaw doctor
+```
+
+### Create Workspace Memory Directory
+
+```bash
+mkdir -p ~/.openclaw/workspace/memory
+touch ~/.openclaw/workspace/MEMORY.md
+touch ~/.openclaw/workspace/memory/$(date +%Y-%m-%d).md
+```
+
+## Connect OpenClaw To llama.cpp Router Mode
+
+### Verify llama.cpp Is Healthy
+
+```bash
+# From inside CT 106
+curl -s http://192.168.50.45:8012/v1/models | python3 -m json.tool
+
+curl -s http://192.168.50.45:8012/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{
+    "model": "model:glm-4-9b",
+    "messages": [{"role": "user", "content": "Say hello in one sentence."}],
+    "max_tokens": 50
+  }' | python3 -m json.tool
+```
+
+### Register The Custom Provider
+
+Edit the config file:
+
+```bash
+nano ~/.openclaw/openclaw.json
+```
+
+Use the full model-provider block below:
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: { primary: "llamacpp/model:qwen3-8b" },
+      workspace: "~/.openclaw/workspace",
+      models: {
+        "llamacpp/model:qwen3-8b":             { alias: "Qwen3-8B" },
+        "llamacpp/model:glm-4-9b":             { alias: "GLM-4-9B" },
+        "llamacpp/model:deepseek-r1-qwen3-8b": { alias: "DeepSeek-R1" },
+        "llamacpp/model:gpt-oss-20b":          { alias: "GPT-OSS-20B" },
+      },
+    },
+  },
+
+  models: {
+    mode: "merge",
+    providers: {
+      llamacpp: {
+        baseUrl: "http://192.168.50.45:8012/v1",
+        apiKey: "your-secret-key",
+        api: "openai-completions",
+        models: [
+          {
+            id: "model:glm-4-9b",
+            name: "GLM-4-9B",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 131072,
+            maxTokens: 16384,
+          },
+          {
+            id: "model:qwen3-8b",
+            name: "Qwen3-8B",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 131072,
+            maxTokens: 16384,
+          },
+          {
+            id: "model:deepseek-r1-qwen3-8b",
+            name: "DeepSeek-R1-Qwen3-8B",
+            reasoning: true,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 131072,
+            maxTokens: 16384,
+          },
+          {
+            id: "model:gpt-oss-20b",
+            name: "GPT-OSS-20B",
+            reasoning: true,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 131072,
+            maxTokens: 16384,
+          },
+        ],
+      },
+    },
+  },
+
+  gateway: {
+    mode: "local",
+    port: 18789,
+    bind: "lan",
+    controlUi: {
+      dangerouslyAllowHostHeaderOriginFallback: true,
+    },
+  },
+}
+```
+
+### Why Qwen3-8B As Primary
+
+| Model | Best For | Tradeoff |
+|------|----------|----------|
+| **Qwen3-8B** | fast general assistant behavior and low-friction tool use | less headroom for heavier reasoning |
+| **GLM-4-9B** | strong instruction following | can over-trigger tool calls as a primary assistant |
+| **GPT-OSS-20B** | heavier reasoning and longer chains | slower and more expensive in VRAM |
+| **DeepSeek-R1-Qwen3-8B** | deliberate reasoning tasks | less ideal for everyday assistant flow |
+
+Qwen3-8B is the best default when the assistant needs to answer quickly in Telegram or Discord instead of treating every message like a research project.
+
+### Verify Model Registration
+
+```bash
+openclaw models status
+openclaw models list
+openclaw agent --agent main --message "What time is it?"
+```
+
+If `openclaw models status` reports missing auth for `llamacpp`, verify:
+
+- the `apiKey` matches the `llama-server` service
+- `curl http://192.168.50.45:8012/v1/models` works from CT 106
+- the `baseUrl` uses `http://` rather than `https://`
+
+Continue with [OpenClaw Channels, Daemon, And Secure Exposure](/pages/proxmox/workloads/openclaw/channels-daemon-and-secure-exposure) once the assistant can talk to the local inference stack.
