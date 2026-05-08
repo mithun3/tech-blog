@@ -1,8 +1,8 @@
 ---
 title: "GPU Passthrough On Proxmox"
 description: "Install NVIDIA drivers on the Proxmox host, expose GPUs into LXC containers, and keep single- or dual-GPU AI workloads stable inside the Proxmox stack."
-publishedAt: "2026-02-06"
-updatedAt: "2026-02-25"
+publishedAt: "2025-05-09"
+updatedAt: "2025-06-15"
 order: 2
 status: published
 ---
@@ -11,7 +11,7 @@ status: published
 
 This is the platform-specific side of the GPU story.
 
-The question here is no longer whether a dedicated GPU is worth having. The question is how to make Proxmox behave properly once the GPU exists: host driver, persistence, device exposure, and the specific container mechanics that make AI workloads feel native instead of awkward.
+The question here is no longer whether a dedicated GPU is worth having. The question is how to make Proxmox behave properly once the GPU exists: host driver, device exposure, and the specific container mechanics that make AI workloads feel native instead of awkward.
 
 If you want the hardware and workload reasoning first, start with [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai).
 
@@ -115,47 +115,19 @@ cd /tmp
 ./NVIDIA-Linux-x86_64-580.126.09.run --dkms
 ```
 
-## Enable Persistence Mode
+## Host Verification
+
+At this point the driver should be installed on the Proxmox host and the device nodes should exist.
 
 ```bash
-# Enable persistence
-nvidia-smi -pm 1
-
-# Set power limit (RTX 3090 max is 350W, set to 250W for stability)
-nvidia-smi -pl 250
-
-# Verify settings
-nvidia-smi -q -d POWER
-
-# Make persistent across reboots (add to crontab)
-# First, create a script
-cat > /usr/local/bin/nvidia-persist.sh << 'EOF'
-#!/bin/bash
-nvidia-smi -pm 1
-nvidia-smi -pl 250
-EOF
-
-chmod +x /usr/local/bin/nvidia-persist.sh
-
-# Add to crontab
-(crontab -l 2>/dev/null; echo "@reboot /usr/local/bin/nvidia-persist.sh") | crontab -
-```
-
-Monitor the host GPU:
-
-```bash
-# Real-time GPU monitoring
-nvtop
-
-# One-time status check
+# Verify the driver is healthy
 nvidia-smi
 
-# Check GPU temperatures (safe operating range: 0-85°C)
-nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader -l 1
-
-# View power consumption
-nvidia-smi --query-gpu=power.draw,power.limit --format=csv -l 1
+# Verify the device files exist
+ls -la /dev/nvidia*
 ```
+
+Keep persistence mode, power limits, and boot-time reapplication in [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management).
 
 ## GPU Passthrough To LXC Containers
 
@@ -299,28 +271,11 @@ find /sys/kernel/iommu_groups -type l | sort -V | while read f; do
 done | grep -i nvidia
 ```
 
-### Persistence Script For Two GPUs
+### Set Runtime Power Policy Before Splitting Workloads
 
-```bash
-cat > /usr/local/bin/nvidia-persist.sh << 'EOF'
-#!/bin/bash
-# GPU 0: MSI RTX 3090
-nvidia-smi -i 0 -pm 1
-nvidia-smi -i 0 -pl 250
+Once both GPUs are visible to the host, decide how you want them to behave under sustained load before you start assigning them to services.
 
-# GPU 1: EVGA RTX 3090
-nvidia-smi -i 1 -pm 1
-nvidia-smi -i 1 -pl 250
-EOF
-
-chmod +x /usr/local/bin/nvidia-persist.sh
-
-# Apply immediately
-/usr/local/bin/nvidia-persist.sh
-
-# Verify both GPUs
-nvidia-smi -q -d POWER | grep -A4 "GPU 0\|GPU 1\|Power Management\|Power Limit"
-```
+For persistence mode, boot-time reapplication, and the 250 W dual-GPU tradeoffs on a 1200 W PSU, continue to [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management).
 
 ### Strategy A: One GPU Per Container
 
@@ -466,5 +421,9 @@ nvidia-smi -pl 200  # Reduce from 350W to 200W
 ## Related Topics
 
 - [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai) — the conceptual side of model sizing, VRAM, and workload tradeoffs.
+- [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management) — persistence mode, boot-time reapplication, and the power-cap tradeoffs once the host can see the cards.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the quickest concrete GPU-backed workload that sits on top of this host configuration.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the lower-level single-model inference stack once you want more control than Ollama offers.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) — the multi-model serving path that leans hardest on clean GPU ownership and VRAM discipline.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — how GPU containers and driver versions fit into the broader maintenance window.
 - [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — GPU telemetry and alerting once the host is running real workloads.

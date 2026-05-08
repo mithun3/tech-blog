@@ -1,0 +1,280 @@
+---
+title: "GPU Power Management On Proxmox"
+description: "Use persistence mode and power limits on Proxmox-hosted NVIDIA GPUs, with dual-GPU PSU headroom planning, 250 W tradeoffs, and boot-time reapplication."
+publishedAt: "2026-05-08"
+updatedAt: "2026-05-08"
+order: 3
+status: published
+---
+
+# GPU Power Management On Proxmox
+
+This page starts where [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) stops.
+
+That page is about getting the NVIDIA driver onto the host and making the GPU visible inside Proxmox guests. This page is about the runtime policy that sits on top of that work: persistence mode, power limits, boot-time reapplication, and the tradeoff of capping a high-end GPU below its stock board power.
+
+My own reason for doing this is straightforward. I run dual high-end NVIDIA GPUs on a 1200 W PSU. Letting both cards run flat-out at the same time leaves less headroom than I am comfortable with once CPU load, motherboard draw, storage, fans, and transient spikes are all part of the same picture. That is why I cap each GPU at 250 W.
+
+That choice is not universal. It is an operating decision.
+
+The goal of this page is to show what that decision buys you, what it costs, and why it can still be the right move for a dual-GPU homelab.
+
+## When This Page Matters
+
+Use this page when:
+
+- the Proxmox host already sees the GPU and `nvidia-smi` works
+- you want persistence mode enabled so the driver stays warm for compute workloads
+- you need predictable PSU and thermal behavior from one or more NVIDIA GPUs
+- you care more about stable sustained operation than squeezing out the last few percent of peak throughput
+
+If the host driver is not installed yet, go back to [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) first.
+
+## Why 250 W Exists In This Build
+
+An RTX 3090-class card is usually a 350 W board-power device at stock settings.
+
+With two of them, the math gets tight faster than it first appears.
+
+| Item | Stock-ish Draw | With 250 W Cap |
+|------|----------------|----------------|
+| Two RTX 3090-class GPUs | about 700 W total | about 500 W total |
+| CPU under heavy load | about 150-250 W | about 150-250 W |
+| Board, RAM, drives, fans | about 50-100 W | about 50-100 W |
+| Approximate sustained total | about 900-1050 W | about 700-850 W |
+
+Those are not universal wall-power measurements for every build. They are planning numbers.
+
+The important part is the gap between the two totals. That is the headroom that helps absorb:
+
+- combined CPU and GPU load peaks
+- transient power spikes that do not show up cleanly in steady-state TDP math
+- hotter ambient conditions and fan ramping
+- PSU aging and the general messiness of real systems under sustained AI load
+
+If your system is already comfortably oversized, you may decide that 250 W is too conservative. In my case, the point is to keep a dual-GPU box inside a power envelope I trust.
+
+## Persistence Mode Versus Power Limit
+
+These two settings solve different problems.
+
+| Setting | What It Does | What It Does Not Do |
+|---------|--------------|---------------------|
+| Persistence mode | Keeps the NVIDIA driver loaded when no client is active, which reduces driver re-init latency for CUDA workloads | It does not reduce heat or power draw by itself |
+| Power limit | Caps the maximum board power and forces the GPU to reduce clocks when a workload tries to exceed that cap | It does not change VRAM capacity, CUDA support, or basic passthrough behavior |
+
+Two details matter a lot on Proxmox hosts:
+
+- both settings are runtime settings
+- both revert to defaults after reboot or driver reset unless you re-apply them
+
+NVIDIA also documents how the power cap is enforced: when the card hits the configured ceiling, software power capping reduces clocks to stay under the limit. That is the mechanism behind the performance loss.
+
+### What Power Capping Changes
+
+- lower sustained boost clocks under heavy load
+- lower peak tokens/sec, samples/sec, or training throughput on power-hungry kernels
+- lower heat output into the chassis
+- lower average and peak PSU stress
+
+### What Power Capping Does Not Change
+
+- available VRAM on the card
+- whether Proxmox can expose the device to an LXC container
+- CUDA feature availability
+- the basic model-fit question of whether a workload can load into memory at all
+
+If you want actual voltage-curve tuning, that is a different topic. On a Proxmox/Linux host, the supported control you can count on is `nvidia-smi --power-limit`.
+
+## Inspect Supported Limits And Stable GPU Identifiers
+
+Before you set anything, ask the card what range it supports and capture the GPU UUIDs.
+
+```bash
+# Show index, UUID, card name, and supported power-limit range
+nvidia-smi --query-gpu=index,uuid,name,power.min_limit,power.default_limit,power.max_limit --format=csv
+
+# Optional: quick readable inventory
+nvidia-smi -L
+```
+
+Use the UUIDs in your script instead of only numeric indexes.
+
+NVIDIA documents index ordering as something that can change between reboots or hardware rearrangements. UUID targeting is the stable option.
+
+## Create A Host Power Profile Script
+
+Create a small host-side script that enables persistence mode and applies the power cap to each GPU.
+
+```bash
+cat > /usr/local/bin/nvidia-power-profile.sh << 'EOF'
+#!/bin/sh
+set -eu
+
+# Replace these UUIDs with the values from:
+# nvidia-smi --query-gpu=index,uuid,name --format=csv
+
+# GPU 0 - MSI RTX 3090
+GPU0_UUID="GPU-REPLACE-FIRST-UUID"
+
+# GPU 1 - EVGA RTX 3090
+GPU1_UUID="GPU-REPLACE-SECOND-UUID"
+
+POWER_LIMIT_WATTS=250
+
+nvidia-smi -i "$GPU0_UUID" -pm 1
+nvidia-smi -i "$GPU0_UUID" -pl "$POWER_LIMIT_WATTS"
+
+nvidia-smi -i "$GPU1_UUID" -pm 1
+nvidia-smi -i "$GPU1_UUID" -pl "$POWER_LIMIT_WATTS"
+EOF
+
+chmod +x /usr/local/bin/nvidia-power-profile.sh
+```
+
+If you only have one GPU, remove the second block.
+
+If the two cards need different caps, split `POWER_LIMIT_WATTS` into separate variables.
+
+## Make The Settings Survive Reboot
+
+The simplest durable path on Proxmox is a small `systemd` one-shot service.
+
+```bash
+cat > /etc/systemd/system/nvidia-power-profile.service << 'EOF'
+[Unit]
+Description=Apply NVIDIA persistence mode and power limits
+After=multi-user.target
+ConditionPathExists=/usr/bin/nvidia-smi
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nvidia-power-profile.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now nvidia-power-profile.service
+```
+
+This keeps the boot-time behavior explicit and inspectable:
+
+```bash
+systemctl status nvidia-power-profile.service
+```
+
+## Apply And Verify
+
+Apply the profile immediately before relying on it.
+
+```bash
+/usr/local/bin/nvidia-power-profile.sh
+
+# Confirm persistence mode and power limit
+nvidia-smi --query-gpu=index,name,uuid,persistence_mode,power.limit,power.default_limit --format=csv
+```
+
+For live monitoring during a real workload:
+
+```bash
+# Real-time terminal view
+nvtop
+
+# Or a lighter built-in monitor
+nvidia-smi dmon -s puc -d 1
+```
+
+For a detailed check, inspect the POWER and PERFORMANCE sections:
+
+```bash
+nvidia-smi -q -d POWER,PERFORMANCE
+```
+
+When a real workload is pressing against the cap, look for software power capping in the performance section. That is how you confirm the limit is doing real work rather than just existing on paper.
+
+## What 250 W Costs In Practice
+
+This is where the answer stops being universal.
+
+The performance loss depends heavily on the workload.
+
+| Source | Workload | 250 W Behavior | What It Means |
+|--------|----------|----------------|---------------|
+| qwertyforce | Single RTX 3090 deep-learning tests | Around 80% of peak in some AMP training and TF32 inference tests, with peak defined against a much higher 480 W ceiling | 250 W is aggressive if your priority is maximum training throughput |
+| Janky AI | Single-model local-LLM inference on RTX 3090 | About 97 tok/s at 250 W versus about 103 tok/s at 350 W, roughly 94% of the 350 W output | For interactive inference, the efficiency gain can be much larger than the throughput loss |
+| Puget Systems | Multi-GPU ResNet50 training on 4x RTX 3090 | About 93% of maximum around 250 W per GPU, and above 95% around 280 W | Multi-GPU compute often has a broad efficiency plateau below stock TDP |
+
+That spread is the real lesson.
+
+The same 250 W cap can be:
+
+- a mild slowdown for some inference paths
+- a meaningful slowdown for heavy training workloads
+- a good whole-system trade if it lets you run both GPUs cleanly instead of pushing the PSU too hard
+
+### A Good Reading Of The Data
+
+250 W is not a magic number.
+
+It is a conservative operational point for a dual-3090 style homelab when power headroom and heat matter more than absolute peak throughput. If your main goal is training speed, 280-300 W is often a more natural starting point. If your main goal is efficiency, some inference tests suggest the best perf-per-watt point is lower still, around the low-200 W range, but with a more obvious throughput penalty.
+
+## Workflow Impact
+
+The practical effect depends on what the machine is doing all day.
+
+| Workflow | Typical Effect Of A 250 W Cap |
+|----------|-------------------------------|
+| Interactive local chat | Usually a small slowdown, often worth the lower heat and noise |
+| Batch inference or embeddings | Mild to moderate slowdown once kernels stay saturated for long stretches |
+| Training or fine-tuning | More noticeable wall-clock penalty than chat-style inference |
+| Two GPUs serving different jobs at once | Often a net positive because both cards can stay active without stressing the PSU as hard |
+| Warm or airflow-limited chassis | Often a net positive because lower heat can prevent the box from turning into its own thermal problem |
+
+That last point matters more than people expect. A lower power limit can reduce local heat buildup enough that the rest of the system behaves better too, including CPU temperature and case airflow.
+
+## Pros
+
+- more PSU headroom for simultaneous GPU and CPU load
+- lower sustained chassis heat
+- lower fan noise in long inference sessions
+- better performance per watt
+- lower chance of power-related instability on a dual-GPU host
+- easier to keep both GPUs busy at once without treating the box like a bench-top experiment
+
+## Costs
+
+- lower peak clocks under sustained load
+- slower training and slower power-hungry inference paths
+- less headroom for short bursts where stock boost would otherwise help
+- one more runtime setting that must be re-applied after reboot or driver reset
+- a 250 W cap can be more conservative than necessary if your PSU and cooling are already comfortable
+
+Power limiting is also not a substitute for a correctly sized PSU or sane airflow. It is an operating control, not a magic fix.
+
+## Choosing A Different Cap
+
+| Target | When It Makes Sense |
+|--------|---------------------|
+| 210-225 W | You care most about efficiency and can accept a larger performance drop |
+| 250 W | You want a conservative dual-GPU operating point with meaningful PSU headroom |
+| 280-300 W | You want most of the performance back while still trimming stock power draw |
+| Near default | Your PSU and cooling are comfortable, and peak throughput matters more than efficiency |
+
+If you are unsure, start at 250 W, validate under your real workload, and then move upward only if the extra throughput is worth the extra heat and power draw.
+
+## Related Topics
+
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - the host-side NVIDIA and LXC groundwork this page builds on.
+- [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai) - the broader hardware and VRAM reasoning behind why these GPUs are in the box in the first place.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - what to do when host updates, kernel changes, or driver refreshes force you to revisit this setup.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - how to keep an eye on power, thermals, and long-running GPU behavior after the system is in service.
+
+## Research References
+
+- [NVIDIA System Management Interface](https://docs.nvidia.com/deploy/nvidia-smi/index.html) - official `nvidia-smi` behavior for persistence mode, power limits, and throttling reasons.
+- [Optimal power limit for deep learning tasks on RTX 3090](https://blog.qwertyforce.dev/posts/optimal_power_limit) - workload-sensitive deep-learning benchmarks across multiple precisions.
+- [Power limiting RTX 3090 GPU to increase power efficiency](https://jankyai.droidgram.com/power-limiting-rtx-3090-gpu-to-increase-power-efficiency/) - local-LLM single-inference efficiency curve and raw tok/s data.
+- [Quad RTX3090 GPU Wattage Limited "MaxQ" TensorFlow Performance](https://www.pugetsystems.com/labs/hpc/Quad-RTX3090-GPU-Wattage-Limited-MaxQ-TensorFlow-Performance-1974/) - multi-GPU training-oriented view of the same tradeoff.

@@ -1,7 +1,8 @@
 ---
 title: "Proxmox Workloads"
 description: "Service and workload guides that depend on Proxmox mechanics: LXC deployments, passthrough, and application setups that live on top of the host."
-publishedAt: "2026-05-08"
+publishedAt: "2025-05-12"
+updatedAt: "2025-06-20"
 order: 4
 status: published
 ---
@@ -22,6 +23,23 @@ Some services belong conceptually to Networking. Some belong conceptually to GPU
 
 - [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - NVIDIA host setup, LXC passthrough, and the single- or dual-GPU layouts that make local AI workloads practical on Proxmox.
+- [GPU Power Management On Proxmox](/pages/proxmox/workloads/gpu-power-management) - persistence mode, boot-time reapplication, and the 250 W tradeoffs that keep dual-GPU hosts inside saner thermal and PSU limits.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the fastest path to a usable local AI stack when you want the interface and the inference engine online without overthinking the separation.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level single-model path when control over GGUF models, build flags, and server behavior matters more than convenience.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the multi-model path for one Open WebUI connection, on-demand loading, and a cleaner long-term inference setup.
+- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) - the concrete February 2026 walkthrough for the dual-RTX-3090 Router Mode deployment.
+
+## AI Workloads
+
+The AI side of this section now breaks into three different moods.
+
+One is for getting something working quickly. One is for taking direct control of the inference stack. One is for the point where a single model feels too limiting and the lab wants choice without manual restarts.
+
+| Path | Best When | What You Trade |
+|------|-----------|----------------|
+| [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) | you want the shortest route to a usable chat stack | less control over the serving layer |
+| [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) | you want direct control over GGUF models and runtime tuning | more manual setup and maintenance |
+| [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) | you want multiple models behind one endpoint and one UI connection | more planning around VRAM, presets, and lifecycle |
 
 ## What Does Not
 

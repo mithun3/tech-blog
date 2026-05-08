@@ -29,3 +29,10 @@ That separation matters. Some guides will absolutely be about how to run AI work
 When a guide is specifically about doing one of these things on Proxmox, it should live under [Proxmox](/pages/proxmox) rather than being forced into this section just because GPUs are involved.
 
 That means the conceptual side stays here, while the host-specific execution path can sit under [Proxmox Workloads](/pages/proxmox/workloads).
+
+Useful entry points:
+
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA setup and LXC device exposure layer.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the quickest way to get a usable local chat stack online.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model GGUF-native path when you want tighter runtime control.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) — the multi-model serving path once one model no longer feels like enough.

@@ -1,0 +1,608 @@
+---
+title: "llama.cpp Router Mode On Proxmox"
+description: "Run multiple llama.cpp models behind one Proxmox-hosted router, with preset files, VRAM planning, LRU eviction, and one Open WebUI connection for the whole stack." 
+publishedAt: "2026-02-18"
+updatedAt: "2026-04-15"
+order: 5
+status: published
+---
+
+# llama.cpp Router Mode On Proxmox
+
+Single-model serving is where most homelabs start.
+
+Eventually that stops being enough. You want a small fast model for casual questions, something heavier for reasoning, maybe a code-biased model for development work, and you do not want to SSH into the container every time you switch.
+
+That is the point of Router Mode.
+
+If the base llama.cpp stack is not in place yet, start with [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc). If you want the concrete dual-RTX-3090 deployment example after the architecture is clear, continue to [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment).
+
+## Why Multi-Model Management
+
+A single `llama-server` instance locked to one model forces you to stop the server, change the `--model` flag, and restart every time you want to switch models. This is impractical when:
+
+- You use **different models for different tasks** — a small fast model for quick questions, a large reasoning model for complex problems, a code-specialised model for development
+- You want to **A/B test models** — compare Qwen3 vs DeepSeek R1 vs Llama 3.3 on the same prompts
+- You share the server with **multiple users** who prefer different models
+- You want **on-demand availability** — select any model from Open WebUI's dropdown without SSH-ing into the container to restart the server
+
+llama.cpp's **Router Mode** (introduced December 2025) solves all of these. It is a built-in, first-class multi-model manager — no external tools, no wrapper scripts, no Ollama.
+
+## Architecture Decision: Single Container With Router Mode
+
+### The Three Approaches
+
+| Approach | Description | Pros | Cons |
+|----------|-------------|------|------|
+| **A. Single Container + Router Mode** | One `llama-server` in router mode manages all models | Single GPU config, one systemd service, one Open WebUI connection, built-in LRU eviction, crash isolation per model (multi-process) | All models share one GPU; `--models-max` limits by count, not VRAM |
+| **B. Multiple `llama-server` Instances** | Separate processes on different ports in the same container | Full control per model, dedicated resources, no eviction surprises | Manual VRAM management, multiple systemd services, multiple Open WebUI connections, no automatic model swapping |
+| **C. Separate LXC Containers** | One container per model | Complete isolation | Massive overhead — duplicate NVIDIA driver (~500 MB), CUDA toolkit (~4 GB), llama.cpp build per container; no VRAM arbitration between containers; complex networking |
+
+### Recommendation
+
+**Use Approach A (Router Mode) for nearly all homelab scenarios.** It was purpose-built for this use case and provides:
+
+- **Multi-process architecture** — each model runs in its own child process. If one model crashes, the router and other models are unaffected.
+- **Automatic request routing** — the `"model"` field in API requests determines which model handles it. Open WebUI sends this natively when users select a model from the dropdown.
+- **LRU eviction** — when `--models-max` is reached, the least-recently-used model auto-unloads to make room.
+- **Idle auto-unload** — `--sleep-idle-seconds` frees VRAM from models that haven't been used recently.
+- **Single connection** — Open WebUI needs only one OpenAI-compatible connection. All models appear in the dropdown automatically.
+
+## Disable Ollama To Reclaim VRAM
+
+Since llama.cpp provides superior performance and control over inference, Ollama can be disabled to reclaim the full 48 GB VRAM for llama.cpp.
+
+### Stop and Disable Ollama
+
+```bash
+# Enter the Ollama container (CT 100)
+pct enter 100
+
+# Stop the service
+systemctl stop ollama
+
+# Disable auto-start on boot
+systemctl disable ollama
+
+# Verify it's stopped
+systemctl status ollama
+# Expected: inactive (dead), disabled
+```
+
+### Verify VRAM Is Free
+
+```bash
+# On the Proxmox host
+nvidia-smi
+```
+
+### Alternative: Keep Ollama as a Fallback
+
+```bash
+# In CT 100 — edit ollama service
+systemctl edit ollama.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment="OLLAMA_KEEP_ALIVE=0"
+Environment="OLLAMA_MAX_LOADED_MODELS=0"
+```
+
+## Router Mode Overview
+
+Router Mode is llama.cpp's built-in multi-model manager, introduced in [PR #17859](https://github.com/ggml-org/llama.cpp/pull/17859) (December 2025). It transforms `llama-server` from a single-model server into a dynamic model router.
+
+### How It Works
+
+1. Start `llama-server` **without specifying a model** — this activates router mode
+2. The router discovers available models from three sources (cache, directory, or preset file)
+3. When a request arrives, the router reads the `"model"` field and loads/routes to the appropriate model
+4. Each model runs as a **separate child process** — crash isolation is built in
+5. When `--models-max` is reached, the **least-recently-used** model is evicted automatically
+6. Idle models can be auto-unloaded via `--sleep-idle-seconds`
+
+### Quick Start
+
+```bash
+# Simplest: serve all models from a directory
+llama-server --models-dir /root/models --host 0.0.0.0 --port 8012 --api-key your-secret-key
+
+# With limits and idle timeout
+llama-server \
+  --models-dir /root/models \
+  --models-max 2 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key
+
+# With per-model configuration
+llama-server \
+  --models-preset /root/models.ini \
+  --models-max 2 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key
+```
+
+### Key Router Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--models-dir PATH` | disabled | Directory containing GGUF models |
+| `--models-preset PATH` | disabled | INI file with per-model configurations |
+| `--models-max N` | 4 | Maximum models loaded simultaneously (0 = unlimited) |
+| `--models-autoload` | enabled | Auto-load models on first request |
+| `--no-models-autoload` | — | Require explicit `POST /models/load` to load models |
+| `--sleep-idle-seconds N` | -1 (disabled) | Auto-unload models after N seconds of inactivity |
+| `--fit [on\|off]` | on | Auto-adjust parameters to fit device memory |
+| `--fit-target MiB` | 1024 | VRAM headroom to leave free per device |
+
+## Setting Up the Models Directory
+
+### Create the Directory Structure
+
+```bash
+# Inside the llama.cpp LXC container
+mkdir -p /root/models
+```
+
+### Directory Layout
+
+```text
+/root/models/
+│
+│  # Single-file models (most common)
+├── Qwen3-8B-Q4_K_M.gguf
+├── Qwen3-32B-Q4_K_M.gguf
+├── DeepSeek-R1-32B-Q4_K_M.gguf
+├── DeepSeek-R1-8B-Q4_K_M.gguf
+├── Llama-3.3-8B-Q4_K_M.gguf
+│
+│  # Multimodal models (subdirectory — mmproj file must start with "mmproj")
+├── gemma-3-4b-it-Q8_0/
+│   ├── gemma-3-4b-it-Q8_0.gguf
+│   └── mmproj-F16.gguf
+│
+│  # Multi-shard models (subdirectory — for very large models split into parts)
+└── Kimi-K2-Thinking-UD-IQ1_S/
+    ├── Kimi-K2-Thinking-UD-IQ1_S-00001-of-00006.gguf
+    ├── Kimi-K2-Thinking-UD-IQ1_S-00002-of-00006.gguf
+    └── ...
+```
+
+### Move Existing Models
+
+```bash
+# Option A: Move files
+mv /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf /root/models/
+mv /root/hf/models/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf /root/models/
+mv /root/hf/models/DeepSeek-R1-32B-GGUF/DeepSeek-R1-32B-Q4_K_M.gguf /root/models/
+
+# Option B: Symlink (saves disk space, keeps originals)
+ln -s /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf /root/models/
+ln -s /root/hf/models/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf /root/models/
+```
+
+### Download Models Directly via Cache
+
+```bash
+# Download and cache models (one-time — server exits after caching)
+llama-server -hf unsloth/Qwen3-8B-GGUF:Q4_K_M &
+sleep 30 && kill %1
+
+llama-server -hf unsloth/Qwen3-32B-GGUF:Q4_K_M &
+sleep 30 && kill %1
+
+llama-server -hf unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF:Q4_K_M &
+sleep 30 && kill %1
+```
+
+## Model Presets — Per-Model Configuration
+
+When using `--models-dir`, all models inherit the same global settings. For fine-grained control, use a preset INI file.
+
+Create `/root/models.ini`:
+
+```ini
+version = 1
+
+; ─── Global defaults applied to ALL models ───────────────────────
+[*]
+flash-attn = on
+jinja = true
+fit = on
+n-gpu-layers = auto
+ctx-size = 131072
+cache-type-k = q8_0
+cache-type-v = q8_0
+threads = 12
+
+; ─── Qwen3 8B — small fast model, quick questions, simple tasks ──
+[qwen3-8b]
+model = /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf
+load-on-startup = true
+stop-timeout = 10
+
+; ─── GLM-4 9B — general purpose, instruction-tuned ──────────────
+[glm-4-9b]
+model = /root/hf/models/GLM-4-9B-0414-GGUF/GLM-4-9B-0414-Q4_K_M.gguf
+
+; ─── DeepSeek R1 8B — reasoning, chain-of-thought ───────────────
+[deepseek-r1-8b]
+model = /root/hf/models/DeepSeek-R1-0528-Qwen3-8B/DeepSeek-R1-0528-Qwen3-8B-BF16.gguf
+
+; ─── GPT-OSS 20B — large general model ──────────────────────────
+[gpt-oss-20b]
+model = /root/hf/models/gpt-oss-20b/gpt-oss-20b-F16.gguf
+```
+
+### Launch with Presets
+
+```bash
+llama-server \
+  --models-preset /root/models.ini \
+  --models-max 2 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key
+```
+
+## VRAM Budget Planning
+
+With dual RTX 3090 (48 GB combined), VRAM is shared across both GPUs. Understanding how models consume VRAM determines your `--models-max` setting and context size choices.
+
+### Model Size Reference (Q4_K_M Quantization)
+
+| Model | Parameters | VRAM (Q4_K_M) | Context 4K Extra | Context 8K Extra |
+|-------|-----------|---------------|-------------------|-------------------|
+| Qwen3 1.7B | 1.7B | ~1.5 GB | — | +~250 MB |
+| Llama 3.2 3B | 3B | ~2 GB | — | +~250 MB |
+| Qwen3 8B / Llama 3.3 8B | 8B | ~5 GB | — | +~500 MB |
+| DeepSeek R1 14B | 14B | ~9 GB | +~250 MB | +~750 MB |
+| Qwen3 32B / DeepSeek R1 32B | 32B | ~19 GB | +~500 MB | +~1.5 GB |
+| Llama 3.1 70B | 70B | ~40 GB | +~1 GB | +~3 GB |
+
+### Recommended `--models-max` for 48 GB VRAM (Dual RTX 3090)
+
+| Model Size Class | Typical VRAM Each | Max Concurrent | Recommended `--models-max` | Notes |
+|-----------------|-------------------|----------------|---------------------------|-------|
+| 1.7B-3B Q4_K_M | 1.5–2 GB | 4–6 | 4 | Room for large context |
+| 7B-8B Q4_K_M | 4–5 GB | 3–4 | 3 | Good balance |
+| 13B-14B Q4_K_M | 8–9 GB | 2 | 2 | Tight with context overhead |
+| 32B Q4_K_M | 18–20 GB | 1 | 1 | Fills most of VRAM |
+| 70B+ Q4_K_M | 40 GB+ | 1 | 1 | Fits on 48 GB; minimal CPU offload needed |
+| Mixed (8B + 14B) | 5 + 9 = 14 GB | 2 | 2 | Practical for two-model setup |
+
+### Unified Memory (OOM Safety Net)
+
+```bash
+export GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+```
+
+## Loading and Unloading Strategies
+
+Router Mode supports multiple strategies for managing which models are in VRAM.
+
+### Strategy A: Fully Automatic (LRU Eviction)
+
+```bash
+llama-server \
+  --models-dir /root/models \
+  --models-max 2 \
+  --host 0.0.0.0 --port 8012 --api-key your-secret-key
+```
+
+### Strategy B: Idle Auto-Unload
+
+```bash
+llama-server \
+  --models-dir /root/models \
+  --models-max 4 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 --port 8012 --api-key your-secret-key
+```
+
+### Strategy C: Manual Control via API
+
+```bash
+# Load a specific model
+curl -X POST http://localhost:8012/models/load \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{"model": "Qwen3-8B-Q4_K_M.gguf"}'
+
+# Unload a model to free VRAM
+curl -X POST http://localhost:8012/models/unload \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{"model": "Qwen3-8B-Q4_K_M.gguf"}'
+```
+
+### Strategy E: Combined (Recommended for Homelab)
+
+```bash
+llama-server \
+  --models-preset /root/models.ini \
+  --models-max 3 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 --port 8012 --api-key your-secret-key
+```
+
+## systemd Service for Router Mode
+
+Replace the single-model `llama-server.service` from [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) with a router-mode service.
+
+### Option A: Using `--models-dir` (Simpler)
+
+```bash
+cat > /etc/systemd/system/llama-server.service << 'EOF'
+[Unit]
+Description=llama.cpp Router — Multi-Model Inference Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/llama.cpp/build/bin/llama-server \
+  --models-dir /root/models \
+  --models-max 2 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key \
+  --flash-attn on \
+  --jinja \
+  --fit on \
+  --ctx-size 8192 \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --threads 4
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment="CUDA_VISIBLE_DEVICES=0,1"
+Environment="GGML_CUDA_ENABLE_UNIFIED_MEMORY=1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Option B: Using `--models-preset` (Recommended)
+
+```bash
+cat > /etc/systemd/system/llama-server.service << 'EOF'
+[Unit]
+Description=llama.cpp Router — Multi-Model Inference Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/llama.cpp/build/bin/llama-server \
+  --models-preset /root/models.ini \
+  --models-max 3 \
+  --sleep-idle-seconds 900 \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key \
+  --threads 4
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment="CUDA_VISIBLE_DEVICES=0,1"
+Environment="GGML_CUDA_ENABLE_UNIFIED_MEMORY=1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Enable and Start
+
+```bash
+systemctl daemon-reload
+systemctl enable llama-server
+systemctl start llama-server
+```
+
+## Open WebUI Integration
+
+Router Mode dramatically simplifies Open WebUI integration — you need only **one connection**, and all models appear automatically.
+
+### Add a Single Connection
+
+1. Open your Open WebUI instance: `http://<openwebui-IP>:8080`
+2. Click your **profile icon** → **Admin Panel** → **Settings** → **Connections**
+3. Under **OpenAI API**, click **+** to add a new connection:
+
+| Field | Value |
+|-------|-------|
+| URL | `http://<llama-cpp-LXC-IP>:8012/v1` |
+| API Key | `your-secret-key` (must match `--api-key`) |
+
+4. Click **Save**
+
+### All Models Appear Automatically
+
+Open WebUI queries `GET /v1/models` on the llama-server. In router mode, this returns **all discovered models** — not just the loaded one. Users can select any model from the dropdown, and the router handles loading on demand.
+
+### Rename Models (Recommended)
+
+1. Go to **Admin Panel** → **Settings** → **Models**
+2. Click the **pencil icon** next to a model
+3. Edit the **Name** to something readable (e.g., `Qwen3 8B`, `DeepSeek R1 32B`)
+4. Click **Save**
+
+## Monitoring and Health Checks
+
+### Model Status
+
+```bash
+# List all models with their status (loaded/unloaded/loading/failed)
+curl -s http://localhost:8012/v1/models \
+  -H "Authorization: Bearer your-secret-key" | python3 -m json.tool
+```
+
+### Server Health
+
+```bash
+# Health check (does not trigger model reload, does not reset idle timer)
+curl http://localhost:8012/health
+# Expected: {"status": "ok"}
+```
+
+### Prometheus Metrics
+
+Enable metrics with the `--metrics` flag in your systemd service:
+
+```bash
+# Add to ExecStart
+--metrics
+```
+
+Then scrape:
+
+```bash
+curl http://localhost:8012/metrics
+```
+
+### GPU Monitoring
+
+```bash
+# Real-time VRAM and GPU usage (run on host or inside LXC)
+watch -n 1 nvidia-smi
+
+# Better terminal UI
+nvtop
+```
+
+### Quick Health Script
+
+```bash
+cat > /root/check-llama.sh << 'SCRIPT'
+#!/bin/bash
+API_KEY="your-secret-key"
+BASE="http://localhost:8012"
+
+echo "=== Server Health ==="
+curl -s "$BASE/health" | python3 -m json.tool
+
+echo -e "\n=== Loaded Models ==="
+curl -s "$BASE/v1/models" -H "Authorization: Bearer $API_KEY" \
+  | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for m in data.get('data', []):
+    status = m.get('status', {}).get('value', 'unknown')
+    print(f\"  {m['id']:40s} [{status}]\")
+"
+
+echo -e "\n=== GPU Memory ==="
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
+SCRIPT
+
+chmod +x /root/check-llama.sh
+```
+
+## Advanced: Multiple Instances (When Router Isn't Enough)
+
+For specific use cases, you may need dedicated `llama-server` instances alongside or instead of router mode.
+
+### systemd Template Unit
+
+```bash
+cat > /etc/systemd/system/llama-server@.service << 'EOF'
+[Unit]
+Description=llama.cpp Instance — %i
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/llama-server/%i.env
+ExecStart=/root/llama.cpp/build/bin/llama-server \
+  --model ${MODEL_PATH} \
+  --port ${PORT} \
+  --host 0.0.0.0 \
+  --api-key ${API_KEY} \
+  --n-gpu-layers ${GPU_LAYERS} \
+  --ctx-size ${CTX_SIZE} \
+  --threads ${THREADS} \
+  --flash-attn on \
+  --jinja \
+  --fit on
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment="CUDA_VISIBLE_DEVICES=${CUDA_DEVICES}"
+Environment="GGML_CUDA_ENABLE_UNIFIED_MEMORY=1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+## Updating and Maintenance
+
+```bash
+# --- From the Proxmox host ---
+
+# 1. Take a snapshot before touching anything
+pct snapshot <CTID> pre-llamacpp-update-$(date +%Y%m%d) --description "Before llama.cpp update"
+
+# 2. Enter the container
+pct enter <CTID>
+
+# --- Inside the container ---
+
+# 3. Stop the service before replacing the binary
+systemctl stop llama-server
+
+# 4. Pull latest commits
+cd /root/llama.cpp
+git pull
+
+# 5. Full CMake reconfigure — picks up new build flags from the updated source
+cmake -S . -B build \
+  -DGGML_CUDA=ON \
+  -DLLAMA_CURL=ON \
+  -DLLAMA_OPENSSL=ON \
+  -DGGML_CUDA_F16=ON \
+  -DCMAKE_CUDA_ARCHITECTURES="86"
+
+# 6. Rebuild (all cores)
+cmake --build build --config Release -j$(nproc)
+
+# 7. Start the service
+systemctl start llama-server
+
+# 8. Verify — check status, logs, API, and GPU
+systemctl status llama-server
+journalctl -u llama-server -n 50
+curl http://localhost:8012/v1/models | python3 -m json.tool
+nvidia-smi
+```
+
+## Support And Additional Resources
+
+### Router Mode Documentation
+
+- llama.cpp Model Management Blog Post: https://huggingface.co/blog/ggml-org/model-management-in-llamacpp
+- llama.cpp Server README (Router Mode section): https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Router Mode PR: https://github.com/ggml-org/llama.cpp/pull/17859
+- VRAM-Aware Eviction Discussion: https://github.com/ggml-org/llama.cpp/discussions/19425
+
+## Related Topics
+
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model setup this page builds on.
+- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) — the concrete dual-RTX-3090 deployment checklist and live config example.
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the simpler bundled stack if Router Mode is unnecessary.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA and LXC groundwork that still applies here.
+*** End Patch

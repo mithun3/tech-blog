@@ -1,0 +1,687 @@
+---
+title: "Open WebUI And Ollama On Proxmox"
+description: "Run Open WebUI and Ollama in Proxmox LXC containers, with the combined all-in-one path first and the dedicated Ollama server pattern as the alternative when the lab grows up a little." 
+publishedAt: "2025-05-19"
+updatedAt: "2025-06-08"
+order: 3
+status: published
+---
+
+# Open WebUI And Ollama On Proxmox
+
+This page owns one very specific Proxmox path: getting a usable local AI stack online with Open WebUI as the human-facing layer and Ollama as the inference engine.
+
+That can mean one combined container when you want the shortest path to a working system. It can also mean splitting Ollama into its own inference node once the lab starts to care more about GPU discipline than convenience.
+
+The host-side GPU work still belongs in [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough). The broader maintenance rhythm still belongs in [Update And Maintenance](/pages/proxmox/operations/update-maintenance). This page is the workload runbook that sits on top of those decisions.
+
+## Combined Container: Open WebUI Plus Ollama
+
+The first deployment pattern is the simplest one to live with.
+
+You create a single LXC, let the community script install Open WebUI, accept the Ollama prompt, and end up with one box that handles both the frontend and the local model runtime.
+
+## Create LXC Container
+
+### Container Sizing
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **100** | First AI container |
+| Hostname | `openwebui-ollama` | Reflects combined deployment role |
+| **Disk Size** | **150 GB** | Model storage (~4–30 GB per model) + app + Python deps |
+| **CPU Cores** | **12** | Tokenization, prompt processing, CPU-offloaded layers |
+| **RAM** | **20000 MiB** | VRAM spill for large models + Ollama + OpenWebUI overhead |
+| OS | Debian 13 | Default (recommended) |
+| Bridge | `vmbr0` | Same network as other containers |
+| **IPv4** | **192.168.50.40/24** | Static IP for Cloudflare tunnel / bookmarks |
+| Gateway | `192.168.50.1` | Router |
+| **GPU Passthrough** | **Yes** | Required — Ollama performs GPU inference in this container |
+| Nesting | **Enabled** | Required for systemd in Debian 13 |
+
+### Pre-configure App Defaults (Skip the Wizard)
+
+The community script has a 28-step interactive wizard in Advanced mode. You can **skip it entirely** by pre-writing an App Defaults file. When you select **"App Defaults"** from the script's menu, the container is created instantly using these values — zero wizard screens.
+
+#### How the Script Loads Settings (Precedence)
+
+| Priority | Source | Location |
+|----------|--------|----------|
+| **1 (highest)** | Environment variables | `export var_cpu=12` before running script |
+| **2** | App Defaults | `/usr/local/community-scripts/defaults/openwebui.vars` |
+| **3** | User Defaults (global) | `/usr/local/community-scripts/default.vars` |
+| **4 (lowest)** | Built-in defaults | Hardcoded in the script |
+
+#### Create the App Defaults File
+
+On the **Proxmox VE host shell**:
+
+```bash
+# Create the directory (if it doesn't exist)
+mkdir -p /usr/local/community-scripts/defaults
+
+# Write the vars file
+cat > /usr/local/community-scripts/defaults/openwebui.vars << 'EOF'
+# OpenWebUI + Ollama (Combined Deployment) - App Defaults
+# GPU enabled, Ollama will be installed alongside OpenWebUI
+var_cpu=16
+var_ram=30000
+var_disk=400
+var_unprivileged=1
+var_gpu=yes
+var_brg=vmbr0
+var_net=192.168.50.40/24
+var_gateway=192.168.50.1
+var_hostname=openwebui-ollama
+var_os=debian
+var_version=13
+var_ssh=yes
+var_nesting=1
+var_protection=yes
+var_tags=ai;inference
+var_timezone=Australia/Melbourne
+var_container_storage=local-zfs
+var_template_storage=local
+EOF
+```
+
+#### Available Variables Reference
+
+| Variable | Description | Example |
+|----------|-------------|--------|
+| `var_cpu` | CPU cores | `12` |
+| `var_ram` | RAM in MiB | `20000` |
+| `var_disk` | Disk in GB | `150` |
+| `var_unprivileged` | `1` = unprivileged, `0` = privileged | `1` |
+| `var_gpu` | GPU passthrough | `yes` / `no` |
+| `var_brg` | Network bridge | `vmbr0` |
+| `var_net` | Static IP (CIDR) | `192.168.50.45/24` |
+| `var_gateway` | Default gateway | `192.168.50.1` |
+| `var_hostname` | Container hostname | `openwebui-ollama` |
+| `var_os` | OS template | `debian` |
+| `var_version` | OS version | `13` |
+| `var_ssh` | Enable SSH | `yes` / `no` |
+| `var_nesting` | Enable nesting (for systemd) | `1` |
+| `var_protection` | Prevent accidental deletion | `yes` |
+| `var_tags` | Proxmox tags (semicolon-separated) | `ai;inference` |
+| `var_timezone` | Timezone | `Australia/Melbourne` |
+| `var_container_storage` | Storage pool for container | `local-zfs` |
+| `var_template_storage` | Storage pool for templates | `local` |
+| `var_vlan` | VLAN tag | `50` |
+| `var_mtu` | MTU size | `1500` |
+
+### Run the Community Script
+
+On the **Proxmox VE host shell**:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+```
+
+The script presents a menu with 5 options:
+
+| Option | What It Does |
+|--------|-------------|
+| **1. Default Install** | Uses built-in defaults (4 CPU, 8 GB RAM, GPU=yes) — not what we want |
+| **2. Advanced Install** | Full 28-step interactive wizard |
+| **3. User Defaults** | Loads `default.vars` (global defaults for all scripts) |
+| **4. App Defaults** | Loads `openwebui.vars` — **select this** |
+| **5. Settings** | Edit vars files, manage diagnostics |
+
+Select **4 (App Defaults)** → the container is created immediately with your pre-configured values. No wizard.
+
+When prompted **"Would you like to add Ollama?"** → type **`Y`** (accept).
+
+Expected output should show:
+
+```text
+  Using App Defaults for Open WebUI
+  LXC Container 100 was successfully created.
+ Detected NVIDIA GPU
+ Found 6 NVIDIA device(s) for passthrough
+  NVIDIA GPU passthrough configured (6 devices)
+  Installed Open WebUI
+      Would you like to add Ollama? <y/N> y
+  Created Service
+  Completed successfully!
+    http://192.168.50.40:42
+```
+
+#### Alternative: One-Shot Environment Variables
+
+For a single run without modifying any files, pass everything inline:
+
+```bash
+var_cpu=12 var_ram=20000 var_disk=150 var_gpu=yes var_hostname=openwebui-ollama \
+var_net=192.168.50.40/24 var_gateway=192.168.50.1 var_nesting=1 \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+```
+
+Environment variables have the **highest priority** — they override both `.vars` files and built-in defaults without modifying any files. You still need to select a menu option, but all values are pre-populated.
+
+### What the Script Installs
+
+- **Python 3.12** (via `uv`)
+- **Open WebUI** — web interface on port **8080**
+- **Ollama** — LLM inference server (if selected)
+- **systemd services** — `open-webui.service` and `ollama.service`
+- Config file: `/root/.env`
+- Data directory: `/root/.open-webui`
+
+> **Note:** The script may install Intel GPU packages when Ollama is selected. These are unused on NVIDIA setups and can be safely ignored.
+
+**Do NOT shut down the container yet** — GPU passthrough must be configured first.
+
+## Configure GPU Passthrough
+
+The source notes are right to treat this as the moment where convenience ends and correctness begins.
+
+If the GPU wiring is wrong, the rest of the stack becomes a very elaborate CPU box.
+
+For the host-side explanation and the full passthrough theory, use [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough). The commands below are the workload-specific checks and fallback steps.
+
+**As of the latest community-scripts version, GPU passthrough is fully automatic.** The script detects NVIDIA/AMD/Intel GPUs and configures passthrough, so you typically don't need manual steps.
+
+### If GPU Passthrough Didn't Auto-Configure
+
+**Check container config:**
+
+```bash
+cat /etc/pve/lxc/100.conf | grep "dev[0-9]:"
+```
+
+You should see entries like:
+
+```text
+dev0: /dev/nvidia0
+dev1: /dev/nvidiactl
+dev2: /dev/nvidia-uvm
+...
+```
+
+If missing, edit the container config to add GPU device passthrough using the **Proxmox native syntax**:
+
+```bash
+nano /etc/pve/lxc/100.conf
+```
+
+Add at the end:
+
+```ini
+# GPU device passthrough (Proxmox native syntax)
+dev0: /dev/nvidia0
+dev1: /dev/nvidiactl
+dev2: /dev/nvidia-uvm
+dev3: /dev/nvidia-uvm-tools
+dev4: /dev/nvidia-caps/nvidia-cap1
+dev5: /dev/nvidia-caps/nvidia-cap2
+```
+
+Save and exit, then restart:
+
+```bash
+pct stop 100
+pct start 100
+```
+
+> **Important:** Use `pct stop` / `pct start` (full cycle), not `pct reboot`. A reboot does not re-read updated LXC config.
+
+## Install NVIDIA Driver in Container
+
+The container shares the host kernel, so only **userspace libraries** are needed — no kernel module compilation.
+
+### Push Driver from Host
+
+```bash
+# On the Proxmox host — push the .run file downloaded during host GPU setup
+pct push 100 /tmp/NVIDIA-Linux-x86_64-580.126.09.run /tmp/NVIDIA-Linux-x86_64-580.126.09.run
+```
+
+### Install Inside Container
+
+```bash
+# Enter the container
+pct enter 100
+
+# Make executable and install (compute-only, no display libraries)
+chmod +x /tmp/NVIDIA-Linux-x86_64-580.126.09.run
+
+./NVIDIA-Linux-x86_64-580.126.09.run \
+  --no-kernel-module \
+  --no-opengl-files
+```
+
+| Flag | Why |
+|------|-----|
+| `--no-kernel-module` | Host provides the kernel module |
+| `--no-opengl-files` | No display server in container |
+
+### Verify GPU Access
+
+```bash
+nvidia-smi
+```
+
+Expected: GPU name, driver version, memory, and temperature displayed.
+
+```bash
+exit  # Return to host shell
+```
+
+## Verify And Access
+
+### Confirm Ollama Uses GPU
+
+```bash
+pct exec 100 -- ollama run llama3.2
+```
+
+First run downloads the model. Once loaded, check GPU utilisation:
+
+```bash
+# On the host (GPU monitoring)
+nvtop
+```
+
+You should see the Ollama process using GPU memory.
+
+### Access Open WebUI
+
+Open in browser:
+
+```text
+http://<container-IP>:8080
+```
+
+To find the container IP:
+
+```bash
+pct exec 100 -- hostname -I
+```
+
+On first visit, create an admin account — this is local to the container.
+
+## Expose Securely Via HTTPS
+
+Your Open WebUI is currently accessible over **unencrypted HTTP** at `http://<container-IP>:8080`. This is not suitable for production use or external sharing.
+
+### Why HTTPS is Essential
+
+- HTTP exposes credentials
+- browsers warn users
+- MITM attacks stay on the table
+- the service feels less trustworthy than it should
+
+### The Solution
+
+You have three proven approaches:
+
+| Solution | Setup Time | Best For | Scalability |
+|----------|-----------|----------|-------------|
+| **Cloudflare Tunnel** | 15 min | Security-first, non-technical users | Yes |
+| **Nginx + Wildcard Cert** | 60 min | Multiple services (recommended) | Yes |
+| **Traefik** | 90 min | Docker-heavy environments | Yes |
+
+The exact choice depends on how the rest of the lab is already exposed. The important point is simpler: do not leave the service as raw HTTP just because it is only meant to be internal today.
+
+## Management Commands
+
+### Service Control (Inside Container)
+
+```bash
+# Check status
+systemctl status open-webui
+systemctl status ollama
+
+# Restart services
+systemctl restart ollama
+systemctl restart open-webui
+
+# View logs
+journalctl -u ollama -f
+journalctl -u open-webui -f
+```
+
+### Container Control (From Host)
+
+```bash
+# Start / Stop / Restart
+pct start 100
+pct stop 100
+pct restart 100
+
+# Enter container shell
+pct enter 100
+
+# Quick command execution
+pct exec 100 -- nvidia-smi
+pct exec 100 -- ollama list
+```
+
+### Pull Models
+
+```bash
+# From host
+pct exec 100 -- ollama pull llama3.2
+pct exec 100 -- ollama pull codellama
+
+# List installed models
+pct exec 100 -- ollama list
+```
+
+### Update OpenWebUI
+
+#### Check Current Version
+
+```bash
+# From host
+pct exec 100 -- curl -s http://localhost:8080/api/version
+```
+
+This returns the current OpenWebUI version in JSON format.
+
+#### Update to v0.8.5
+
+```bash
+# From Proxmox host — take a snapshot first (recommended)
+pct snapshot 100 pre_v085_update --description "Before OpenWebUI v0.8.5 update"
+
+# Enter the container
+pct enter 100
+
+# Stop the OpenWebUI service
+systemctl stop open-webui.service
+
+# Update using uv (package manager used by the community script)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+source $HOME/.local/bin/env
+
+uv --version
+
+systemctl stop open-webui.service
+
+uv tool upgrade open-webui
+
+# Restart the service
+systemctl start open-webui.service
+```
+
+#### Verify the Update
+
+```bash
+# Check that v0.8.5 is now running
+curl -s http://localhost:8080/api/version
+
+# Check service status
+systemctl status open-webui.service
+
+# Exit the container
+exit
+```
+
+Access OpenWebUI in your browser at `http://192.168.50.40:8080` to confirm the update was successful.
+
+## Troubleshooting
+
+### Ollama Command Not Found
+
+If the helper script completes but `ollama` isn't available:
+
+```bash
+pct enter 100
+
+# Install Ollama manually
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Add to PATH permanently
+echo 'export PATH="/root/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify
+ollama --version
+```
+
+The helper script sometimes skips Ollama installation if certain dependencies are missing or network issues occur during the install phase.
+
+## Alternative Deployment: Ollama As A Dedicated Inference Server
+
+The source guide also kept an alternate shape for the moment when the combined container starts feeling too convenient for its own good.
+
+If Open WebUI and Ollama deserve different lifecycles, different memory budgets, or cleaner GPU ownership, split them.
+
+### Container Sizing (Standalone)
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Container ID | **101** (repurposed) or next available | Reuse existing GPU-configured container |
+| Hostname | `ollama` | Reflects inference-only role |
+| **Disk Size** | **150 GB** | Model storage (~4–30 GB per model in `~/.ollama/models/`) |
+| **CPU Cores** | **8–12** | Tokenization, prompt processing, CPU-offloaded layers |
+| **RAM** | **24000–32000 MiB** | VRAM spill for large models + Ollama overhead |
+| OS | Debian 13 | Consistent with existing setup |
+| Bridge | `vmbr0` | Same network as OpenWebUI |
+| **IPv4** | **192.168.50.40/24** | Standard Ollama IP (OpenWebUI keeps `.30`) |
+| Gateway | `192.168.50.1` | Router |
+| **GPU Passthrough** | **Yes** | The whole point — GPU inference |
+| Nesting | **Enabled** | Required for systemd in Debian 13 |
+
+#### Model VRAM Reference
+
+| Model | Parameters | Quantisation | VRAM Required |
+|-------|-----------|-------------|---------------|
+| Llama 3.2 | 3B | Q4_K_M | ~2 GB |
+| Llama 3.1 | 8B | Q4_K_M | ~5 GB |
+| Llama 3.1 | 8B | Q8_0 | ~9 GB |
+| DeepSeek-R1 | 14B | Q4_K_M | ~9 GB |
+| Qwen 2.5 | 32B | Q4_K_M | ~20 GB |
+| Llama 3.1 | 70B | Q4_K_M | ~40 GB (spills to RAM) |
+
+> **Rule of thumb:** If the model fits in 24 GB VRAM, it runs at full GPU speed. If it exceeds VRAM, Ollama automatically offloads layers to CPU/RAM — this works but inference is slower for the CPU-offloaded layers.
+
+### Option A: Repurpose Existing CT 100
+
+```bash
+pct enter 100
+
+# Stop and disable OpenWebUI
+systemctl disable --now open-webui.service
+
+# Verify it's stopped
+systemctl status open-webui
+# Expected: inactive (dead), disabled
+```
+
+#### Clean Up OpenWebUI (Optional — Frees Disk Space)
+
+```bash
+# Remove OpenWebUI binary and Python environment
+# Try uv first (may not be in PATH depending on script version)
+uv tool uninstall open-webui 2>/dev/null || \
+  ~/.local/bin/uv tool uninstall open-webui 2>/dev/null || \
+  echo "uv not found — removing files manually"
+
+# Remove uv-managed tool installs and cache
+rm -rf /root/.local/share/uv /root/.local/bin/open-webui
+
+# Remove data (ONLY after migrating to the new OpenWebUI container!)
+rm -rf /root/.open-webui
+
+# Remove env file if no longer needed
+# (Keep it if it contains Ollama-relevant settings)
+rm /root/.env
+```
+
+#### Change the IP Address
+
+From the **Proxmox host**:
+
+```bash
+# Stop the container
+pct stop 100
+
+# Update the network config
+pct set 100 -net0 name=eth0,bridge=vmbr0,ip=192.168.50.40/24,gw=192.168.50.1
+
+# Update the hostname
+pct set 100 -hostname ollama
+
+# Resize resources (optional — give more RAM for inference)
+pct set 100 -memory 24000
+# CPU cores can stay at 12 or adjust:
+# pct set 100 -cores 12
+
+# Start the container
+pct start 100
+```
+
+Verify inside the container:
+
+```bash
+pct enter 100
+hostname -I
+# Expected: 192.168.50.40
+```
+
+### Option B: Create A New Container
+
+On the **Proxmox VE host shell**:
+
+```bash
+# Back up the existing OpenWebUI vars (if any)
+cp /usr/local/community-scripts/defaults/openwebui.vars \
+   /usr/local/community-scripts/defaults/openwebui.vars.bak 2>/dev/null
+
+# Create the directory (if it doesn't exist)
+mkdir -p /usr/local/community-scripts/defaults
+
+# Write Ollama-specific vars
+cat > /usr/local/community-scripts/defaults/openwebui.vars << 'EOF'
+# Ollama Standalone (GPU Inference Server) - App Defaults
+# GPU enabled, Ollama will be installed, OpenWebUI disabled after install
+var_cpu=12
+var_ram=24000
+var_disk=150
+var_unprivileged=1
+var_gpu=yes
+var_brg=vmbr0
+var_net=192.168.50.40/24
+var_gateway=192.168.50.1
+var_hostname=ollama
+var_os=debian
+var_version=13
+var_ssh=yes
+var_nesting=1
+var_protection=1
+var_tags=ai;inference
+var_timezone=Australia/Melbourne
+var_container_storage=local-zfs
+var_template_storage=local
+EOF
+```
+
+Run the script again:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+```
+
+Select **4 (App Defaults)** → container is created immediately with your pre-configured values.
+
+When prompted **"Would you like to add Ollama?"** → type **`Y`** (accept).
+
+Restore the earlier OpenWebUI vars if you backed them up:
+
+```bash
+mv /usr/local/community-scripts/defaults/openwebui.vars.bak \
+   /usr/local/community-scripts/defaults/openwebui.vars
+```
+
+Disable the OpenWebUI service after the install:
+
+```bash
+pct enter <CT-ID>
+
+systemctl disable --now open-webui.service
+```
+
+### Configure Network Listening (Standalone)
+
+By default, Ollama only listens on `127.0.0.1` (localhost). For remote access from OpenWebUI, it must bind to all interfaces on port **58008**.
+
+```bash
+pct enter 100
+
+sudo systemctl edit ollama.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=127.0.0.1:11434 unix:///run/ollama.sock"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+Environment="OLLAMA_KEEP_ALIVE=5m"
+```
+
+Apply and verify:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+
+ss -tlnp | grep 58008
+```
+
+Expected:
+
+```text
+LISTEN  0  4096  0.0.0.0:58008  0.0.0.0:*  users:(("ollama",pid=...,fd=...))
+```
+
+If it shows `127.0.0.1` instead of `0.0.0.0`, the override didn't apply. Check:
+
+```bash
+systemctl cat ollama.service
+```
+
+### Recommended Overrides
+
+```bash
+sudo systemctl edit ollama.service
+```
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:58008"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+Environment="OLLAMA_KEEP_ALIVE=5m"
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+#### Variable Reference
+
+| Variable | Default | Recommended | Effect |
+|----------|---------|-------------|--------|
+| `OLLAMA_HOST` | `127.0.0.1:11434` | `0.0.0.0:58008` | Listen on all interfaces for remote access on non-standard port |
+| `OLLAMA_FLASH_ATTENTION` | `0` | `1` | Enables Flash Attention — **significantly reduces memory** at large context sizes. No quality impact. |
+| `OLLAMA_KV_CACHE_TYPE` | `f16` | `q8_0` | Quantises the KV cache to 8-bit — **halves KV cache memory** with minimal quality loss. Allows larger context windows or bigger models. |
+| `OLLAMA_KEEP_ALIVE` | `5m` | `5m` or `-1` | How long models stay in VRAM after last request. `5m` = unload after 5 min idle (good when sharing GPU with llama.cpp). `-1` = never unload (good for dedicated Ollama use). |
+| `OLLAMA_NUM_PARALLEL` | `1` | `1`–`4` | Max parallel requests per model. Higher values increase context memory proportionally. |
+| `OLLAMA_MAX_LOADED_MODELS` | `3 × num_GPUs` | `1` | Max models loaded concurrently. Set to `1` if VRAM is tight (single RTX 3090). |
+| `OLLAMA_ORIGINS` | `127.0.0.1,0.0.0.0` | Add OpenWebUI origin if needed | CORS allowed origins (browser-level only, not a security boundary). |
+
+## Related Topics
+
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA and LXC groundwork this stack depends on.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where the lab-wide update order and GPU driver version discipline live.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — the place to watch GPU health and service behavior once this stack is in use.
+*** End Patch

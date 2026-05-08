@@ -1,0 +1,377 @@
+---
+title: "Router Mode Deployment Example"
+description: "A concrete February 2026 Router Mode deployment example for llama.cpp on Proxmox, using Qwen3, GLM-4, DeepSeek-R1, and gpt-oss on RTX 3090 hardware." 
+publishedAt: "2026-02-25"
+updatedAt: "2026-02-25"
+order: 6
+status: published
+---
+
+# Router Mode Deployment Example
+
+This page is the concrete version of the Router Mode story.
+
+The main guide explains the architecture and the tradeoffs. This page keeps the February 2026 deployment checklist intact so you can follow one tested path end to end on the dual-RTX-3090 setup it was written for.
+
+Read [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) first if you still need the reasoning behind the layout.
+
+**Date:** February 25, 2026  
+**Hardware:** NVIDIA RTX 3090 (24 GB VRAM)  
+**Models:** Qwen3-8B, GLM-4-9B, DeepSeek-R1-Qwen3-8B, gpt-oss-20b  
+**Target:** Router Mode with LRU eviction on 2 concurrent models
+
+## Pre-Deployment Checklist
+
+- [ ] SSH access to llama-cpp LXC container (CT 105 or similar)
+- [ ] llama.cpp built from source **after December 11, 2025** (Router Mode support)
+- [ ] 4 GGUF model files already in `/root/hf/models/` (verify via `ls -lhR`)
+- [ ] Open WebUI running and connected to port 8012 (or will be reconfigured)
+- [ ] Backup current `/etc/systemd/system/llama-server.service` if it exists
+- [ ] `CUDA_VISIBLE_DEVICES=0` verified on host GPU device
+
+## Step 1: Verify llama.cpp Version And Router Mode Support
+
+On the **llama-cpp container**, check the binary version:
+
+```bash
+# Login to container if not already done
+pct enter 105  # or appropriate CT ID
+
+# Check version (build date should be >= Dec 11, 2025)
+/root/llama.cpp/build/bin/llama-server --version
+```
+
+If older, rebuild llama.cpp from source:
+
+```bash
+cd /root/llama.cpp
+git pull
+mkdir -p build
+cd build
+cmake .. -DGGML_CUDA=ON -DGGML_CUDA_F16=ON
+make -j$(nproc)
+```
+
+## Step 2: Verify Model Files And Integrity
+
+```bash
+ls -lhR /root/hf/models/
+```
+
+**Discard empty directories:**
+
+```bash
+rmdir /root/hf/models/Llama-3.1-8B-Instruct-GGUF
+rmdir /root/hf/models/Qwen3-32B-GGUF
+```
+
+## Step 3: Create Configuration Directory
+
+```bash
+mkdir -p /root/configs
+cd /root/configs
+```
+
+## Step 4: Create `models.ini` (Preset Configuration)
+
+Copy the following into `/root/configs/models.ini`:
+
+```ini
+version = 1
+
+; ─── Global defaults applied to ALL models ───────────────────────
+[*]
+flash-attn = on
+jinja = true
+fit = on
+cache-type-k = q8_0
+cache-type-v = q8_0
+threads = 4
+
+; ─── Qwen3-8B (Fast, General Purpose) ─────────────────────────────
+; Primary model: always loaded on startup
+; VRAM: 5–7 GB | Context: 32K–131K (with YaRN rope scaling 4x)
+[qwen3-8b]
+model = /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf
+ctx-size = 32768
+rope-scaling = linear
+rope-scale = 4.0
+load-on-startup = true
+stop-timeout = 10
+
+; ─── GLM-4-9B (Balanced, High-Quality) ────────────────────────────
+; Secondary model: loads on demand
+; VRAM: 6–8 GB | Context: 8K–128K (ALiBi position interpolation)
+[glm-4-9b]
+model = /root/hf/models/GLM-4-9B-0414-GGUF/GLM-4-9B-0414-Q4_K_M.gguf
+ctx-size = 128000
+load-on-startup = true
+stop-timeout = 10
+
+; ─── DeepSeek-R1-Qwen3-8B (Deep Reasoning) ────────────────────────
+; High-capability reasoning model; loads on-demand (evicts smaller models)
+; VRAM: 18–20 GB | Context: 32K–64K
+; CRITICAL: temperature=0.6 is required (enforce in Open WebUI)
+[deepseek-r1-qwen3-8b]
+model = /root/hf/models/DeepSeek-R1-0528-Qwen3-8B/DeepSeek-R1-0528-Qwen3-8B-BF16.gguf
+ctx-size = 64000
+load-on-startup = false
+stop-timeout = 20
+
+; ─── GPT-OSS-20B (Production Reasoning, MoE) ──────────────────────
+; Advanced reasoning with function calling; loads on-demand (exclusive VRAM)
+; VRAM: 16 GB | Context: 4K–8K (optimized for MoE sparse activation)
+; CRITICAL: temperature=1.0 and top_p=1.0 are non-negotiable
+; CRITICAL: must use Harmony format prompting
+[gpt-oss-20b]
+model = /root/hf/models/gpt-oss-20b/gpt-oss-20b-F16.gguf
+ctx-size = 8192
+harmony = true
+load-on-startup = false
+stop-timeout = 30
+```
+
+**Create the file:**
+
+```bash
+cat > /root/configs/models.ini << 'INIEOF'
+[PASTE CONTENT FROM ABOVE]
+INIEOF
+```
+
+**Verify:**
+
+```bash
+cat /root/configs/models.ini
+```
+
+## Step 5: Update systemd Service
+
+**Backup the current service (if exists):**
+
+```bash
+cp /etc/systemd/system/llama-server.service /etc/systemd/system/llama-server.service.backup
+```
+
+**Create new service file:**
+
+```bash
+cat > /etc/systemd/system/llama-server.service << 'SERVICEEOF'
+[Unit]
+Description=llama.cpp Inference Server (Router Mode Multi-Model)
+After=network.target
+Documentation=https://github.com/ggml-org/llama.cpp/blob/master/examples/server/README.md
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+
+ExecStart=/root/llama.cpp/build/bin/llama-server \
+  --models-preset /root/configs/models.ini \
+  --models-max 2 \
+  --sleep-idle-seconds 600 \
+  --port 8012 \
+  --host 0.0.0.0 \
+  --api-key your-secret-key \
+  --metrics
+
+Environment="CUDA_VISIBLE_DEVICES=0"
+
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-server
+
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+```
+
+## Step 6: Enable And Start The Service
+
+```bash
+# Reload systemd daemon
+systemctl daemon-reload
+
+# Enable auto-start on boot
+systemctl enable llama-server
+
+# Start the service
+systemctl start llama-server
+
+# Check status (should show "active (running)")
+systemctl status llama-server
+```
+
+## Step 7: Verify Service Is Running
+
+**Check service status:**
+
+```bash
+systemctl status llama-server
+```
+
+**View real-time logs:**
+
+```bash
+journalctl -u llama-server -f
+```
+
+Expected log output:
+
+```text
+llama-server: Starting router mode with --models-preset /root/configs/models.ini
+llama-server: Router mode enabled, max 2 models
+llama-server: Loading preset file: /root/configs/models.ini
+llama-server: Discovered model [qwen3-8b] at /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf
+llama-server: Discovered model [glm-4-9b] at /root/hf/models/GLM-4-9B-0414-GGUF/GLM-4-9B-0414-Q4_K_M.gguf
+llama-server: Discovered model [deepseek-r1-qwen3-8b] at /root/hf/models/DeepSeek-R1-0528-Qwen3-8B/DeepSeek-R1-0528-Qwen3-8B-BF16.gguf
+llama-server: Discovered model [gpt-oss-20b] at /root/hf/models/gpt-oss-20b/gpt-oss-20b-F16.gguf
+llama-server: Server listening on port 8012
+```
+
+## Step 8: Test API Endpoint
+
+**Check available models:**
+
+```bash
+curl -s http://localhost:8012/v1/models | python3 -m json.tool
+```
+
+**Expected status after startup:**
+
+- `qwen3-8b`: `"loaded"`
+- `glm-4-9b`: `"loaded"`
+- `deepseek-r1-qwen3-8b`: `"unloaded"`
+- `gpt-oss-20b`: `"unloaded"`
+
+## Step 9: Test Model Inference
+
+**Test Qwen3-8B (should respond immediately, already loaded):**
+
+```bash
+curl -s -X POST http://localhost:8012/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-8b",
+    "messages": [{"role": "user", "content": "What is 2+2?"}],
+    "max_tokens": 100,
+    "temperature": 0.7
+  }' | python3 -m json.tool
+```
+
+**Test DeepSeek-R1 (will load first time, takes ~15-30 sec):**
+
+```bash
+curl -s -X POST http://localhost:8012/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-r1-qwen3-8b",
+    "messages": [{"role": "user", "content": "Explain quantum computing in simple terms"}],
+    "max_tokens": 500,
+    "temperature": 0.6
+  }' | python3 -m json.tool
+```
+
+## Step 10: Update Open WebUI Connection
+
+1. Open Open WebUI: `http://<openwebui-IP>:8080`
+2. Go to **Profile** → **Admin Panel** → **Settings** → **Connections**
+3. Find the old Ollama/llama-server connection and **delete it**
+4. Click **+** to add new connection:
+   - **URL:** `http://<llama-cpp-container-IP>:8012/v1`
+   - **API Key:** `your-secret-key` (must match service)
+5. Click **Save**
+6. Go to **Models** → you should see all 4 models in the dropdown:
+   - `qwen3-8b`
+   - `glm-4-9b`
+   - `deepseek-r1-qwen3-8b`
+   - `gpt-oss-20b`
+
+## Step 11: Configure Model-Specific Sampling In Open WebUI
+
+### Qwen3-8B: Flexible
+
+- Temperature: 0.6–0.8 (reasoning) or 0.7 (default)
+- Top P: 0.8–0.95
+- Top K: 20–50
+
+### GLM-4-9B: Flexible
+
+- Temperature: 0.6–0.9
+- Top P: 0.85–0.95
+- Top K: 30–100
+
+### DeepSeek-R1: STRICT
+
+- Temperature: **0.6 (FIXED — do NOT change)**
+- Top P: **0.95 (recommended)**
+- Top K: **40 (recommended)**
+
+### gpt-oss-20b: STRICT
+
+- Temperature: **1.0 (FIXED — non-negotiable)**
+- Top P: **1.0 (FIXED — non-negotiable)**
+- Top K: **null (no top-k filtering)**
+
+## Step 12: Monitor VRAM And Model Loading
+
+```bash
+# On the Proxmox HOST (not container)
+watch -n 1 nvidia-smi
+
+# Or in the llama-cpp CONTAINER
+nvidia-smi -i 0 -l 1
+```
+
+Watch the service logs for load/unload events:
+
+```bash
+journalctl -u llama-server -f | grep -E "(loading|unloading|evicting|sleep)"
+```
+
+## Troubleshooting
+
+### Problem: Service fails to start
+
+```bash
+journalctl -u llama-server -n 50 --no-pager
+```
+
+### Problem: VRAM not freeing when switching models
+
+```bash
+curl -X POST http://localhost:8012/models/unload \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-8b"}'
+```
+
+## Performance Expectations
+
+| Model | First Load | Cold Reload | Inference Speed | Best For |
+|-------|-----------|------------|-----------------|----------|
+| Qwen3-8B | 3–5 sec | 2–3 sec | ~15–20 tok/sec | Fast chat, quick Q&A |
+| GLM-4-9B | 4–6 sec | 2–4 sec | ~12–18 tok/sec | Balanced, instruction-following |
+| DeepSeek-R1 | 20–30 sec | 10–15 sec | ~5–10 tok/sec | Complex reasoning, research |
+| gpt-oss-20b | 20–35 sec | 15–20 sec | ~8–15 tok/sec | Production reasoning, tools |
+
+## Next Steps
+
+1. **Monitor** for 24+ hours; check VRAM allocation patterns
+2. **Adjust context sizes** per-model if needed (conservative defaults already set)
+3. **Fine-tune `--sleep-idle-seconds`** based on usage patterns
+4. **Document your workflow** (which model for which task) in Open WebUI model descriptions
+5. **Consider quantized versions** of large models if VRAM becomes a bottleneck (DeepSeek-R1 Q4_K_M = ~5 GB)
+
+## Related Topics
+
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) — the canonical architecture and operations guide this example sits under.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model setup you should already have working before using this example.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA groundwork that still applies here.
+*** End Patch
