@@ -9,11 +9,11 @@ status: published
 
 # OpenClaw
 
-OpenClaw now has enough moving parts that it deserves its own map.
+OpenClaw has grown into its own little operating shape, so this page keeps the moving parts in one place instead of scattering them across infrastructure notes.
 
-This section is where the project-specific logic lives: the orchestrator, the specialist agents, household workflows, voice and media handling, the task board, validation discipline, and the small but important distinction between what is already live and what is still planned.
+This section is the behavior layer: orchestrator, specialist agents, household workflows, voice and media handling, the task board, validation discipline, and the line between what is already live and what is still only a good idea.
 
-The goal is to keep that material together instead of scattering it across infrastructure pages just because some of the containers happen to run on Proxmox.
+The deployment notes still live elsewhere. That keeps the story honest and makes the project easier to read without repeating the same setup details in every page.
 
 ## In This Section
 
@@ -38,5 +38,13 @@ The goal is to keep that material together instead of scattering it across infra
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the deployment-side cluster for CT 106, channel wiring, and secure exposure.
 - [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the model-serving layer OpenClaw depends on.
 - [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) - the external access path for the control UI when it should leave the LAN.
+
+## Source Trail
+
+This hub is summarized from the living OpenClaw pages and the deployment guides that feed them:
+
+- [OpenClaw Architecture, Agents, And Workflows](/pages/openclaw/architecture-agents-and-workflows)
+- [OpenClaw Workspace, Skills, And Use Cases](/pages/openclaw/workspace-skills-and-use-cases)
+- [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw)
 
 If the main question is how to deploy or expose the surrounding infrastructure, that content still belongs in [Proxmox](/pages/proxmox). If the main question is how OpenClaw behaves once it is alive, this section is the right home.
