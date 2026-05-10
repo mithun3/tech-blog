@@ -1,3 +1,4 @@
+If the lab already standardised on [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) or [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), the same OpenAI-compatible connection flow applies here.
 ---
 title: "Open WebUI Standalone Frontend On Proxmox"
 description: "Run Open WebUI in a lightweight Proxmox LXC, keep inference on remote Ollama or llama.cpp nodes, and move the browser layer out of the heavier combined stack."
@@ -308,6 +309,7 @@ curl -s -H "Authorization: Bearer <your-api-key>" \
 ```
 
 If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
+If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
 
 ### Useful Environment Variables
 

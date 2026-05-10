@@ -1,0 +1,147 @@
+---
+title: "Container Setup"
+description: "Create the LXC container for llama.cpp on Proxmox and configure GPU passthrough using Proxmox native device syntax."
+publishedAt: "2025-05-28"
+updatedAt: "2025-06-18"
+order: 2
+status: published
+---
+
+# Container Setup
+
+There is no community helper script for llama.cpp — create the container manually through the Proxmox GUI or CLI.
+
+## Create the LXC Container
+
+### Option A: Proxmox GUI
+
+1. **Datacenter → your node → Create CT**
+2. Use these recommended settings:
+
+| Setting | Recommended Value | Notes |
+|---------|-------------------|-------|
+| CT ID | Next available (e.g., `101`) | |
+| Hostname | `llama-cpp` | |
+| Unprivileged | **Yes** | Works with Proxmox native `devN:` GPU passthrough |
+| Template | `debian-12-standard` | Download from Proxmox template store if not present |
+| Disk Size | **100 GB+** | Models are large — DeepSeek V3 Q4_K_M is ~150 GB |
+| CPU Cores | **4+** | More cores = faster prompt processing on CPU layers |
+| RAM | **16384 MB** (16 GB) | 32 GB+ recommended if running large models with CPU offload |
+| Swap | **0** (or 8192 MB) | 0 if you have enough RAM; add swap as a safety net |
+| Network | `vmbr0`, static IP or DHCP | Must be reachable from your Open WebUI container |
+| Features | `nesting=1,keyctl=1` | Required for systemd inside the container |
+| DNS | Use host settings | |
+| Start on boot | **Yes** | |
+
+### Option B: CLI
+
+#### Destroy an existing container.
+
+A. Use `pct destroy <CTID>` after stopping it:
+
+```bash
+pct stop <CTID>
+pct destroy <CTID>
+```
+
+B. If it's protected, remove protection first:
+
+```bash
+pct unprotect <CTID>
+# OR
+pct set <CTID> --protection 0
+```
+
+C. And finally destroy the container:
+
+```bash
+pct destroy <CTID>
+```
+
+D. Download Image
+
+```bash
+# Before creating a container you should download the template if needed
+
+pveam update
+
+pveam available | grep debian-12-standard
+
+pveam download local debian-12-standard_12.12-1_amd64.tar.zst
+```
+
+E. Create new container
+
+```bash
+# Create container (adjust IP/gateway to match your network)
+pct create 102 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname llama-cpp \
+  --cores 16 \
+  --memory 30000 \
+  --swap 0 \
+  --rootfs local-zfs:300 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.168.50.45/24,gw=192.168.50.1 \
+  --unprivileged 1 \
+  --features nesting=1,keyctl=1 \
+  --onboot 1 \
+  --password '<your-root-password>'
+```
+
+> **Note:** Adjust `--rootfs` to match your storage backend (`local-zfs`, `local-lvm`, etc.). To mirror your existing Open WebUI container (CT 100):
+> ```bash
+> # Show CT 100 storage backend and volume name
+> pct config 100 | grep -i rootfs
+>
+> # List available storage backends
+> pvesm status
+> ```
+> Use the same storage backend from CT 100 in the new container, e.g. `local-zfs:100` or `local-lvm:100`.
+
+## Configure GPU Passthrough
+
+> **Note:** `<CTID>` is used as a placeholder throughout this guide. Replace it with your actual container ID. To find it:
+> ```bash
+> pct list                  # shows all containers and their IDs
+> ls /etc/pve/lxc/          # shows all container config files
+> ```
+
+Stop the container and edit its config:
+
+```bash
+pct stop <CTID>
+
+nano /etc/pve/lxc/<CTID>.conf
+```
+
+Add the GPU device entries using Proxmox's native `devN:` syntax (same approach the Open WebUI community script uses):
+
+```ini
+# GPU Passthrough — Proxmox native device passthrough (Dual GPU)
+dev0: /dev/nvidia0
+dev1: /dev/nvidia1
+dev2: /dev/nvidiactl
+dev3: /dev/nvidia-uvm
+dev4: /dev/nvidia-uvm-tools
+dev5: /dev/nvidia-caps/nvidia-cap1
+dev6: /dev/nvidia-caps/nvidia-cap2
+```
+
+> **How to find your nvidia-caps devices:**
+> ```bash
+> ls /dev/nvidia-caps/
+> ```
+> You should see `nvidia-cap1` and `nvidia-cap2` (or similar). Add one `devN:` entry per file.
+
+> **Single GPU?** Remove the `dev1: /dev/nvidia1` line and renumber `dev2`–`dev6` down by one.
+
+Start the container:
+
+```bash
+pct start <CTID>
+```
+
+> **Important:** Use `pct stop` / `pct start` (full cycle), not `pct reboot`. A reboot does not re-read LXC config changes.
+
+## Next
+
+Continue to [CUDA And Driver Install](/pages/proxmox/workloads/llamacpp/cuda-driver-install) to install the NVIDIA userspace libraries inside the container.

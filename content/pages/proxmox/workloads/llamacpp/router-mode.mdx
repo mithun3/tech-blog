@@ -3,7 +3,7 @@ title: "llama.cpp Router Mode On Proxmox"
 description: "Run multiple llama.cpp models behind one Proxmox-hosted router, with preset files, VRAM planning, LRU eviction, and one Open WebUI connection for the whole stack." 
 publishedAt: "2025-01-10"
 updatedAt: "2025-01-20"
-order: 5
+order: 6
 status: published
 ---
 
@@ -15,7 +15,7 @@ Eventually that stops being enough. You want a small fast model for casual quest
 
 That is the point of Router Mode.
 
-If the base llama.cpp stack is not in place yet, start with [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc). If you want the concrete dual-RTX-3090 deployment example after the architecture is clear, continue to [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment).
+If the base llama.cpp stack is not in place yet, start with [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp). If you want the concrete dual-RTX-3090 deployment example after the architecture is clear, continue to [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp/router-mode-deployment).
 
 If the goal is still a browser-first interface but the UI should live in a separate guest, continue to [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc).
 
@@ -340,7 +340,7 @@ llama-server \
 
 ## systemd Service for Router Mode
 
-Replace the single-model `llama-server.service` from [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) with a router-mode service.
+Replace the single-model `llama-server.service` from [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) with a router-mode service.
 
 ### Option A: Using `--models-dir` (Simpler)
 
@@ -605,8 +605,8 @@ nvidia-smi
 
 ## Related Topics
 
-- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model setup this page builds on.
-- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp-router-mode-deployment) — the concrete dual-RTX-3090 deployment checklist and live config example.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) — the single-model setup this page builds on.
+- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp/router-mode-deployment) — the concrete dual-RTX-3090 deployment checklist and live config example.
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the simpler bundled stack if Router Mode is unnecessary.
 - [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc) — the split browser layer when Router Mode is already handling inference somewhere else.
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) — the assistant layer when Telegram, Discord, and scheduled workflows should sit on top of Router Mode.

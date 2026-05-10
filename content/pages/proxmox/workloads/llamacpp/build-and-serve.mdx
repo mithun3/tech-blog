@@ -1,0 +1,229 @@
+---
+title: "Build And Serve"
+description: "Build llama.cpp from source with CUDA support, download GGUF models from Hugging Face, and run llama-server as a systemd service."
+publishedAt: "2025-05-28"
+updatedAt: "2025-06-18"
+order: 4
+status: published
+---
+
+# Build And Serve
+
+## Build llama.cpp from Source
+
+Building from source is the recommended approach — it produces binaries optimised for your specific GPU and system.
+
+```bash
+# Clone the repository
+git clone https://github.com/ggml-org/llama.cpp
+
+# Build from inside the repo
+cd /root/llama.cpp
+
+# Enable HTTPS downloads for -hf (requires OpenSSL dev files)
+apt update
+apt install -y libssl-dev
+
+# Configure with CUDA and curl support (curl enables -hf direct downloads)
+cmake -S . -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DLLAMA_OPENSSL=ON
+
+# Build (use all available cores)
+cmake --build build --config Release -j$(nproc)
+```
+
+> **Optional — target your specific GPU compute capability** for faster compilation and slightly better performance:
+> ```bash
+> # RTX 3090 = compute 8.6, RTX 4090 = 8.9, RTX 5060 Ti = 12.0
+> cmake -S . -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_CUDA_ARCHITECTURES="86"
+> ```
+
+### Binaries Produced
+
+| Binary | Location | Purpose |
+|--------|----------|---------|
+| `llama-server` | `llama.cpp/build/bin/llama-server` | OpenAI-compatible HTTP API server |
+| `llama-cli` | `llama.cpp/build/bin/llama-cli` | Interactive CLI chat / text completion |
+| `llama-bench` | `llama.cpp/build/bin/llama-bench` | Benchmark inference speed (tokens/sec) |
+| `llama-gguf-split` | `llama.cpp/build/bin/llama-gguf-split` | Split/merge large GGUF files |
+
+## Download Models from Hugging Face
+
+Models must be in **GGUF format**. The best sources are:
+
+- [Hugging Face GGUF models](https://huggingface.co/models?library=gguf&sort=trending)
+- [Unsloth](https://huggingface.co/unsloth) — optimised GGUF quants for popular models
+- [bartowski](https://huggingface.co/bartowski) — wide selection of GGUF quantisations
+
+### Quantization Guide
+
+| Quantization | Bits | Quality | VRAM Usage | When to Use |
+|-------------|------|---------|------------|-------------|
+| Q2_K | 2-bit | Low | Smallest | Very limited VRAM, willing to sacrifice quality |
+| Q3_K_M | 3-bit | Fair | Low | Entry-level GPUs (8 GB VRAM) |
+| Q4_K_M | 4-bit | Good | Moderate | **Best balance** — recommended starting point |
+| Q5_K_M | 5-bit | Very Good | Higher | 24 GB+ VRAM, quality matters |
+| Q6_K | 6-bit | Excellent | High | 48 GB+ VRAM or multi-GPU |
+| Q8_0 | 8-bit | Near-FP16 | Highest | Evaluation/research, maximum quality |
+
+### Method 1: Direct Download via llama-server (Simplest)
+
+```bash
+./llama.cpp/build/bin/llama-server \
+  -hf unsloth/Qwen3-8B-GGUF:Q4_K_M \
+  --port 8012 \
+  --host 0.0.0.0
+```
+
+### Method 2: Manual Download via huggingface-cli
+
+```bash
+# Install Python and create an environment
+apt install -y python3-full python3-pip pipenv
+
+mkdir -p ~/hf/scripts && cd ~/hf/scripts
+pipenv shell
+
+# Install Hugging Face tools
+pip install huggingface_hub hf_transfer
+```
+
+Create a download script:
+
+```bash
+cat > ~/hf/scripts/dl.py << 'DLEOF'
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"  # Set to "1" for faster downloads if your connection is stable
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="unsloth/Qwen3-8B-GGUF",
+    local_dir="models/Qwen3-8B-GGUF",
+    allow_patterns=["*Q4_K_M*"],
+)
+DLEOF
+
+# Qwen3 32B
+cat > ~/hf/scripts/dl_qwen3_32b.py << 'DLEOF'
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="unsloth/Qwen3-32B-GGUF",
+    local_dir="models/Qwen3-32B-GGUF",
+    allow_patterns=["*Q4_K_M*"],
+)
+DLEOF
+
+# DeepSeek R1 32B
+cat > ~/hf/scripts/dl_deepseek_r1_32b.py << 'DLEOF'
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="unsloth/DeepSeek-R1-32B-GGUF",
+    local_dir="models/DeepSeek-R1-32B-GGUF",
+    allow_patterns=["*Q4_K_M*"],
+)
+DLEOF
+
+# DeepSeek R1 8B
+cat > ~/hf/scripts/dl_deepseek_r1_qwen3_8b.py << 'DLEOF'
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF",
+    local_dir="models/DeepSeek-R1-0528-Qwen3-8B-GGUF",
+    allow_patterns=["*DeepSeek-R1-0528-Qwen3-8B-BF16.gguf*", "config.json"],
+)
+DLEOF
+```
+
+> **Best practice:** Store all models in a dedicated directory:
+> ```bash
+> mkdir -p /root/models
+> ```
+
+## Run llama-server
+
+### Basic Launch
+
+```bash
+./llama.cpp/build/bin/llama-server \
+  --model /root/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf \
+  --port 8012 \
+  --host 0.0.0.0 \
+  --api-key your-secret-key \
+  --n-gpu-layers 99 \
+  --ctx-size 131072 \
+  --threads 12
+```
+
+### Verify the Server
+
+```bash
+# From inside the container or any machine on the network
+curl http://localhost:8012/v1/models
+
+# Test a completion
+curl http://localhost:8012/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{
+    "model": "Qwen3-8B",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Create a systemd Service (Recommended)
+
+```bash
+cat > /etc/systemd/system/llama-server.service << 'EOF'
+[Unit]
+Description=llama.cpp Inference Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/llama.cpp/build/bin/llama-server \
+  --model /root/hf/models/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf \
+  --port 8012 \
+  --host 0.0.0.0 \
+  --api-key your-secret-key \
+  --n-gpu-layers 99 \
+  --ctx-size 131072 \
+  --threads 12
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment="CUDA_VISIBLE_DEVICES=0,1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable llama-server
+systemctl start llama-server
+```
+
+Manage the service:
+
+```bash
+# Check status
+systemctl status llama-server
+
+# View logs
+journalctl -u llama-server -f
+
+# Restart after config changes
+systemctl restart llama-server
+```
+
+## Next
+
+Continue to [Open WebUI Integration](/pages/proxmox/workloads/llamacpp/openwebui-integration) to connect the server to Open WebUI and tune performance.

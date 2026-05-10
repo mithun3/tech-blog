@@ -1,0 +1,122 @@
+---
+title: "CUDA And Driver Install"
+description: "Install CUDA Toolkit 12.8 and the NVIDIA userspace driver inside the llama.cpp LXC container on Proxmox."
+publishedAt: "2025-05-28"
+updatedAt: "2025-06-18"
+order: 3
+status: published
+---
+
+# CUDA And Driver Install
+
+The container shares the host kernel. Only **userspace libraries** are installed — no kernel modules.
+
+> **Important:** The NVIDIA driver version inside the LXC **must match** the host driver version exactly. If you updated the host driver, repeat these steps inside the container.
+
+## Step 1: Install Prerequisites (Before Driver Install)
+
+Install the required build and system packages inside the container before running the NVIDIA driver installer:
+
+```bash
+# Enter the container
+pct enter <CTID>
+
+apt update && apt install -y \
+  g++ \
+  freeglut3-dev \
+  build-essential \
+  libx11-dev \
+  libxmu-dev \
+  libxi-dev \
+  libglu1-mesa-dev \
+  libfreeimage-dev \
+  libglfw3-dev \
+  wget \
+  htop \
+  btop \
+  nvtop \
+  glances \
+  git \
+  pciutils \
+  cmake \
+  curl \
+  libcurl4-openssl-dev
+```
+
+## Step 2: Install CUDA Toolkit 12.8
+
+```bash
+# Install CUDA Toolkit 12.8
+wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+
+dpkg -i cuda-keyring_1.1-1_all.deb
+
+apt update && apt install -y cuda-toolkit-12-8
+
+```
+
+```bash
+export PATH=/usr/local/cuda-12.8/bin${PATH:+:${PATH}}
+```
+
+## Step 3: Push the NVIDIA Driver into the Container
+
+```bash
+# On the Proxmox host — use the same .run file from the host GPU setup
+cd drivers/
+ls
+NVIDIA-Linux-x86_64-580.126.09.run
+pct push 102 NVIDIA-Linux-x86_64-580.126.09.run /root/NVIDIA-Linux-x86_64-580.126.09.run
+```
+
+> If you no longer have the `.run` file on the host, re-download it:
+> ```bash
+> cd /root
+> wget https://us.download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
+> chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+> ```
+
+## Step 4: Install Driver Inside Container
+
+```bash
+# Install driver — compute-only, no display/OpenGL libraries
+# Replace the filename if your host uses a different driver version.
+chmod +x /root/NVIDIA-Linux-x86_64-580.126.09.run
+
+/root/NVIDIA-Linux-x86_64-580.126.09.run \
+  --no-kernel-module \
+  --no-opengl-files
+```
+
+| Flag | Why |
+|------|-----|
+| `--no-kernel-module` | Host provides the kernel module — LXC shares it |
+| `--no-opengl-files` | No display server in the container |
+
+Verify:
+
+```bash
+nvidia-smi
+```
+
+## Step 5: Add CUDA to PATH
+
+```bash
+# Backup and edit .bashrc
+cp ~/.bashrc ~/.bashrc-backup
+
+echo 'export PATH=/usr/local/cuda-12.8/bin${PATH:+:${PATH}}' >> ~/.bashrc
+
+source ~/.bashrc
+```
+
+Verify:
+
+```bash
+nvcc --version
+# Expected: nvcc release 12.8, Vxxx
+```
+
+## Next
+
+Continue to [Build And Serve](/pages/proxmox/workloads/llamacpp/build-and-serve) to compile llama.cpp from source and start the inference server.

@@ -3,7 +3,7 @@ title: "Router Mode Deployment Example"
 description: "A concrete Router Mode deployment example for llama.cpp on Proxmox, using Qwen3, GLM-4, DeepSeek-R1, and gpt-oss on RTX 3090 hardware." 
 publishedAt: "2025-01-14"
 updatedAt: "2025-01-14"
-order: 6
+order: 7
 status: published
 ---
 
@@ -13,7 +13,7 @@ This page is the concrete version of the Router Mode story.
 
 The main guide explains the architecture and the tradeoffs. This page keeps one tested Router Mode deployment checklist intact so you can follow a concrete dual-RTX-3090 path end to end.
 
-Read [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) first if you still need the reasoning behind the layout.
+Read [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode) first if you still need the reasoning behind the layout.
 
 **Date:** January 14, 2025  
 **Hardware:** NVIDIA RTX 3090 (24 GB VRAM)  
@@ -371,7 +371,7 @@ curl -X POST http://localhost:8012/models/unload \
 
 ## Related Topics
 
-- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) — the canonical architecture and operations guide this example sits under.
-- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) — the single-model setup you should already have working before using this example.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode) — the canonical architecture and operations guide this example sits under.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) — the single-model setup you should already have working before using this example.
 - [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA groundwork that still applies here.
 *** End Patch

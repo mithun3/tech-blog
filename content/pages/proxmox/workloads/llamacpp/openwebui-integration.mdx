@@ -1,0 +1,149 @@
+---
+title: "Open WebUI Integration"
+description: "Connect llama-server to Open WebUI and tune GPU offloading, unified memory, multi-GPU setup, and update discipline for ongoing maintenance."
+publishedAt: "2025-05-28"
+updatedAt: "2025-06-18"
+order: 5
+status: published
+---
+
+# Open WebUI Integration
+
+llama-server exposes an **OpenAI-compatible API**, so Open WebUI can use it as an "OpenAI" connection.
+
+## Connect to Open WebUI
+
+### Step 1: Add the Connection
+
+1. Open your Open WebUI instance in a browser: `http://<openwebui-IP>:8080`
+2. Click your **profile icon** (bottom-left) → **Admin Panel** → **Settings** → **Connections**
+3. Under **OpenAI API**, click **+** to add a new connection:
+
+| Field | Value |
+|-------|-------|
+| URL | `http://<llama-cpp-LXC-IP>:8012/v1` |
+| API Key | `your-secret-key` (must match `--api-key`) |
+| Prefix | `llamacpp-` (helps distinguish from Ollama models) |
+
+4. Click **Save**
+
+> **Finding the llama-cpp container IP:**
+> ```bash
+> # From the Proxmox host
+> pct exec <CTID> -- hostname -I
+> ```
+
+### Step 2: Rename Models (Optional)
+
+1. Go to **Admin Panel** → **Settings** → **Models**
+2. Click the **pencil icon** next to the model
+3. Edit the **Name** to something short (e.g., `Qwen3 8B Q4`)
+4. Click **Save**
+
+### Step 3: Verify
+
+1. Go to the chat interface
+2. Select the llama.cpp model from the model dropdown
+3. Send a test message — you should get a response
+4. Monitor GPU usage on the host: `nvtop`
+
+## Best Practices And Performance Tuning
+
+### Snapshot After Setup
+
+```bash
+# From host — replace 101 with your CT ID
+pct snapshot <CTID> working-base --description "llama.cpp built, CUDA working, model loaded"
+```
+
+### GPU Layer Offloading
+
+```bash
+# Real-time GPU monitoring (run on host)
+watch -n 1 nvidia-smi
+
+# Or use nvtop for a nicer view
+nvtop
+```
+
+### Unified Memory (VRAM Overflow to RAM)
+
+```bash
+export GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+```
+
+### Multi-GPU Setup
+
+```bash
+# Use all GPUs
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+
+# Use only GPU 0 and 1
+export CUDA_VISIBLE_DEVICES=0,1
+```
+
+```bash
+export CUDA_SCALE_LAUNCH_QUEUES=4x
+```
+
+### Updating llama.cpp
+
+```bash
+# 1. Take a snapshot first (from the Proxmox host before entering the container)
+# pct snapshot <CTID> pre-llamacpp-update-$(date +%Y%m%d) --description "Before llama.cpp update"
+
+# 2. Stop the service before replacing the binary
+systemctl stop llama-server
+
+# 3. Pull latest changes
+cd /root/llama.cpp
+git pull
+
+# 4. Full CMake reconfigure — picks up any new build flags from the updated source
+cmake -S . -B build \
+  -DGGML_CUDA=ON \
+  -DLLAMA_CURL=ON \
+  -DLLAMA_OPENSSL=ON \
+  -DGGML_CUDA_F16=ON \
+  -DCMAKE_CUDA_ARCHITECTURES="86"
+
+# 5. Rebuild (all cores)
+cmake --build build --config Release -j$(nproc)
+
+# 6. Start the service
+systemctl start llama-server
+
+# 7. Verify
+systemctl status llama-server
+journalctl -u llama-server -n 50
+curl http://localhost:8012/v1/models | python3 -m json.tool
+nvidia-smi
+```
+
+### Running Multiple Models
+
+You can run multiple `llama-server` instances on different ports, each serving a different model:
+
+```bash
+# Server 1: Small fast model for simple queries
+./llama.cpp/build/bin/llama-server \
+  --model /root/models/qwen3-1.7b-q4.gguf \
+  --port 8012 --host 0.0.0.0 --api-key key1 \
+  --n-gpu-layers 99
+
+# Server 2: Large model for complex reasoning
+./llama.cpp/build/bin/llama-server \
+  --model /root/models/qwen3-32b-q4.gguf \
+  --port 8013 --host 0.0.0.0 --api-key key2 \
+  --n-gpu-layers 40
+```
+
+> **Better approach:** Use llama.cpp's built-in **Router Mode** instead of running multiple instances. Router Mode manages multiple models in a single process with automatic LRU eviction, idle unloading, and per-model configuration.
+
+## Related Topics
+
+- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the simpler bundled stack when you want faster setup and less control.
+- [Router Mode](/pages/proxmox/workloads/llamacpp/router-mode) — the multi-model path once a single-model server starts feeling too limiting.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA groundwork this container relies on.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where host-first updates and driver version discipline live.
+- [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — useful when large model downloads should not take the whole link while this container is filling `/root/models`.

@@ -1,0 +1,144 @@
+---
+title: "Limited VRAM Playbook (Large Models)"
+description: "Practical tactics to run very large models on old or low-VRAM GPUs: smarter CPU/GPU placement, mmap control, KV cache compression, and long-run stability."
+publishedAt: "2026-05-10"
+updatedAt: "2026-05-10"
+order: 8
+status: published
+---
+
+# Limited VRAM Playbook (Large Models)
+
+Can you run a very large model on old hardware with only 6 GB VRAM and still keep it usable? Yes.
+
+This page captures a practical workflow for making that happen on llama.cpp, including what helped, what did not, and why.
+
+## Test Rig (Worst-Case Baseline)
+
+- GPU: GTX 1060 6 GB (PCIe Gen 3)
+- CPU: i3-8100 (4 cores, no HT)
+- RAM: 24 GB DDR4
+
+The point is not that this is an ideal rig. The point is that this is a floor. Newer hardware should perform better with the same settings.
+
+## The Baseline That Feels Slow
+
+A naive split uses only `--n-gpu-layers` and leaves the rest on CPU/RAM.
+
+```bash
+llama-server \
+  --model /root/models/<model>.gguf \
+  --n-gpu-layers 20
+```
+
+This can work, but often stalls around low token throughput because too much per-token work crosses PCIe.
+
+## Five Practical Levers
+
+### 1) Move MoE Experts to CPU Intentionally
+
+For MoE models, `--n-cpu-moe` is the key lever. Instead of a generic layer split, pin expert blocks to CPU and keep non-expert compute hot on GPU.
+
+```bash
+--n-cpu-moe 41
+```
+
+Then tune downward (for example `35` or `36`) to move some experts back to GPU if VRAM allows.
+
+### 2) Disable mmap for Predictable Inference
+
+Use `--no-mmap` so model data is loaded into RAM upfront instead of demand-paged from disk mid-inference.
+
+```bash
+--no-mmap
+```
+
+This usually reduces stutter and improves consistency on long sessions.
+
+### 3) Re-balance Experts vs Context
+
+If VRAM headroom exists, reduce `--n-cpu-moe` (for example `41 -> 35`) to keep more work on GPU.
+
+Tradeoff: more VRAM used by model weights leaves less room for KV cache/context.
+
+### 4) Compress KV Cache Aggressively (Carefully)
+
+Context growth is linear in KV cache memory. Lower KV precision can massively increase usable context.
+
+```bash
+--cache-type-k q4_0 --cache-type-v q3_0
+```
+
+Use this with context tuning:
+
+```bash
+--ctx-size 128000
+# then test
+--ctx-size 256000
+```
+
+If OOM appears, move one step back in GPU allocation (for MoE, often `--n-cpu-moe +1`).
+
+### 5) Lock RAM for Long-Run Stability
+
+A setup that benchmarks well can still degrade after hours if the OS pages model data out.
+
+Use all three layers together:
+
+- container permission to lock memory
+- Docker `IPC_LOCK` capability
+- llama.cpp `--mlock`
+
+## One Docker Command Pattern
+
+This is the combined pattern (adjust model path and values):
+
+```bash
+docker run --rm \
+  --gpus all \
+  --cap-add IPC_LOCK \
+  --ulimit memlock=-1:-1 \
+  -p 8012:8012 \
+  -v /root/models:/models \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/<model>.gguf \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --n-gpu-layers 99 \
+  --n-cpu-moe 36 \
+  --no-mmap \
+  --cache-type-k q4_0 \
+  --cache-type-v q3_0 \
+  --ctx-size 256000 \
+  --mlock
+```
+
+## Dense vs MoE (Important)
+
+The MoE-specific trick is `--n-cpu-moe`.
+
+For dense models, this flag is irrelevant because there are no expert blocks. Dense tuning on limited VRAM relies more on:
+
+- `--n-gpu-layers`
+- `--ctx-size`
+- `--cache-type-k` and `--cache-type-v`
+- quantization choice (for example Q4_K_M vs Q5_K_M)
+- avoiding paging (`--no-mmap`, `--mlock`)
+
+## What Did Not Help Here
+
+Speculative decoding can underperform on some MoE + SSM architectures due to verification overhead and memory traffic patterns, even when draft acceptance looks decent.
+
+Treat speculative decoding as model-architecture dependent, not a universal speedup.
+
+## Practical Outcome Target
+
+The goal is not just "it runs". The goal is interactive speed with enough context to be useful in real workflows.
+
+On low-end hardware, these levers can move a setup from barely usable to stable, conversational throughput.
+
+## Related Topics
+
+- [Build And Serve](/pages/proxmox/workloads/llamacpp/build-and-serve)
+- [Open WebUI Integration](/pages/proxmox/workloads/llamacpp/openwebui-integration)
+- [Router Mode](/pages/proxmox/workloads/llamacpp/router-mode)
