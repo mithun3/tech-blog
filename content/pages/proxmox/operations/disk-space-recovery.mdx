@@ -1,0 +1,210 @@
+---
+title: "Disk Space Recovery On Proxmox"
+description: "Practical maintenance for a Proxmox host that has run out of space, with a focus on locating large consumers, clearing safe reclaim targets, and preventing `/var/lib/vz` from filling again."
+publishedAt: "2026-05-10"
+updatedAt: "2026-05-10"
+order: 5
+status: published
+---
+
+# Disk Space Recovery On Proxmox
+
+When a Proxmox host runs out of space, the failure usually shows up in a place that looks harmless at first.
+
+In the example that triggered this page, the root pool still had breathing room, but `/var/lib/vz` was completely full:
+
+```text
+rpool/var-lib-vz  1.6T  1.6T   14G 100% /var/lib/vz
+```
+
+That is the kind of condition that quietly breaks backups, template downloads, container work, and anything else that expects local storage to still have room.
+
+This page is about recovering space safely, confirming what actually consumed it, and setting up a maintenance rhythm so the same problem does not return immediately.
+
+## First Rule: Confirm The Problem
+
+Start with a quick view of mounted filesystems and the storage pool layout:
+
+```bash
+df -h
+zpool list
+zfs list -o name,used,avail,refer,mountpoint
+pvesm status
+```
+
+If `/var/lib/vz` is the full mount and it maps to a ZFS dataset like `rpool/var-lib-vz`, the issue is usually one of these:
+
+- old backups under `/var/lib/vz/dump`
+- ISO images or template tarballs under `/var/lib/vz/template`
+- container or VM artifacts that were copied in and never removed
+- a workload storing temporary data on the local Proxmox storage pool
+- logs or cached package data growing faster than expected
+
+## Find The Biggest Consumers
+
+Before deleting anything, check where the space actually went.
+
+```bash
+# Show top-level usage under the mount
+sudo du -xh --max-depth=1 /var/lib/vz | sort -h
+
+# Check the backup directory specifically
+sudo du -xh --max-depth=1 /var/lib/vz/dump | sort -h
+
+# Check templates and images
+sudo du -xh --max-depth=2 /var/lib/vz/template /var/lib/vz/images | sort -h
+```
+
+If `du` is not installed or you want a quick visual scan, `ncdu` is often easier to read:
+
+```bash
+apt update && apt install -y ncdu
+ncdu /var/lib/vz
+```
+
+## What The Example Output Suggests
+
+From the host output that prompted this page, these details matter most:
+
+- `/var/lib/vz` is the critical pressure point, not the root filesystem
+- the host keeps many backup archives under `/var/lib/vz/dump`
+- there are repeated `vzdump` archives for many containers and VMs
+- the file tree under `/var/lib/vz` is normal, but the backup retention is too large for the current allocation
+
+That means the first recovery target is almost always backup retention, not system packages.
+
+## Safe Space-Recovery Targets
+
+### 1) Prune Old Backups
+
+List what exists first:
+
+```bash
+ls -lh /var/lib/vz/dump/
+```
+
+Then remove backups you no longer need, or move them to slower external storage.
+
+If you use `vzdump` retention, prune by policy instead of manually deleting random archives:
+
+```bash
+# Example: keep only recent weekly backups
+vzdump --prune-backups keep-weekly=2 --storage local --all 0
+```
+
+If your backups are just flat files in `/var/lib/vz/dump`, clean them deliberately:
+
+```bash
+# Example: remove an old backup archive after verifying it is not needed
+rm /var/lib/vz/dump/vzdump-lxc-103-2026_03_25-00_19_45.tar.zst
+```
+
+### 2) Move Backups Off The Local Pool
+
+Local storage is convenient, but it should not be the only backup destination if the host is already tight.
+
+Move `vzdump` targets to a secondary pool or NAS-style storage using the backup workflow from [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery).
+
+### 3) Remove Unused ISO Images And Templates
+
+These can quietly grow over time.
+
+```bash
+ls -lh /var/lib/vz/template/iso/
+ls -lh /var/lib/vz/template/cache/
+```
+
+Delete what you no longer need.
+
+### 4) Check For Large Guest Artifacts
+
+Sometimes the host is full because something was copied into the wrong place.
+
+```bash
+find /var/lib/vz -xdev -type f -size +10G -ls
+```
+
+### 5) Clean Package Cache And Logs
+
+These are usually not the main culprit when a dataset is 100% full, but they are still worth clearing once the urgent pressure is gone.
+
+```bash
+apt clean
+journalctl --vacuum-time=7d
+```
+
+## Container-Level Checks
+
+A host can also fill because one guest is larger than planned.
+
+Check the heaviest containers and their storage usage:
+
+```bash
+pct list
+zfs list -o name,used,avail,refer,mountpoint | grep subvol-
+```
+
+If one guest dataset is consuming far more than expected, inspect that container directly:
+
+```bash
+pct exec <CTID> -- df -h
+pct exec <CTID> -- du -xh --max-depth=1 / | sort -h
+```
+
+If the guest itself is the source of the growth, clean that guest from the inside rather than deleting host storage blindly.
+
+## A Practical Recovery Sequence
+
+When you are under pressure, use this order:
+
+1. Identify the full mount and the dataset behind it.
+2. Inspect `/var/lib/vz/dump` and remove or move old backups.
+3. Check `/var/lib/vz/template` and delete unused ISOs or cache files.
+4. Inspect large guest datasets and temporary files.
+5. Clean package caches and logs.
+6. Recheck free space before doing anything else.
+
+## Example Recovery Checklist
+
+```bash
+# 1. Confirm the full mount
+zfs list -o name,used,avail,refer,mountpoint rpool/var-lib-vz
+
+# 2. Inspect backup usage
+sudo du -xh --max-depth=1 /var/lib/vz/dump | sort -h
+
+# 3. Inspect templates and images
+sudo du -xh --max-depth=2 /var/lib/vz/template /var/lib/vz/images | sort -h
+
+# 4. Clean package cache and journal
+apt clean
+journalctl --vacuum-time=7d
+
+# 5. Check space again
+df -h /var/lib/vz
+zfs list -o name,used,avail,refer,mountpoint rpool/var-lib-vz
+```
+
+## Prevent It From Happening Again
+
+The host should not depend on a single saturated local storage area for backups.
+
+### Set Backup Retention
+
+Use a retention policy for `vzdump` backups so the archive directory does not expand forever. The backup guide covers the broader scheduling pattern.
+
+### Put Backups On Dedicated Storage
+
+If possible, store backups on a separate pool or on NAS-style storage instead of keeping them under the same local pool as the running guests.
+
+### Monitor Storage Early
+
+Treat `df -h` and `zfs list` as routine checks, not emergency commands.
+
+If a dataset regularly runs above 80-85%, it is already asking for maintenance.
+
+## Related Topics
+
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the storage model behind `rpool` and `rpool/var-lib-vz`.
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — how to keep `vzdump` from becoming the thing that fills the disk.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where this kind of cleanup fits into the broader host care rhythm.

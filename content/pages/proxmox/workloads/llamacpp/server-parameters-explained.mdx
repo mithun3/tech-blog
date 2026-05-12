@@ -1,0 +1,182 @@
+---
+title: "llama-server Parameters Explained"
+description: "A practical reference for the most-used llama.cpp server parameters, grouped by networking, performance, memory, context, sampling, and operations."
+publishedAt: "2026-05-10"
+updatedAt: "2026-05-10"
+order: 9
+status: published
+---
+
+# llama-server Parameters Explained
+
+This page is a practical map of the options that matter most in real deployments.
+
+It focuses on the parameters you will tune repeatedly in homelab and production-like setups, not every single flag in `--help`.
+
+Upstream reference used for this summary:
+- https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+
+## Mental Model: Tune In This Order
+
+1. **Make it reachable and secure** (`--host`, `--port`, `--api-key`)
+2. **Make it fit memory** (`--n-gpu-layers`, `--ctx-size`, cache types, `--fit`)
+3. **Make it fast enough** (`--threads`, `--threads-batch`, `--flash-attn`, batching)
+4. **Make it stable for long runs** (`--mlock`, `--no-mmap`, metrics, timeouts)
+5. **Then tune output behavior** (temperature and sampling)
+
+## 1) Core Startup And Networking
+
+| Parameter | What it does | Typical use |
+|---|---|---|
+| `-m`, `--model` | Path to GGUF model file | Required in single-model mode |
+| `--host` | Bind address (default `127.0.0.1`) | Use `0.0.0.0` for LAN access |
+| `--port` | HTTP port (default `8080`) | Use a fixed internal port like `8012` |
+| `--api-key` | Enables API key auth | Always enable when exposed beyond localhost |
+| `-a`, `--alias` | Friendly model ID in API responses | Clean model names in Open WebUI |
+| `--api-prefix` | Prefixes all routes | Useful behind reverse proxies |
+| `-to`, `--timeout` | Read/write timeout (seconds) | Raise for slow clients or long generations |
+
+### Minimal single-model command
+
+```bash
+/root/llama.cpp/build/bin/llama-server \
+  --model /root/models/Qwen3-8B-Q4_K_M.gguf \
+  --host 0.0.0.0 \
+  --port 8012 \
+  --api-key your-secret-key
+```
+
+## 2) Memory Fit And Device Placement
+
+These flags decide whether the server starts reliably and whether context fits.
+
+| Parameter | What it does | Rule of thumb |
+|---|---|---|
+| `-ngl`, `--n-gpu-layers` | Number of layers in VRAM | Increase until VRAM is near full but stable |
+| `-c`, `--ctx-size` | Context window size | Start modest, then scale after stability |
+| `-ctk`, `--cache-type-k` | KV cache dtype for keys | Lower precision for larger context |
+| `-ctv`, `--cache-type-v` | KV cache dtype for values | Pair with `cache-type-k` |
+| `-fit`, `--fit` | Auto-adjust unset args to fit memory | Keep enabled unless hand-tuning everything |
+| `-fitt`, `--fit-target` | VRAM headroom target per GPU | Keep safety margin to avoid OOM edges |
+| `-dev`, `--device` | Which devices to offload to | Explicit multi-GPU placement |
+| `-sm`, `--split-mode` | Multi-GPU split behavior | Default `layer` is usually easiest |
+| `-ts`, `--tensor-split` | Per-GPU offload ratios | Use when GPUs are mismatched |
+| `-mg`, `--main-gpu` | Main GPU index | Keep deterministic assignment |
+
+### MoE-specific placement
+
+| Parameter | What it does | When to use |
+|---|---|---|
+| `-cmoe`, `--cpu-moe` | Keep all MoE weights on CPU | Very low VRAM environments |
+| `-ncmoe`, `--n-cpu-moe` | Keep first N MoE layers on CPU | Fine-grained VRAM balancing |
+
+## 3) Throughput And Concurrency
+
+| Parameter | What it does | Practical guidance |
+|---|---|---|
+| `-t`, `--threads` | CPU threads for token generation | Start near physical core count |
+| `-tb`, `--threads-batch` | Threads for prompt/batch work | Often >= `--threads` helps prefills |
+| `-b`, `--batch-size` | Logical max batch size | Increase carefully; watch latency |
+| `-ub`, `--ubatch-size` | Physical micro-batch size | Tune with VRAM and backend behavior |
+| `-fa`, `--flash-attn` | Flash attention on/off/auto | Keep `auto` or `on` when supported |
+| `-np`, `--parallel` | Number of server slots | Raise for multi-user concurrency |
+| `-cb`, `--cont-batching` | Continuous/dynamic batching | Keep enabled for shared endpoints |
+| `--threads-http` | HTTP worker threads | Raise only if HTTP side is bottleneck |
+
+### Stability note for concurrency
+
+Higher `--parallel` improves throughput under load but can increase memory pressure and tail latency. Increase gradually and monitor `/metrics`.
+
+## 4) Long-Run Reliability Flags
+
+| Parameter | What it does | Why it matters |
+|---|---|---|
+| `--mlock` | Lock model in RAM | Prevents paging-related jitter |
+| `--no-mmap` | Disable memory-mapped model file | Slower startup, often fewer runtime stalls |
+| `--sleep-idle-seconds` | Unload model when idle | Saves RAM/VRAM in bursty usage |
+| `--warmup` | Empty warmup run at startup | Reduces first-request surprise latency |
+| `--metrics` | Enable Prometheus endpoint | Required for serious tuning/ops |
+| `--slots` | Slot monitoring endpoint | Useful for queue and slot visibility |
+| `--cache-prompt` | Prefix reuse in KV cache | Big win for repeated prompt prefixes |
+| `--cache-reuse` | Reuse chunks via KV shifting | Helps with long, similar prompts |
+
+### Operational baseline
+
+```bash
+--mlock --no-mmap --metrics --cache-prompt
+```
+
+Then add `--sleep-idle-seconds` only if cold-start reload time is acceptable.
+
+## 5) Output Behavior (Sampling)
+
+These change response style and consistency, not hardware utilization.
+
+| Parameter | What it does | Typical starting point |
+|---|---|---|
+| `--temp` | Randomness | `0.6` to `0.8` |
+| `--top-p` | Nucleus sampling | `0.9` to `0.95` |
+| `--top-k` | Candidate cap | `20` to `50` |
+| `--min-p` | Relative probability floor | `0.02` to `0.08` |
+| `--repeat-penalty` | Penalize repetitions | `1.05` to `1.15` |
+| `--repeat-last-n` | Tokens checked for repetition | `64` is common |
+| `--seed` | Determinism control | Set fixed value for reproducible tests |
+| `--mirostat` + related | Alternative adaptive sampler | Use only when deliberately testing it |
+
+## 6) Chat Template, Tool Use, And API Compatibility
+
+| Parameter | What it does | Use case |
+|---|---|---|
+| `--jinja` | Enables Jinja chat template engine | Recommended for modern chat models |
+| `--chat-template` | Override template | Fixes mismatched defaults |
+| `--chat-template-file` | Custom template file | Advanced custom prompting flows |
+| `--reasoning-format` | Parses reasoning output format | For models with thought tags |
+| `--embedding` | Embedding-focused server mode | Dedicated embedding models |
+| `--rerank` | Enables reranking endpoint | Retrieval pipelines |
+
+## 7) Router Mode Parameters (Multi-Model)
+
+| Parameter | What it does | Typical use |
+|---|---|---|
+| `--models-dir` | Discover models from directory | Easiest multi-model bootstrap |
+| `--models-preset` | INI preset file per model | Production-style per-model tuning |
+| `--models-max` | Max loaded models at once | Controls memory pressure |
+| `--models-autoload` | Auto-load on first request | Keep enabled for convenience |
+| `--no-models-autoload` | Manual load via API | Tighter operational control |
+
+If you run one endpoint for many models, these matter more than single-model `--model` flags.
+
+## 8) Three Ready-Made Profiles
+
+### A. Single-user quality profile
+
+```bash
+--threads 8 --threads-batch 8 --ctx-size 32768 --temp 0.7 --top-p 0.95
+```
+
+### B. Shared homelab endpoint profile
+
+```bash
+--parallel 2 --cont-batching --cache-prompt --metrics --timeout 600
+```
+
+### C. Constrained VRAM profile
+
+```bash
+--n-gpu-layers 35 --ctx-size 131072 --cache-type-k q4_0 --cache-type-v q4_0 --mlock --no-mmap
+```
+
+## 9) How To Tune Safely (Quick Loop)
+
+1. Fix one benchmark prompt and one chat prompt.
+2. Record baseline from `/v1/chat/completions` timings and `/metrics`.
+3. Change one flag family at a time: memory, then throughput, then sampling.
+4. Keep notes on throughput, first-token latency, and OOM/reload behavior.
+5. Keep the best-known stable profile in your systemd service.
+
+## Related Topics
+
+- [Build And Serve](/pages/proxmox/workloads/llamacpp/build-and-serve)
+- [Limited VRAM Playbook (Large Models)](/pages/proxmox/workloads/llamacpp/limited-vram-playbook)
+- [Router Mode](/pages/proxmox/workloads/llamacpp/router-mode)
+- [Router Mode Deployment Example](/pages/proxmox/workloads/llamacpp/router-mode-deployment)

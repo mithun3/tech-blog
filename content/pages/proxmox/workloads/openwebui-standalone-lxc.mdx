@@ -1,4 +1,3 @@
-If the lab already standardised on [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) or [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), the same OpenAI-compatible connection flow applies here.
 ---
 title: "Open WebUI Standalone Frontend On Proxmox"
 description: "Run Open WebUI in a lightweight Proxmox LXC, keep inference on remote Ollama or llama.cpp nodes, and move the browser layer out of the heavier combined stack."
@@ -44,7 +43,7 @@ Proxmox host
   -> remote llama.cpp endpoint   (OpenAI-compatible API)
 ```
 
-If the lab already standardised on [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) or [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode), the same OpenAI-compatible connection flow applies here. The commands below keep the original remote-backend values from the source notes so the working examples stay intact.
+If the lab already standardised on [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) or [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), the same OpenAI-compatible connection flow applies here. The commands below keep the original remote-backend values from the source notes so the working examples stay intact.
 
 ## What The Script Still Installs
 
@@ -308,7 +307,7 @@ curl -s -H "Authorization: Bearer <your-api-key>" \
   http://192.168.50.45:65535/v1/models | python3 -m json.tool
 ```
 
-If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
+If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
 If the lab already uses [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode), keep the same OpenAI connection flow and substitute that endpoint instead.
 
 ### Useful Environment Variables
@@ -517,8 +516,8 @@ pct start 103
 ## Related Topics
 
 - [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) - the combined path first, plus the dedicated Ollama follow-on when you still want Open WebUI living with the runtime.
-- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp-inference-lxc) - the lower-level OpenAI-compatible backend when you want tighter runtime control.
-- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp-router-mode) - the cleaner multi-model backend once one model no longer feels like enough.
+- [llama.cpp Inference On Proxmox](/pages/proxmox/workloads/llamacpp) - the lower-level OpenAI-compatible backend when you want tighter runtime control.
+- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode) - the cleaner multi-model backend once one model no longer feels like enough.
 - [OpenClaw On Proxmox](/pages/proxmox/workloads/openclaw) - the assistant layer when the same local model estate should power Telegram, Discord, and scheduled workflows instead of only a browser UI.
 
 [^1]: Open WebUI documents both the bundled-Ollama path and the "Ollama on a different server" path, and notes that the first account created becomes the administrator for that instance: [Open WebUI Quick Start](https://docs.openwebui.com/getting-started/quick-start/).
