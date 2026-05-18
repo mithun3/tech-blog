@@ -1,0 +1,121 @@
+---
+title: "USB Over PCIe"
+description: "USB is not a separate bus. USB controllers are PCIe devices, USB4 is Thunderbolt over PCIe, and every USB port on your machine routes through a PCIe lane internally."
+publishedAt: "2026-03-05"
+order: 4
+status: published
+---
+
+# USB Over PCIe
+
+USB feels like its own thing. You plug a cable in, things work. The port has a name — USB 3.2 Gen 2, Thunderbolt 4, USB4 — and none of those names mention PCIe.
+
+But underneath every USB port on your system is a USB controller, and that controller is a PCIe device. USB is just a user-facing protocol that lives on top of the same PCIe infrastructure everything else uses.
+
+## The Controller Chain
+
+When you plug something into a USB port, the signal does not go directly to the CPU. It goes to a USB controller chip, which is wired to the chipset over PCIe, which then connects to the CPU over DMI.
+
+```text
+USB device  →  USB port  →  USB controller (PCIe device)
+                                    |
+                              PCIe x1 or x4
+                                    |
+                              Chipset (PCH)
+                                    |
+                              DMI bus
+                                    |
+                                  CPU
+```
+
+The USB controller is responsible for multiplexing multiple ports onto that single PCIe link. If you have six rear USB 3.2 Gen 2 ports on a motherboard, they typically share one or two USB controllers, each wired up to the chipset via a PCIe x1 or x4 lane.
+
+## What That Means For Bandwidth
+
+USB 3.2 Gen 2 has a theoretical maximum of 10 Gbps per port (~1.2 GB/s). A PCIe 3.0 x1 link provides ~1 GB/s.
+
+That is a tight fit.
+
+```text
+USB 3.2 Gen 2 port max:   ~1.2 GB/s per port
+PCIe 3.0 x1 controller:  ~1.0 GB/s total
+
+Multiple ports sharing one PCIe x1 controller:
+  Port A running at 900 MB/s
+  Port B running at 100 MB/s
+  Total: 1.0 GB/s (the controller ceiling, not per-port)
+```
+
+This is why plugging in two fast USB drives and copying from both simultaneously does not give you 2× the speed. They are sharing a controller, and the controller is sharing a PCIe lane.
+
+Boards with multiple USB controllers spread the load. If port A and port B are on different controllers, they do not compete. The board manual or a tool like `lsusb -t` on Linux will show you which ports share a controller.
+
+## USB4 and Thunderbolt Are PCIe In A Cable
+
+Thunderbolt 3 and 4, and USB4, are different at the protocol level but they are all implemented as PCIe 3.0 x4 links under the surface.
+
+```text
+USB4 / Thunderbolt 4 — what is actually in the cable:
+
+  ┌────────────────────────────────────────────┐
+  |  PCIe 3.0 x4     (up to ~8 GB/s)          |  ← device data, eGPU, NVMe dock
+  |  DisplayPort 2.0 (up to 8K display signal) |  ← monitor output
+  |  USB 3.2 Gen 2   (10 Gbps USB devices)     |  ← regular USB devices
+  |  Power delivery  (up to 100W)              |  ← charging
+  └────────────────────────────────────────────┘
+  All multiplexed over a single USB-C connector at 40 Gbps
+```
+
+When you plug a Thunderbolt 4 dock into your laptop or desktop, the PCIe bus inside the dock is literally an extension of your system's PCIe bus. The devices in the dock — NVMe drives, Ethernet adapters, display outputs — are all PCIe devices communicating over that cable.
+
+## The eGPU Bottleneck
+
+External GPUs (eGPUs) connect via Thunderbolt. Since Thunderbolt is PCIe 3.0 x4 in a cable, an eGPU is limited to the bandwidth of a PCIe 3.0 x4 link: ~3.9 GB/s.
+
+A desktop GPU slot runs at PCIe 4.0 x16: ~31.5 GB/s.
+
+```text
+Internal GPU slot (PCIe 4.0 x16):  ~31.5 GB/s available
+eGPU over Thunderbolt 4 (PCIe 3.0 x4):  ~3.9 GB/s available
+
+  That is roughly 8× less bandwidth.
+```
+
+This is why eGPUs are suitable for productivity and moderate gaming but cannot compete with an internal card for demanding workloads. The GPU itself is fast. The cable is the bottleneck.
+
+## Thunderbolt Controllers Are Also PCIe Devices
+
+The Thunderbolt controller chip on your motherboard or laptop is itself a PCIe device attached to the chipset. If it is on a PCIe x4 link, the 40 Gbps cable is the bottleneck. If it is on a PCIe x1 link, the internal connection is the bottleneck — before the cable even enters the picture.
+
+```text
+Laptop with TB4 on PCIe x1 Gen 3:
+
+  TB4 cable capacity:         ~40 Gbps (~5 GB/s)
+  PCIe x1 Gen 3 internal:     ~8 Gbps (~1 GB/s)
+  Effective ceiling:          ~1 GB/s   ← limited by the internal link
+
+Laptop with TB4 on PCIe x4 Gen 3:
+
+  TB4 cable capacity:         ~40 Gbps (~5 GB/s)
+  PCIe x4 Gen 3 internal:     ~32 Gbps (~4 GB/s)
+  Effective ceiling:          ~4 GB/s   ← limited by the internal link (close to cable max)
+```
+
+This explains why Thunderbolt performance varies significantly between machines, even when both advertise "Thunderbolt 4."
+
+## USB Hubs And Shared Bandwidth
+
+A USB hub does not add bandwidth. It is a multiplexer that lets multiple devices share the same upstream port.
+
+```text
+Host USB 3.2 Gen 2 port  (10 Gbps to controller)
+          |
+       USB hub
+      /    |    \
+  Dev A   Dev B   Dev C
+
+All three devices share the 10 Gbps upstream link.
+If Dev A saturates the link, Dev B and Dev C wait.
+```
+
+Connecting a hub to a port on a different controller separates the traffic. If your board has two independent USB controllers, spreading devices across them avoids contention. The only way to know which ports belong to which controller is to check the manual or inspect the system.

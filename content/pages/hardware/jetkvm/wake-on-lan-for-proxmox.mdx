@@ -12,8 +12,8 @@ This page owns the host-side Wake-on-LAN path.
 
 It does not cover the Raspberry Pi admin terminal and it does not repeat the base JetKVM cabling. Those already have their own pages.
 
-- For the JetKVM hardware and browser-console workflow, start with [JetKVM](/pages/jetkvm).
-- For the Raspberry Pi client build, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal).
+- For the JetKVM hardware and browser-console workflow, start with [JetKVM](/pages/hardware/jetkvm).
+- For the Raspberry Pi client build, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/hardware/raspberry-pi/jetkvm-admin-terminal).
 
 What this page covers is the practical part that makes remote power-on real: firmware settings, NIC checks, the Linux commands that arm Wake-on-LAN, and the Proxmox persistence step that keeps it from quietly resetting after the next reboot.
 
@@ -129,9 +129,9 @@ If your JetKVM firmware exposes Wake-on-LAN in the UI, use that as the sender. I
 
 ## Related Topics
 
-- [JetKVM](/pages/jetkvm) - the out-of-band console layer that becomes useful again as soon as the host wakes.
+- [JetKVM](/pages/hardware/jetkvm) - the out-of-band console layer that becomes useful again as soon as the host wakes.
 - [Homelab Installation](/pages/proxmox/setup/homelab-installation) - the firmware and bring-up guide that should align with your remote-recovery model.
-- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal) - the small dedicated client if you want the console and the sender close to the rack.
+- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/hardware/raspberry-pi/jetkvm-admin-terminal) - the small dedicated client if you want the console and the sender close to the rack.
 
 [^1]: The Debian `ethtool` manual documents `ethtool -s DEVNAME wol g`, where `g` enables wake on MagicPacket: https://manpages.debian.org/bookworm/ethtool/ethtool.8.en.html
 [^2]: Proxmox documents host networking in `/etc/network/interfaces` and recommends `ifreload -a` with ifupdown2 when manual edits are made: https://pve.proxmox.com/wiki/Network_Configuration

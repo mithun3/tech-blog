@@ -1,0 +1,29 @@
+---
+title: "Hardware"
+description: "PCIe lanes, NVMe, USB internals, and the misconceptions that quietly confuse most hardware users."
+publishedAt: "2025-12-10"
+order: 1
+status: published
+---
+
+# Hardware
+
+Most people use hardware every day without knowing what is actually happening inside the box.
+
+That is fine right up until you are buying a motherboard, building a homelab, adding a second GPU, or wondering why your second NVMe slot seems slower. Then it matters.
+
+This section covers the PCIe bus — the backbone that almost everything inside your machine connects through — and the misconceptions that follow people around for years.
+
+## In This Section
+
+- [PCIe Fundamentals](/pages/hardware/pcie-fundamentals) — what lanes are, how they attach to the CPU, and why not all M.2 slots are equal.
+- [PCIe Generations](/pages/hardware/pcie-generations) — Gen 1 through Gen 5, what each generation actually means in bandwidth numbers, and when the upgrade matters.
+- [PCIe Devices](/pages/hardware/pcie-devices) — how GPUs, NICs, capture cards, and storage controllers share and consume lanes.
+- [USB Over PCIe](/pages/hardware/usb-over-pcie) — USB is not its own bus. It rides PCIe internally, and that has practical consequences.
+- [Common Misconceptions](/pages/hardware/common-misconceptions) — the five things most people have wrong about PCIe.
+- [Builds](/pages/hardware/builds) — real hardware configurations with PCIe topology, constraints, and use cases documented per machine.
+- [Raspberry Pi](/pages/hardware/raspberry-pi) — Pi-specific infrastructure guides now grouped under Hardware.
+
+## Suggested Reading Order
+
+Start with PCIe Fundamentals to get the mental model right. Generations and Devices build on that. USB Over PCIe is the most surprising section for most people. Read Misconceptions last — it will make more sense once the fundamentals are in place. The Builds section applies everything to real machines.

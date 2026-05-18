@@ -1,0 +1,101 @@
+---
+title: "PCIe Devices"
+description: "How GPUs, NICs, capture cards, and storage controllers use PCIe lane widths, and what x8 versus x16 actually means for real workloads."
+publishedAt: "2026-02-18"
+order: 3
+status: published
+---
+
+# PCIe Devices
+
+Different devices need different amounts of bandwidth. Lane width is how PCIe matches the pipe to the demand.
+
+Understanding this means you stop wondering why your GPU slot is x16 and your NIC slot is x4, and you start making better decisions about what to plug in where.
+
+## Lane Widths
+
+The `x` number on a PCIe slot describes how many lanes are active. More lanes means a wider pipe.
+
+```text
+x1   = 1 lane   = ~1 GB/s (Gen 3), ~2 GB/s (Gen 4)
+x4   = 4 lanes  = ~4 GB/s (Gen 3), ~8 GB/s (Gen 4)
+x8   = 8 lanes  = ~8 GB/s (Gen 3), ~16 GB/s (Gen 4)
+x16  = 16 lanes = ~16 GB/s (Gen 3), ~32 GB/s (Gen 4)
+```
+
+A physical x16 slot can operate at x16, x8, x4, or x1 depending on what is negotiated. The slot shape stays the same; the active lanes change.
+
+## GPUs
+
+Graphics cards use x16 for historical and practical reasons. The GPU needs to stream large textures and framebuffers to and from system memory, and x16 ensures there is headroom for even the most bandwidth-hungry scenarios.
+
+```text
+RTX 4090 bandwidth needs by scenario:
+
+  1440p gaming      ~5–8 GB/s actual bus usage
+  4K gaming         ~8–12 GB/s actual bus usage
+  AI inference      ~10–18 GB/s actual bus usage
+
+  x16 Gen 4 available: ~32 GB/s
+  x8  Gen 4 available: ~16 GB/s
+  x4  Gen 4 available: ~8 GB/s
+```
+
+The practical takeaway is that x8 Gen 4 provides ~16 GB/s — enough headroom for the vast majority of gaming and even demanding AI inference workloads. Real-world gaming benchmarks show a 1–3% performance difference between x16 and x8 Gen 4. At x4, some scenarios show 10–20% loss where bandwidth starts to genuinely limit the GPU.
+
+### Bifurcation: Running Two GPUs
+
+When a board bifurcates a x16 slot into two x8 slots, it is splitting the same physical wiring in half. Each GPU gets 8 lanes instead of 16.
+
+```text
+Single GPU:
+  PCIe x16 slot  →  GPU at x16  (32 GB/s)
+
+Dual GPU (bifurcated):
+  PCIe x16 slot  →  GPU A at x8  (16 GB/s)
+                 →  GPU B at x8  (16 GB/s)
+```
+
+The total bandwidth is the same. Each card just gets half. For gaming this barely matters. For AI training that saturates memory bandwidth, x8 has a measurable but usually acceptable cost.
+
+## Other Devices and Their Lane Requirements
+
+Most devices do not need x16. The GPU is the exception, not the rule.
+
+| Device | Typical width | Bandwidth needed | Notes |
+|--------|--------------|------------------|-------|
+| GPU (gaming) | x16 | 8–16 GB/s peak | x8 Gen 4 is effectively equal |
+| GPU (AI training) | x16 | up to 32 GB/s | benefits from full x16 |
+| NVMe SSD | x4 | up to 16 GB/s (Gen 5) | CPU-direct slot preferred |
+| 10 Gigabit NIC | x4 | ~1.25 GB/s | x1 Gen 3 technically sufficient |
+| 25 Gigabit NIC | x8 | ~3.1 GB/s | x4 Gen 3 usually enough |
+| 4K capture card | x4 | ~1–2 GB/s | x4 Gen 3 handles 4K/60fps |
+| RAID controller | x8 | 3–8 GB/s | depends on drive count |
+| Thunderbolt 4 card | x4 | up to 5 GB/s | PCIe 3.0 x4 per port |
+| WiFi 6E card | x1 | ~600 MB/s | rarely saturates a single lane |
+| Audio interface | x1 | <100 MB/s | latency matters more than bandwidth |
+
+## Physical Slot Shapes vs. Electrical Widths
+
+A physical x16 slot does not always run at x16. This is a common source of confusion.
+
+```text
+Board layout example (mid-range ATX):
+
+  Slot 1 (physical x16)  →  electrically x16, CPU-direct  ← primary GPU
+  Slot 2 (physical x16)  →  electrically x4, chipset      ← looks like x16, runs at x4
+  Slot 3 (physical x1)   →  electrically x1, chipset      ← NIC, WiFi card
+
+Slot 2 will accept a GPU physically. The GPU will negotiate x4.
+At Gen 4 that is ~8 GB/s — fine for lightweight AI, not great for a gaming card.
+```
+
+The board manual specifies the electrical width for every slot. The physical slot shape tells you what card fits, not how fast it will run.
+
+## Lane Sharing Between Slots
+
+On many consumer boards, enabling certain slots disables others because they share the same CPU or chipset lanes.
+
+A common pattern is that installing a device in slot 2 disables one M.2 slot, because both draw from the same pool of chipset lanes. The manual will note this as something like "M.2_2 slot is disabled when PCIE_3 is populated."
+
+This is not a flaw. It is a lane budget decision the board makes to keep costs reasonable. Workstation and HEDT (High-End Desktop) platforms have more CPU-direct lanes and do not have this constraint as often.

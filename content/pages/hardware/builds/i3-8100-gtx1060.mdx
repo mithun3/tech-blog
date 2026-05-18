@@ -1,0 +1,99 @@
+---
+title: "i3-8100 · GTX 1060 6 GB"
+description: "The floor — a budget Coffee Lake machine with a Pascal GPU and 24 GB RAM that still runs large language models with the right llama.cpp configuration."
+publishedAt: "2026-05-05"
+order: 3
+status: published
+---
+
+# i3-8100 · GTX 1060 6 GB
+
+This is the floor.
+
+Not a floor as in "it barely runs things." A floor as in — this is the minimum viable configuration where local AI inference is still usable. Everything above this is better. This is where it starts.
+
+## Specs
+
+```text
+Motherboard:  Intel 300-series  (LGA 1151, Coffee Lake)
+CPU:          Intel Core i3-8100  (4 cores, 4 threads, 3.6 GHz, 65W TDP, no Hyper-Threading)
+RAM:          24 GB DDR4
+GPU:          NVIDIA GeForce GTX 1060 6 GB  (PCIe 3.0, Pascal architecture)
+Storage:      SATA SSD (system), SATA HDD (data)
+```
+
+## Why 24 GB RAM Matters Here
+
+The GTX 1060 has 6 GB VRAM. That is not enough to fully load most modern language models worth using. The rest of the model layers fall back to system RAM and get processed on CPU.
+
+```text
+Model loading strategy on this rig:
+
+  GPU VRAM (6 GB)  →  hottest layers (attention, first/last layers)
+  System RAM (24 GB)  →  remaining layers, processed by CPU
+  PCIe 3.0 x16 link  →  data crosses this boundary every inference step
+```
+
+24 GB of system RAM is what makes this tolerable. With 8 GB you would be paging to disk mid-inference. With 16 GB you could run smaller models comfortably. 24 GB gives enough headroom to load a meaningful portion of a 7B or even a trimmed-down larger model into RAM without thrashing.
+
+## PCIe Topology
+
+The i3-8100 is a Coffee Lake consumer CPU. It provides 16 CPU-direct PCIe 3.0 lanes.
+
+```text
+Intel Core i3-8100
+  16× PCIe 3.0 CPU-direct lanes
+  |
+  └── x16  GTX 1060 6 GB  →  ~16 GB/s available
+
+Intel 300-series Chipset
+  |
+  ├── SATA controller
+  ├── USB controllers
+  └── (no M.2 NVMe on this build)
+```
+
+All 16 CPU-direct lanes go to the GPU. There is no PCIe 4.0 here — this platform predates it by two generations. The GTX 1060 is also a PCIe 3.0 card, so both sides of the link are Gen 3. The GPU runs at its rated bandwidth with no downgrade.
+
+The bandwidth available to the GPU is ~16 GB/s. The GPU itself is not close to saturating that — the GTX 1060's memory bandwidth tops out at 192 GB/s internally (GDDR5), and the workload here is inference, not training. The PCIe link is not the bottleneck on this machine. The VRAM ceiling is.
+
+## The Constraint: 6 GB VRAM
+
+6 GB is the hard wall for this rig.
+
+```text
+What fits in 6 GB:
+  - Quantized 7B models (Q4 or Q5):  ~4–5 GB  →  fits fully on GPU
+  - Phi-3 Mini (3.8B, Q4):           ~2.5 GB  →  runs entirely on GPU, fast
+
+What overflows:
+  - 13B models (Q4):                ~8 GB    →  ~8 layers to CPU RAM
+  - Mistral 7B (Q8):                ~8 GB    →  same situation
+  - Larger models:  only partial layers on GPU, rest on CPU
+
+Once layers start crossing PCIe per token, throughput drops significantly.
+Each token requires data movement across the PCIe bus for every CPU-side layer.
+```
+
+The [Limited VRAM Playbook](/pages/proxmox/workloads/llamacpp/limited-vram-playbook) covers the exact llama.cpp configuration for this rig — which flags help, which ones do not, and the Docker command pattern that makes it stable over long sessions.
+
+## What This Rig Taught
+
+Running AI inference on this hardware clarified a few things that benchmarks on high-end rigs do not:
+
+- **VRAM is the first limit, not GPU compute.** The GTX 1060's compute is plenty for inference. The VRAM ceiling is what shapes every other decision.
+- **System RAM quality matters.** With layers spilling to CPU, RAM speed and capacity become part of the inference pipeline. The i3-8100's dual-channel DDR4 at least keeps that path reasonable.
+- **PCIe generation is not the bottleneck here.** The machine runs PCIe 3.0. Upgrading to Gen 4 would not change throughput — the constraint is VRAM overflow, not the GPU link speed.
+- **`--no-mmap` and `--mlock` are not optional.** On a system where model data is in RAM and inference runs for hours, OS memory paging silently degrades performance. Locking the model in memory keeps behaviour consistent.
+
+## Use Case
+
+This machine runs inference on smaller quantized models. It is fast enough to be conversational for 7B Q4 models running fully on GPU. For larger models, patience is required.
+
+It is also what produced most of the data points in the limited-VRAM pages. If something is documented as "does not help," it was tested here.
+
+## Related Pages
+
+- [Limited VRAM Playbook](/pages/proxmox/workloads/llamacpp/limited-vram-playbook) — exact configuration for running large models on this hardware
+- [PCIe Fundamentals](/pages/hardware/pcie-fundamentals) — why the lane topology on this CPU is simpler than it looks
+- [X570 · 5950X · Dual RTX 3090](/pages/hardware/builds/x570-5950x-rtx3090) — the same inference workloads on the high-end rig

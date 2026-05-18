@@ -1,0 +1,25 @@
+---
+title: "Builds"
+description: "Hardware builds across different use cases — high-end homelab AI rigs, budget inference machines, and server platforms."
+publishedAt: "2026-04-10"
+order: 2
+status: published
+---
+
+# Builds
+
+Theory only goes so far. These are the actual machines — the specs, the PCIe topology, the constraints, and what each build is used for.
+
+Not every build is optimal. Some are budget-constrained, some are experiments, one is a dual-socket server that is still being assembled. The point is to document real configurations and what they mean in practice — not ideal specs on paper.
+
+## In This Section
+
+- [X570 · Ryzen 9 5950X · Dual RTX 3090](/pages/hardware/builds/x570-5950x-rtx3090) — the primary homelab rig. High core count, 48 GB VRAM across two GPUs, PCIe 4.0.
+- [Supermicro X10DRC-LN4 · Xeon E5-2696 V4](/pages/hardware/builds/xeon-e5-2696v4) — a dual-socket server platform being built out for compute and VM workloads.
+- [i3-8100 · GTX 1060 6 GB](/pages/hardware/builds/i3-8100-gtx1060) — the floor. A minimal AI inference machine that documents what is possible on constrained hardware.
+
+## What These Pages Cover
+
+Each build page covers the PCIe topology — which devices are CPU-direct, what shares chipset lanes, and where the bandwidth constraints actually are. That is the thing most build guides skip.
+
+The specs alone do not tell you whether your second NVMe slot competes with your GPU, whether a dual-GPU setup is a true bifurcation or one card running at x4, or why your Thunderbolt port tops out lower than expected. The topology does.

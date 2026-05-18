@@ -15,7 +15,7 @@ You already know why the lab wants a second DNS sinkhole. What you need now is a
 
 If you want the shared fast path first, start with [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts). This page is the more opinionated version for the secondary Pi-hole container layout I actually use.
 
-The networking-side design lives in [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab). The dedicated Pi build lives in [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b). This page only covers the Proxmox workload layer.
+The networking-side design lives in [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab). The dedicated Pi build lives in [Pi-hole On Raspberry Pi 4B](/pages/hardware/raspberry-pi/pihole-4b). This page only covers the Proxmox workload layer.
 
 ## Before You Start
 
@@ -299,7 +299,7 @@ If the service is unhealthy instead of just misconfigured, Pi-hole's own repair 
 ## Related Topics
 
 - [Pi-hole In A Homelab](/pages/networking/homelab-architecture/pihole-in-a-homelab) — the networking-side architecture, failover, and upstream DNS decisions.
-- [Pi-hole On Raspberry Pi 4B](/pages/raspberry-pi/pihole-4b) — the dedicated Pi deployment path when the DNS node should live on its own hardware.
+- [Pi-hole On Raspberry Pi 4B](/pages/hardware/raspberry-pi/pihole-4b) — the dedicated Pi deployment path when the DNS node should live on its own hardware.
 - [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — the broader Proxmox backup routines around containers and workloads.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where this container fits into the regular host maintenance window.
 - [Secure Service Exposure On Proxmox](/pages/proxmox/workloads/service-exposure) — the place to decide whether the admin UI should be reachable remotely and, if so, through what layer.

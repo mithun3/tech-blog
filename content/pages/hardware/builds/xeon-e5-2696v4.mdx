@@ -1,0 +1,174 @@
+---
+title: "Supermicro X10DRC-LN4 · Xeon E5-2696 V4"
+description: "A dual-socket Broadwell-EP server platform being built out for compute and VM workloads — PCIe 3.0, ECC RAM, and four onboard 10GbE ports."
+publishedAt: "2026-05-16"
+order: 2
+status: published
+---
+
+# Supermicro X10DRC-LN4 · Xeon E5-2696 V4
+
+This one is still being assembled.
+
+It is a departure from consumer hardware — a dual-socket server board, a Broadwell-EP Xeon, and the kind of platform that trades raw per-core speed for core density, ECC memory, and PCIe lane abundance.
+
+## Specs (Current State)
+
+```text
+Motherboard:  Supermicro X10DRC-LN4+
+CPU:          2× Intel Xeon E5-2696 V4  (44 cores, 88 threads total, 2.2 GHz base / 2.8 GHz boost, 150W each)
+RAM:          SK Hynix DDR4 2666V ECC RDIMM  4× 16 GB  =  64 GB  (expandable to 2 TB)
+GPU:          None yet
+Storage:      TBD
+Network:      4× 10 GbE onboard (the LN4 in the board name)
+IPMI:         Dedicated management port (out-of-band access)
+```
+
+## Why This Platform
+
+Consumer platforms top out around 16–24 CPU-direct PCIe lanes and a handful of memory slots. Server platforms are built differently.
+
+The X10DRC-LN4+ supports two LGA 2011-3 sockets. A single Xeon E5 v4 provides 40 PCIe 3.0 lanes. Two sockets give access to 80 lanes total, with the inter-socket QPI link handling CPU-to-CPU communication at up to 9.6 GT/s.
+
+The result is a platform where you can populate multiple x16 PCIe slots, multiple NVMe drives, onboard 10 GbE, and an IPMI controller without the lane-sharing compromises that define consumer boards.
+
+## PCIe Topology
+
+```text
+CPU Socket 1 (Xeon E5-2696 V4)
+  40× PCIe 3.0 lanes
+  |
+  ├── PCIe x16  →  expansion slot 1
+  ├── PCIe x16  →  expansion slot 2  (or x8 each if bifurcated)
+  ├── PCIe x8   →  chipset / south bridge connection
+  └── QPI link  →  CPU Socket 2 (9.6 GT/s)
+
+CPU Socket 2 (Xeon E5-2696 V4)
+  40× PCIe 3.0 lanes
+  |
+  ├── PCIe x16  →  expansion slot 3
+  └── PCIe x16  →  expansion slot 4
+
+Supermicro server chipset (C612)
+  |
+  ├── IPMI controller
+  ├── SATA / SAS ports
+  ├── USB
+  └── PCIe x4 slots (additional low-speed expansion)
+```
+
+With both CPUs installed, the board has enough CPU-direct lanes to run multiple GPUs at full x16, unlike consumer boards where the second slot drops to chipset x4.
+
+## The ECC Memory Difference
+
+The SK Hynix DDR4 2666V modules are ECC Registered DIMMs. This is server memory.
+
+ECC (Error-Correcting Code) memory detects and corrects single-bit memory errors transparently. Registered (buffered) DIMMs add a register between the memory controller and the DRAM chips, which reduces electrical load and allows more DIMMs per channel.
+
+```text
+Consumer DDR4 (non-ECC):
+  Memory error  →  data corruption, crash, or silent wrong result
+
+ECC DDR4:
+  1-bit error   →  automatically corrected, logged
+  2-bit error   →  detected and flagged (system halts rather than corrupt data)
+```
+
+For a machine running VMs, ZFS storage, or anything where silent data corruption is worse than a crash, ECC is worth having. The E5 platform requires it — these CPUs only support registered ECC memory.
+
+The current 64 GB (4× 16 GB) can scale significantly. The X10DRC-LN4+ supports up to 2 TB with LRDIMMs across 16 DIMM slots per socket.
+
+## The Four Onboard 10 GbE Ports
+
+The LN4 suffix on this board means four onboard 10 Gigabit Ethernet ports. No add-in card needed.
+
+```text
+4× Intel 10 GbE  →  each port ~1.25 GB/s  →  4 independent channels
+
+Use cases:
+  - Direct 10 GbE connections to NAS, storage, or other servers
+  - Aggregated links (LACP bonding) for higher throughput or failover
+  - Separate network segments (storage, management, guest traffic)
+  - Proxmox bridge per port for VM isolation
+```
+
+Having four physical 10 GbE ports removes the need to carve PCIe slots for NICs, which on a server doing storage, compute, and management simultaneously makes the layout cleaner.
+
+## IPMI
+
+Supermicro boards include IPMI (Intelligent Platform Management Interface) — a dedicated management controller with its own network port, separate from the main system.
+
+```text
+IPMI gives you:
+  - Power on / off / reset from anywhere on the network
+  - KVM-over-IP (keyboard, video, mouse in a browser tab)
+  - Serial console access
+  - Fan and temperature monitoring
+  - Event logs
+
+All of this works even when the OS is down, the system is powered off, or the
+main network interfaces are misconfigured.
+```
+
+For a server that lives in a rack or a corner of a room without a monitor attached, IPMI is the operational backbone. It replaces what the JetKVM does for consumer hardware on this platform.
+
+## What It Will Be Used For
+
+Current and planned use for this machine:
+
+- additional Proxmox node for the homelab cluster
+- dedicated compute capacity for heavier VM workloads
+- potential GPU expansion now that both sockets are populated and full lane budget is available
+- high-bandwidth storage node, taking advantage of the onboard 10 GbE
+
+Both CPU sockets are now populated, so the platform is running at its dual-socket core and lane topology.
+
+## Dual-Socket Xeon vs X570 (5950X) Build
+
+This board is fundamentally a different class of platform from the X570 rig.
+
+The X570 + 5950X machine is a high-frequency consumer platform with excellent single-thread responsiveness and PCIe 4.0. The Supermicro dual-socket platform is about aggregate resources: more total cores, more total memory channels, more total PCIe lanes, and cleaner multi-device expansion.
+
+```text
+At a glance:
+
+X570 + 5950X:
+  - 1 socket
+  - 16C/32T total
+  - 24 CPU-direct PCIe lanes
+  - Higher clocks, lower memory latency
+  - Better for single-GPU + mixed desktop-style workloads
+
+X10DRC-LN4+ + dual E5-2696 v4:
+  - 2 sockets
+  - 44C/88T total
+  - 80 PCIe lanes total
+  - More RAM capacity and I/O expansion headroom
+  - Better for many VMs, dense services, and lane-heavy expansion
+```
+
+| Area | X570 + Ryzen 9 5950X | X10DRC-LN4+ + Xeon E5-2696 v4 (dual CPU) |
+|---|---|---|
+| CPU topology | Single socket | Dual socket (NUMA) |
+| Core count | 16C / 32T | 44C / 88T |
+| Clock behavior | Higher boost clocks | Lower per-core clocks, higher aggregate threads |
+| PCIe generation | PCIe 4.0 | PCIe 3.0 |
+| CPU-direct lanes | 24 | 80 total across both CPUs |
+| Memory platform | Consumer DDR4 | ECC RDIMM/LRDIMM, much larger capacity ceiling |
+| GPU placement flexibility | Limited; second GPU often lane-constrained on consumer boards | Strong; multiple x16 slots with more direct lane budget |
+| Operational model | Fast all-rounder | Capacity and expansion-first server platform |
+
+### What This Means In Practice
+
+- If you care about single-thread speed and fast response for interactive workloads, the 5950X platform feels snappier.
+- If you care about running many VMs, large memory footprints, and multiple add-in cards without fighting lane sharing, the dual-socket Xeon platform wins.
+- If you need PCIe 4.0 storage or GPU bandwidth, X570 has the generation advantage.
+- If you need raw lane count and server-style expansion at lower cost, the X10DRC-LN4+ platform is the stronger long-run base.
+
+For this lab, the two systems are complementary: X570 stays the high-clock AI/inference workhorse, while the dual-socket Xeon platform becomes the capacity node for heavier consolidation and expansion.
+
+## Related Pages
+
+- [Proxmox Fundamentals](/pages/proxmox/basics/proxmox-fundamentals)
+- [PCIe Fundamentals](/pages/hardware/pcie-fundamentals) — CPU-direct lanes and why 40 lanes per socket matters
+- [X570 · 5950X · Dual RTX 3090](/pages/hardware/builds/x570-5950x-rtx3090) — the consumer-platform contrast

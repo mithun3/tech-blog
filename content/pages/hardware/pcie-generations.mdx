@@ -1,0 +1,108 @@
+---
+title: "PCIe Generations"
+description: "PCIe Gen 1 through Gen 5, what the bandwidth numbers actually mean, and when a generation upgrade matters for real workloads."
+publishedAt: "2026-01-26"
+order: 2
+status: published
+---
+
+# PCIe Generations
+
+Each new PCIe generation doubles the per-lane bandwidth of the previous one. The generation number tells you the signal speed; the lane width (x1, x4, x16) tells you how many lanes are bonded together.
+
+Both numbers matter. A Gen 3 x4 link and a Gen 4 x4 link use the same number of physical wires, but one moves twice the data.
+
+## The Bandwidth Table
+
+| Generation | Released | Per-lane (GT/s) | Per-lane (GB/s) | x4 total | x16 total |
+|------------|----------|-----------------|-----------------|----------|-----------|
+| Gen 1 | 2003 | 2.5 | ~0.25 | ~1 GB/s | ~4 GB/s |
+| Gen 2 | 2007 | 5.0 | ~0.5 | ~2 GB/s | ~8 GB/s |
+| Gen 3 | 2010 | 8.0 | ~1.0 | ~3.9 GB/s | ~15.8 GB/s |
+| Gen 4 | 2017 | 16.0 | ~2.0 | ~7.9 GB/s | ~31.5 GB/s |
+| Gen 5 | 2019 | 32.0 | ~4.0 | ~15.8 GB/s | ~63 GB/s |
+| Gen 6 | 2023+ | 64.0 | ~8.0 | ~31.5 GB/s | ~126 GB/s |
+
+The effective bandwidth is slightly under the theoretical maximum because of protocol encoding overhead. Gen 1 and 2 used 8b/10b encoding (80% efficiency). Gen 3 and beyond switched to 128b/130b encoding (~98.5% efficiency), which is why the real-world numbers track closely to the theoretical figures from Gen 3 onward.
+
+## What "Generation" Actually Means
+
+The generation defines the electrical signaling speed on each wire. Higher generation = higher frequency = more data per second per lane.
+
+```text
+Gen 3 lane:  8 GT/s  →  ~985 MB/s effective per lane
+Gen 4 lane: 16 GT/s  →  ~1,969 MB/s effective per lane
+Gen 5 lane: 32 GT/s  →  ~3,938 MB/s effective per lane
+
+An x4 slot bonds four lanes:
+  Gen 3 x4  →  ~3.9 GB/s
+  Gen 4 x4  →  ~7.9 GB/s   ← most NVMe drives today
+  Gen 5 x4  →  ~15.8 GB/s  ← fastest consumer NVMe as of 2025
+```
+
+## Backward Compatibility
+
+PCIe is backward and forward compatible. A Gen 4 device in a Gen 3 slot negotiates down to Gen 3. A Gen 3 device in a Gen 5 slot runs at Gen 3 speeds. The physical connector is identical across generations.
+
+```text
+Gen 5 NVMe in Gen 4 slot:
+  Drive capability:  15.8 GB/s (Gen 5 x4)
+  Slot capability:    7.9 GB/s (Gen 4 x4)
+  Negotiated speed:   7.9 GB/s  ← runs at the slower of the two
+```
+
+This means buying a Gen 5 NVMe drive for a Gen 4 board is not wasted — the drive works and runs at Gen 4 speeds. If you later upgrade the board, the drive automatically runs faster.
+
+## When Each Generation Actually Matters
+
+### Gen 1 and Gen 2
+
+Legacy only. Gen 2 cards still work in modern boards but no consumer storage or GPU made in the last decade is limited by a Gen 2 slot.
+
+### Gen 3 (the comfortable baseline)
+
+Gen 3 x4 delivers ~3.9 GB/s. That is roughly 7× the throughput of a SATA SSD. For most homelab workloads — OS boots, file copies, VM disk I/O — Gen 3 NVMe is already faster than the workload demands.
+
+If you are building on a budget, a Gen 3 NVMe from a reputable manufacturer is a solid choice that will not bottleneck anything most people do.
+
+### Gen 4 (the current sweet spot)
+
+Gen 4 x4 delivers ~7.9 GB/s. This is where you notice the difference in specific scenarios:
+
+- loading large game assets
+- transferring raw video footage
+- restoring large VM backups
+- running databases with lots of random I/O under load
+
+For a homelab running VMs, Proxmox backing storage, or a NAS, Gen 4 is worth having on the primary drive. The price premium over Gen 3 has largely disappeared as of 2025.
+
+### Gen 5 (narrowly useful today)
+
+Gen 5 x4 delivers ~15.8 GB/s. In practice, most workloads cannot consistently feed data at that rate.
+
+Where it shows up:
+- 4K/8K video editing with real-time effects
+- AI training workflows moving large datasets into GPU memory
+- High-frequency database operations on large tables
+
+For general homelab use, Gen 5 is the right choice if you are future-proofing a new build. It is not the right choice if you are upgrading an existing Gen 4 system expecting to feel a difference.
+
+### Gen 6 (emerging)
+
+Gen 6 hardware was announced in 2023 and is arriving in server and workstation platforms first. Consumer availability is limited and prices are high. Not a practical consideration for homelab builds yet.
+
+## The Diminishing Returns Curve
+
+```text
+SATA SSD      ~0.55 GB/s  |====|
+Gen 3 x4      ~3.9  GB/s  |============================|
+Gen 4 x4      ~7.9  GB/s  |====================================================|
+Gen 5 x4     ~15.8  GB/s  |================================================================================|
+
+Typical homelab
+workload needs:  ~1-4 GB/s sustained
+
+Gen 3 gets you there. Gen 4 gives headroom. Gen 5 is overhead.
+```
+
+The bottleneck for most systems is not the NVMe bus speed — it is CPU processing, network bandwidth, or memory bandwidth. Upgrading from Gen 4 to Gen 5 NVMe when the rest of the system is unchanged usually shows no perceptible difference.

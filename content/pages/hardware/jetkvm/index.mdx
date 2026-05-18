@@ -12,8 +12,8 @@ This section owns the JetKVM side of the recovery story.
 
 It is not the Raspberry Pi client build, and it is not the host-side Wake-on-LAN configuration. Those already have cleaner homes.
 
-- For the small browser terminal path, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal).
-- For remote power-on on the Proxmox host, use [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox).
+- For the small browser terminal path, use [JetKVM Admin Terminal On Raspberry Pi 3](/pages/hardware/raspberry-pi/jetkvm-admin-terminal).
+- For remote power-on on the Proxmox host, use [Wake-on-LAN For Proxmox](/pages/hardware/jetkvm/wake-on-lan-for-proxmox).
 
 What this page covers is the base-device workflow: how JetKVM fits around a Proxmox node, what the base hardware actually gives you, and how to make it dependable before you start depending on it during a bad day.
 
@@ -82,11 +82,11 @@ It is most useful when:
 
 ## In This Section
 
-- [Wake-on-LAN For Proxmox](/pages/jetkvm/wake-on-lan-for-proxmox) - arm the host NIC properly so JetKVM can wake the box instead of only watching it stay off.
+- [Wake-on-LAN For Proxmox](/pages/hardware/jetkvm/wake-on-lan-for-proxmox) - arm the host NIC properly so JetKVM can wake the box instead of only watching it stay off.
 
 ## Related Topics
 
-- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/raspberry-pi/jetkvm-admin-terminal) - use a small dedicated Pi as the client-side console terminal.
+- [JetKVM Admin Terminal On Raspberry Pi 3](/pages/hardware/raspberry-pi/jetkvm-admin-terminal) - use a small dedicated Pi as the client-side console terminal.
 - [Homelab Installation](/pages/proxmox/setup/homelab-installation) - line up firmware and power-management settings with the recovery path from day one.
 
 [^1]: JetKVM describes the base device as a high-performance, open-source KVM over IP with low-latency 1080p60 video and optional remote access in the project README: https://github.com/jetkvm/kvm

@@ -1,0 +1,132 @@
+---
+title: "Common Misconceptions"
+description: "Five things most people have wrong about PCIe — lanes and CPU cores, M.2 slot equality, bifurcation, generation upgrades, and USB independence."
+publishedAt: "2026-03-20"
+order: 5
+status: published
+---
+
+# Common Misconceptions
+
+These five misconceptions come up constantly in build discussions, forums, and homelab planning conversations. None of them are unreasonable to believe — they just happen to be wrong.
+
+## 1. "PCIe Lanes Use CPU Cores"
+
+This one is surprisingly widespread.
+
+The idea is that a GPU at full bandwidth is somehow consuming CPU core capacity — that the CPU is "doing work" to push data through the lane. That is not how it works.
+
+PCIe lanes are managed by the uncore portion of the CPU die. The uncore handles I/O, memory controllers, and interconnects. It is separate hardware from the compute cores.
+
+```text
+CPU Die (simplified):
+
+  ┌────────────────────────────────────────────┐
+  |  Core 0  Core 1  Core 2  Core 3            |  ← compute, runs your code
+  |  (completely separate from I/O)            |
+  |                                            |
+  |  Memory controller  PCIe controller  DMI   |  ← uncore, handles lanes
+  └────────────────────────────────────────────┘
+
+A GPU saturating a x16 PCIe lane has zero effect on Core 0-3.
+```
+
+What people sometimes confuse this with is I/O wait — a software state where a CPU core is idle, waiting for a slow I/O operation to complete. I/O wait is a scheduling concept. It does not mean the lane is consuming core capacity; it means the software asked for data and the core has nothing else to do while it waits.
+
+## 2. "All M.2 Slots Are The Same"
+
+This is the one that catches people mid-build when they buy a second NVMe drive expecting the same performance as their first.
+
+Most consumer motherboards have one CPU-direct M.2 slot and one or more chipset-attached slots. The chipset-attached slots:
+
+- go through the DMI bus before reaching the CPU
+- share bandwidth with SATA, USB, and other chipset devices
+- may run at x2 instead of x4 on budget boards
+
+```text
+What the spec sheet says: "4× M.2 NVMe slots"
+What it often means:
+
+  M.2_1  →  CPU-direct, PCIe 4.0 x4  (7.9 GB/s, low latency)
+  M.2_2  →  Chipset, PCIe 4.0 x4    (7.9 GB/s, but shared DMI bandwidth)
+  M.2_3  →  Chipset, PCIe 3.0 x4    (3.9 GB/s, older generation)
+  M.2_4  →  Chipset, PCIe 3.0 x2    (1.9 GB/s, lane-constrained)
+```
+
+For a Proxmox host or NAS, this matters. VM storage on a chipset-attached slot under sustained I/O will show different behavior under load than the same drive on a CPU-direct slot.
+
+Check the board manual. It will spell this out exactly.
+
+## 3. "Bifurcating x16 to x8+x8 Halves GPU Performance"
+
+This concern comes up whenever someone is adding a second GPU for AI or compute tasks.
+
+Bifurcation splits the x16 slot into two x8 connections. Each GPU goes from having 16 lanes to 8. That is half the lanes.
+
+But here is what the benchmarks actually show:
+
+```text
+RTX 4090 gaming at 4K:
+  x16 Gen 4  →  baseline
+  x8  Gen 4  →  ~97–99% of baseline  (1–3% difference)
+  x4  Gen 4  →  ~80–90% of baseline  (noticeable)
+
+Why x8 is fine for most scenarios:
+  x8 Gen 4 provides ~16 GB/s
+  Most gaming workloads use ~8–12 GB/s of actual PCIe bandwidth
+  The GPU is not the bottleneck — the GPU's internal memory bus is
+```
+
+GPUs have their own high-bandwidth VRAM. The PCIe link primarily handles transferring data between system RAM and VRAM. For gaming, that data transfer is not the bottleneck — the rendering computation is.
+
+For AI training with large models and large batches, PCIe bandwidth does matter more. Even then, x8 Gen 4 is rarely the first bottleneck.
+
+## 4. "You Need Gen 5 NVMe To Have Fast Storage"
+
+Gen 5 NVMe can hit around 14–15 GB/s sequential read. That is an impressive number.
+
+But sequential read speed is one of the least representative metrics for real workloads.
+
+Most storage operations in a running system look like this:
+
+```text
+Database queries:     small random reads/writes, latency-sensitive
+VM disk I/O:          mixed random, queue depth matters more than peak speed
+OS operations:        many small files, file system overhead dominates
+Backup/restore:       sequential, but network or CPU is usually the limit
+
+Only these workloads genuinely push sequential speed:
+  - large video file transfers
+  - disk-to-disk imaging
+  - direct AI dataset loading into GPU memory
+```
+
+Gen 3 NVMe at ~3.9 GB/s already outpaces what most software can produce. Gen 4 at ~7.9 GB/s is the sensible upgrade for anyone who moves large files regularly. Gen 5 is overhead for everything else.
+
+If you are running Proxmox and your VMs feel slow, upgrading from Gen 4 to Gen 5 NVMe will not fix it. The bottleneck is almost certainly memory, CPU, or network — not storage bandwidth.
+
+## 5. "USB Is A Separate Bus From PCIe"
+
+USB feels independent because it has its own name, its own cable, its own ecosystem of devices. Internally it is not.
+
+USB controllers are PCIe devices. They attach to the chipset over PCIe lanes, go through the DMI bus, and reach the CPU the same way everything else does.
+
+```text
+The path for a USB storage device read:
+
+  USB drive  →  USB port  →  USB 3.2 controller (PCIe device)
+                                    |
+                            PCIe x1 or x4 (chipset lane)
+                                    |
+                              Chipset / PCH
+                                    |
+                               DMI bus
+                                    |
+                                  CPU
+                                    |
+                               System RAM
+```
+
+The consequence that catches people: USB bandwidth and NVMe bandwidth are not independent on most consumer boards. They share chipset lanes and DMI bandwidth. Saturating USB transfers while running heavy NVMe I/O can create contention — not because the devices are physically connected, but because they share the path to the CPU.
+
+On workstation and HEDT platforms with more CPU-direct lanes and wider DMI connections, this is less of a concern. On a typical consumer ATX board, it is worth knowing.

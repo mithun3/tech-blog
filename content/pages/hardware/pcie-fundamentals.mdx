@@ -1,0 +1,127 @@
+---
+title: "PCIe Fundamentals"
+description: "What PCIe lanes are, how they attach to the CPU versus the chipset, and why NVMe is just PCIe with a different name."
+publishedAt: "2026-01-12"
+order: 1
+status: published
+---
+
+# PCIe Fundamentals
+
+PCIe stands for Peripheral Component Interconnect Express. It is the bus that connects your GPU, NVMe drives, NIC, and most other high-speed peripherals to the processor.
+
+Understanding it explains a lot of things that seem arbitrary — why one M.2 slot is faster than another, why a second GPU loses almost no performance at x8, why USB 3.2 tops out where it does.
+
+## What A Lane Actually Is
+
+A PCIe lane is a pair of wires — one pair for transmitting, one pair for receiving. That is it.
+
+Each lane is a dedicated serial link operating at a fixed speed. Multiple lanes can be bonded together to multiply bandwidth, which is what x4, x8, and x16 slots do.
+
+```text
+Single PCIe lane (x1):
+
+  TX+  ──────────────────────────────>
+  TX-  ──────────────────────────────>  (differential pair, outbound)
+
+  RX+  <──────────────────────────────
+  RX-  <──────────────────────────────  (differential pair, inbound)
+
+x4 slot = 4 of these bonded in parallel
+x16 slot = 16 of these bonded in parallel
+```
+
+Differential signaling is used because it is noise-resistant. The signal is the difference between the + and - wires, so electromagnetic interference that hits both wires equally cancels out.
+
+## CPU-Direct Lanes vs. Chipset Lanes
+
+This is the part most people do not think about, and it is the most important thing to understand before buying a motherboard.
+
+PCIe lanes on your system come from two places: the CPU itself, and the chipset (also called the PCH on Intel platforms).
+
+```text
+CPU Die
+  ┌──────────────────────────────────────────┐
+  |  Cores          Uncore / I/O logic        |
+  |  (compute)      (PCIe controller)         |
+  |                        |                  |
+  └────────────────────────┼──────────────────┘
+                           |
+           CPU-direct PCIe lanes (low latency)
+                           |
+          ┌────────────────┼────────────────┐
+          |                |                |
+      [GPU x16]       [NVMe #1 x4]    [x4 other]
+
+
+CPU <── DMI 4.0 bus ──> Chipset (PCH)
+                             |
+         ┌───────────────────┼──────────────────┐
+         |                   |                  |
+    [NVMe #2 x4]       [USB ctrl]          [SATA ctrl]
+    [NVMe #3 x4]       [Ethernet]          [WiFi]
+         |                   |
+    (shared chipset bandwidth, higher latency)
+```
+
+CPU-direct lanes connect straight to the processor die. They have the lowest latency and dedicated bandwidth — nothing else shares that path.
+
+Chipset lanes connect to the CPU through a separate bus (DMI on Intel, the Infinity Fabric on AMD). That internal bus has a finite ceiling, and every chipset-attached device shares it.
+
+On a modern Intel consumer platform:
+- CPU-direct: typically 20 PCIe 5.0 lanes (16 for the GPU, 4 for the primary NVMe slot)
+- Chipset: additional lanes for everything else, routed through DMI 4.0
+
+On AMD Ryzen 7000 and 9000 series:
+- CPU-direct: 24 PCIe 5.0 lanes (16 GPU, 4 NVMe, 4 remaining)
+- Chipset: additional lanes via Infinity Fabric
+
+## The First M.2 Slot Is Not The Same As The Rest
+
+This is where it gets practical.
+
+Most motherboards have two, three, or four M.2 slots. Usually only one of them is wired CPU-direct. The others go through the chipset.
+
+That means the second and third NVMe drives on most boards:
+- share chipset bandwidth with SATA, USB, and Ethernet
+- have higher latency because every request crosses the DMI bus
+- may run at x2 instead of x4 on budget boards to conserve chipset lanes
+
+```text
+High-end board (two CPU-direct M.2 slots):
+
+  CPU
+  ├── x16  GPU (PCIe 5.0)
+  ├── x4   NVMe slot 1 (PCIe 5.0) ← fast, dedicated
+  └── x4   NVMe slot 2 (PCIe 5.0) ← fast, dedicated
+
+Budget board (one CPU-direct M.2 slot):
+
+  CPU
+  ├── x16  GPU (PCIe 4.0)
+  └── x4   NVMe slot 1 (PCIe 4.0) ← fast, dedicated
+
+  Chipset (through DMI)
+  ├── x4   NVMe slot 2 ← shared, higher latency
+  ├── x4   NVMe slot 3 ← shared, may drop to x2
+  ├──      SATA (6 ports)
+  └──      USB controllers
+```
+
+Always check the motherboard manual. It will show exactly which slots are CPU-direct and which ones are chipset-attached. This is not marketing — it is a real performance difference for sustained workloads.
+
+## NVMe Is Just PCIe With A Storage Protocol On Top
+
+M.2 is a physical connector shape. NVMe is a communication protocol. PCIe is the underlying bus.
+
+When you buy an NVMe drive and slot it into an M.2 connector, the drive is a PCIe device. The NVMe protocol defines how commands are queued and how the drive responds — it sits on top of the PCIe link.
+
+```text
+NVMe request path:
+
+  OS  →  NVMe driver  →  PCIe lane  →  NVMe controller on drive  →  NAND flash
+```
+
+An M.2 slot can actually carry either PCIe or SATA signals. The physical slot looks the same. An M.2 SATA drive uses the SATA controller in the chipset; an M.2 NVMe drive bypasses SATA entirely and talks directly over PCIe.
+
+That is why SATA-based M.2 drives top out around 550 MB/s regardless of what PCIe generation the board runs — they are not on the PCIe bus at all.

@@ -1,0 +1,98 @@
+---
+title: "X570 · Ryzen 9 5950X · Dual RTX 3090"
+description: "The primary homelab AI rig — PCIe 4.0 platform, 16-core CPU, dual 3090s for 48 GB total VRAM, and a mixed NVMe and SATA storage pool."
+publishedAt: "2026-04-24"
+order: 1
+status: published
+---
+
+# X570 · Ryzen 9 5950X · Dual RTX 3090
+
+The primary homelab machine. Built for AI inference and local model serving, but it runs Proxmox and handles general homelab duties too.
+
+## Specs
+
+```text
+Motherboard:  MSI MAG X570 TOMAHAWK WIFI
+CPU:          AMD Ryzen 9 5950X  (16 cores, 32 threads, 3.4 GHz base / 4.9 GHz boost)
+RAM:          64 GB DDR4
+GPU:          2× NVIDIA RTX 3090  (24 GB GDDR6X each, 48 GB total)
+Storage:      2× M.2 NVMe
+              2× 1 TB SATA HDD  (local backup)
+              3× WD Red 8 TB NAS HDD  (NAS pool, ~24 TB usable with redundancy)
+```
+
+## Why This Platform
+
+The Ryzen 9 5950X was the highest core-count AM4 consumer CPU AMD shipped before the move to AM5. 16 cores and 32 threads on a mature, affordable platform made it a better value than chasing AM5 at the time this was built.
+
+The dual 3090s are the reason the machine exists for AI work. Each card carries 24 GB GDDR6X. With both installed, large models that do not fit on a single card can be split across 48 GB of combined VRAM using tensor parallelism or multi-GPU inference in llama.cpp or vLLM.
+
+## PCIe Topology
+
+The X570 platform is the first consumer platform with native PCIe 4.0. The Ryzen 5000 series (Zen 3) ships 24 CPU-direct PCIe 4.0 lanes.
+
+```text
+Ryzen 9 5950X (24 CPU-direct PCIe 4.0 lanes)
+  |
+  ├── x16  PCIe 4.0   GPU #1 (RTX 3090)   ← full bandwidth, 32 GB/s
+  ├── x4   PCIe 4.0   M.2_1 NVMe          ← CPU-direct, 8 GB/s
+  └── x4   PCIe 4.0   → X570 Chipset link (upstream)
+
+X570 Chipset (PCIe 4.0 x4 upstream to CPU = ~8 GB/s shared ceiling)
+  |
+  ├── x4   PCIe 4.0   GPU #2 (RTX 3090)   ← chipset-attached, ~8 GB/s
+  ├── x4   PCIe 3.0   M.2_2 NVMe          ← chipset-attached
+  ├──      SATA        5× HDDs
+  └──      USB / WiFi
+```
+
+The critical detail: the second RTX 3090 is not in a bifurcated CPU lane arrangement. The MSI MAG X570 TOMAHAWK WIFI routes its second physical x16 slot through the chipset at x4 electrical. That means GPU #2 runs at PCIe 4.0 x4 — about 8 GB/s — not the x16 or x8 a dual-CPU-lane platform would provide.
+
+For gaming this would be a hard constraint. For inference it is workable. The GPU's internal memory bandwidth (936 GB/s on the 3090) dominates inference performance. The PCIe link is primarily used for loading model weights and transferring intermediate tensors — operations that happen in bursts, not sustained.
+
+## The Dual-GPU Reality
+
+Running two GPUs for inference is not plug-and-play. A few things to understand:
+
+```text
+Single GPU inference:
+  Model fits in 24 GB  →  runs fully on GPU #1  →  fast
+  Model exceeds 24 GB  →  layers split to CPU RAM  →  slowdown at PCIe boundary
+
+Dual GPU inference (tensor parallel):
+  Model split across both cards
+  GPU #1 ↔ GPU #2 communication: NVLink or PCIe
+  RTX 3090: no NVLink bridge (consumer card)
+  Inter-GPU traffic goes: GPU #1 → PCIe → CPU → PCIe → GPU #2
+```
+
+The RTX 3090 does not have NVLink on consumer configurations (unlike the RTX 3090 Ti or A-series). Inter-GPU communication falls back to PCIe. With GPU #2 on a x4 chipset lane, that path is further constrained.
+
+The practical outcome: tensor-parallel inference on this setup is slower than it would be on a server platform with NVLink or a dual-socket board with both GPUs on CPU-direct lanes. It still runs. For large models that simply cannot fit in 24 GB, splitting is the only option. For models that fit on a single card, running on GPU #1 alone is faster.
+
+## Storage Topology
+
+```text
+M.2_1 (CPU-direct, PCIe 4.0 x4):  OS drive, Proxmox, VM primary storage
+M.2_2 (Chipset, PCIe 3.0 x4):     Overflow VM storage, scratch
+
+SATA pool:
+  2× 1 TB HDD  →  local backup target (rsync, Proxmox backup jobs)
+  3× WD Red 8 TB  →  ZFS RAIDZ1 pool (~16 TB usable) for NAS / bulk storage
+```
+
+The SATA pool is fully chipset-attached. All five drives share the X570 chipset's upstream bandwidth to the CPU. For the workloads involved — backup writes and NAS reads — this is not a bottleneck. The HDDs themselves are the limiting factor, not the PCIe path.
+
+## Use Cases
+
+- Large model inference via llama.cpp and Open WebUI
+- Proxmox hypervisor running multiple VMs and LXC containers
+- NAS storage for the wider homelab network
+- Local backup target for other machines
+
+## Related Pages
+
+- [GPU AI Overview](/pages/gpu-ai)
+- [Common Misconceptions](/pages/hardware/common-misconceptions) — why GPU #2 at x4 is not as bad as it sounds
+- [PCIe Devices](/pages/hardware/pcie-devices) — the x8 vs x16 GPU performance numbers
