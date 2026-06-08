@@ -1,0 +1,241 @@
+---
+title: "PBS Backup Policy And Maintenance"
+description: "The daily PBS backup schedule, 14-day retention policy, health checks, prune and garbage collection rhythm, and restore-testing practice for CT 301."
+publishedAt: "2026-06-08"
+order: 2
+status: published
+---
+
+# PBS Backup Policy And Maintenance
+
+PBS made backups smaller. It did not make them automatic magic.
+
+The useful part is the rhythm: a daily job, simple retention, quick health checks, routine garbage collection awareness, ZFS scrubs on `pbspool`, and an occasional restore test so the backup system proves itself before a bad day asks for it.
+
+## Daily Backup Job
+
+The active job lives in `/etc/pve/jobs.cfg` on the Proxmox host.
+
+```bash
+# On Proxmox host — created /etc/pve/jobs.cfg
+vzdump: pbs-daily-backup
+        enabled 1
+        schedule 02:00
+        storage pbs-backups
+        all 1
+        mode snapshot
+        compress zstd
+        notes-template {{guestname}}
+        notification-mode notification-system
+        prune-backups keep-daily=14
+        fleecing 0
+        node pve
+        repeat-missed 0
+```
+
+That one block captures the policy:
+
+| Parameter | Value | Why It Matters |
+|---|---|---|
+| `schedule` | `02:00` | Runs after the earlier ZFS snapshot window. |
+| `storage` | `pbs-backups` | Sends backups to PBS, not the root pool. |
+| `all` | `1` | Backs up every container, including CT 301 itself. |
+| `mode` | `snapshot` | Keeps LXC backups fast and consistent enough for this lab. |
+| `compress` | `zstd` | Keeps transfer and storage efficient. |
+| `prune-backups` | `keep-daily=14` | Keeps the last 14 daily recovery points. |
+| `notification-mode` | `notification-system` | Uses the newer Proxmox notification path. |
+
+The current daily shape is intentionally plain:
+
+```text
+00:00  Midnight
+01:00  ZFS snapshots
+02:00  PBS daily backups
+02:30  ZFS snapshot cleanup
+03:00  Expected backup completion window
+```
+
+## Containers Covered
+
+The migration treated all containers as worth protecting, not just the glamorous ones.
+
+```text
+100  Ollama - GPU
+102  llama.cpp - GPU
+103  Open WebUI
+105  Pi-hole DNS
+106
+107
+108
+116  Grafana
+200  Nginx Proxy
+201  Cloudflare Tunnel
+301  PBS itself
+400
+```
+
+CT 301 backing itself up is useful, but remember the bind mount. A restored CT may still need the mount restored with `pct set 301 -mp0 /mnt/pbs-backups,mp=/mnt/backups`.
+
+## Retention And Space Expectations
+
+The policy is `keep-daily=14`. PBS prunes old snapshots according to that policy, then garbage collection frees chunks that are no longer referenced.[^1]
+
+The important mental model is this: 14 daily backups should not mean 14 full copies. PBS stores chunks and deduplicates unchanged data across snapshots, so the same 110GB container can have many restore points without consuming 110GB every day.[^2]
+
+Actual migration numbers:
+
+| Metric | Before | After |
+|---|---:|---:|
+| `rpool/var-lib-vz` usage | 1.3T / 1.6T, 83% | 177GB / 1.6T, 12% |
+| Backup storage | root pool | `pbspool` |
+| Backup method | full local copies | PBS deduplicated chunks |
+| Cleanup | manual | retention plus prune/GC |
+
+Projected PBS use after 14 days was about 150-200GB against 1.76TB available. The exact number will move with model files, package churn, and whether the GPU containers change often.
+
+## Daily Checks
+
+Use these when the job should have completed but you want a quick pulse.
+
+```bash
+# View last backup job status
+grep "INFO: Backup job finished" /var/log/vzdump.log | tail -1
+
+# Or check Proxmox web UI → Datacenter → Tasks (filter: vzdump)
+```
+
+```bash
+pvesm status -storage pbs-backups
+# Should show "active" status and increasing used space
+```
+
+```bash
+pct exec 301 -- df -h /mnt/backups
+# Should stay well below 80% usage
+```
+
+## Weekly Checks
+
+Look for quiet failures before the retention window moves on.
+
+```bash
+# Check for backup failures in last 7 days
+grep -i "error\|failed" /var/log/vzdump.log | tail -20
+```
+
+```bash
+# Inside PBS container, check GC task log
+pct exec 301 -- journalctl -u proxmox-backup -n 100 --no-pager | grep -i "garbage\|gc"
+```
+
+```bash
+# Verify pbspool is healthy
+zpool status pbspool
+# Should show: state: ONLINE, errors: No known data errors
+
+# Check compression ratio
+zfs get compressratio pbspool/backups
+# Should show ~1.5x-2.5x compression
+```
+
+## Monthly Maintenance
+
+Scrub the backup pool and do one restore test. A backup system that has never restored anything is still partly a theory.
+
+```bash
+# Scrub to detect and repair silent data corruption
+zpool scrub pbspool
+
+# Monitor scrub progress
+zpool status pbspool
+
+# Should complete within 1-2 hours for 2TB pool
+```
+
+Review retention:
+
+```bash
+# Check current retention policy
+cat /etc/pve/jobs.cfg | grep "prune-backups"
+
+# Adjust if needed (e.g., change to 30 days)
+# Edit via Proxmox web UI → Datacenter → Backup → Jobs
+```
+
+Test restore:
+
+```bash
+# Monthly test: restore a non-critical container to verify backup integrity
+# Example: restore CT 201 to new VMID 501
+pct restore 501 pbs-backups:backup/ct/201/LATEST \
+  --storage local-zfs
+
+# Verify container starts
+pct start 501
+pct list | grep 501
+
+# Delete test container after verification
+pct stop 501
+pct destroy 501
+```
+
+## Verification Jobs
+
+PBS can also verify backups on a schedule. The original migration left this as a follow-up, but the shape is straightforward.
+
+```bash
+# Inside PBS container, create verification job
+pct exec 301 -- proxmox-backup-manager verification-job create weekly-verify \
+  --store backups \
+  --schedule "0 4 * * 0"  # Sundays at 4 AM
+
+# Verification runs automatically and logs results
+# Can be monitored via PBS web UI → Configuration → Verification Jobs
+```
+
+## Optional Staggered Jobs
+
+If the GPU containers start making the window too long, split the job instead of letting one heavy backup dominate the night.
+
+```bash
+# Edit /etc/pve/jobs.cfg to create multiple jobs
+# GPU containers (slower, more data):
+vzdump: pbs-gpu-backup
+        enabled 1
+        schedule 02:00
+        storage pbs-backups
+        vmid 100,102
+        mode snapshot
+        ...
+
+# Other containers (faster):
+vzdump: pbs-other-backup
+        enabled 1
+        schedule 02:30
+        storage pbs-backups
+        vmid 103,105,106,107,108,116,200,201,301,400
+        mode snapshot
+        ...
+```
+
+That is a policy choice, not a required fix. The first version kept one simple all-container job.
+
+## Next Backup Tiers
+
+This PBS setup is Tier 1: fast, local, and much better than piling full backups onto `rpool`. It is not the last copy.
+
+The natural next moves are:
+
+- mirror `pbspool` with a second SSD
+- add a second PBS instance and sync to it
+- export long-term copies to TrueNAS or cloud storage
+- add backup metrics to Grafana and alerts to the existing notification path
+
+## Related Topics
+
+- [PBS Setup And Integration](/pages/proxmox/operations/proxmox-backup-server/setup-and-integration) - how CT 301 and `pbs-backups` were created.
+- [Restore And Troubleshooting](/pages/proxmox/operations/proxmox-backup-server/restore-and-troubleshooting) - what to do when a backup or restore path fails.
+- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) - the wider observability stack around these checks.
+
+[^1]: PBS maintenance documentation separates prune from garbage collection: prune removes references according to retention, while GC reclaims unreferenced chunks: https://pbs.proxmox.com/docs/maintenance.html
+[^2]: PBS describes its datastore and chunk-based deduplication model in the technical overview: https://pbs.proxmox.com/docs/technical-overview.html

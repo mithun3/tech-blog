@@ -2,7 +2,7 @@
 title: "Update And Maintenance"
 description: "A practical maintenance rhythm for updating the Proxmox host, LXC containers, and service workloads without turning a quiet Sunday into a rebuild session."
 publishedAt: "2024-12-01"
-updatedAt: "2025-01-19"
+updatedAt: "2026-06-08"
 order: 4
 status: published
 ---
@@ -48,6 +48,14 @@ Just as important is knowing what not to do.
 ```
 
 That order is conservative on purpose.
+
+## Major Upgrades Are Their Own Window
+
+Routine updates belong here. Major upgrades deserve a dedicated runbook.
+
+The PVE 9.2 upgrade is the example that made the boundary obvious: PBS backups came first, container package updates came second, the host moved to kernel 7.0 third, and the reboot exposed a `nova_core` boot hang that needed its own RCA.
+
+Use [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) for that full sequence, then read [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) for the side effect and fix.
 
 ## Pre-Update Checklist
 
@@ -509,5 +517,7 @@ pct start <CTID>
 ## Related Topics
 
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — make maintenance visible instead of silent.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) — the major upgrade path that extends this regular maintenance rhythm.
+- [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) — the post-upgrade side effect that required physical console recovery.
 - [Proxmox Workloads](/pages/proxmox/workloads) — the service and platform guides that sit behind many of these update routines.
 - [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — a useful temporary control when a single LXC is pulling large artifacts during a maintenance window.

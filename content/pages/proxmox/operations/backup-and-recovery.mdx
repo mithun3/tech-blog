@@ -2,7 +2,7 @@
 title: "Backup And Recovery"
 description: "How to layer ZFS snapshots, vzdump jobs, and restore practice so Proxmox recovery is routine instead of improvised."
 publishedAt: "2024-11-14"
-updatedAt: "2025-01-19"
+updatedAt: "2026-06-08"
 order: 2
 status: published
 ---
@@ -30,6 +30,14 @@ These are the portable Proxmox backups you actually want when a guest needs to b
 ### 3. Remote Copies
 
 If everything only exists on the Proxmox box, then your backup strategy is still too local.
+
+### 4. Proxmox Backup Server
+
+PBS is the next step once local `vzdump` files start competing with the host they are supposed to protect.
+
+In this lab, PBS moved daily container backups from `rpool/var-lib-vz` to a dedicated `pbspool` SSD through CT 301. That change freed roughly 1.1 TB from the root pool and made daily backups deduplicated, visible, and easier to restore from.
+
+Use [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) when the question is no longer "can I make a backup?" but "can I keep backups without filling the host, test restores monthly, and survive a real upgrade window?"
 
 ## Automatic Snapshot Retention
 
@@ -152,5 +160,6 @@ For example, Pi-hole still benefits from Teleporter exports even when the contai
 ## Related Topics
 
 - [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the storage layer that these backups depend on.
+- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) — the dedicated PBS path for daily deduplicated backups and restore practice.
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — the part that makes backup failures visible.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where pre-update snapshots and validation loops fit into regular host care.

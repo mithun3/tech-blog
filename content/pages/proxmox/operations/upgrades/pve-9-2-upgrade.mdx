@@ -1,0 +1,589 @@
+---
+title: "PVE 9.2 Upgrade Runbook"
+description: "The Proxmox VE 9.1.6 to 9.2 runbook: PBS backups, container updates, host upgrade, NVIDIA 595.71.05, post-upgrade checks, and recovery paths."
+publishedAt: "2026-06-08"
+order: 1
+status: published
+---
+
+# PVE 9.2 Upgrade Runbook
+
+This was the planned work: move the host from Proxmox VE 9.1.6 to 9.2 on the same Debian Trixie base, with PBS backups taken first and GPU driver work handled deliberately after the host moved to kernel 7.0.
+
+The part to keep in your head: the upgrade was not the end of the story. The post-upgrade reboot exposed the kernel 7.0/nova_core boot hang documented in [Kernel 7 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca). Read this page as act one, then the RCA as act two.
+
+## System
+
+| Item | Value |
+|---|---|
+| Upgrade | PVE 9.1.6 -> 9.2 |
+| Host | MSI MAG X570 TOMAHAWK WIFI, Ryzen 9 5950X, 64 GB, RTX 3090 |
+| Host IP | `192.168.50.20` |
+| PBS | CT 301, `https://192.168.50.191:8007` |
+| PBS storage | `pbs-backups` |
+| apt cache | CT 800, `192.168.50.123:3142` |
+
+## What Changes In 9.2
+
+| Component | Before 9.1 | After 9.2 |
+|---|---|---|
+| Linux kernel | 6.17 | 7.0 |
+| QEMU | 10.1.2 | 11.0 |
+| LXC | 6.0.5 | 7.0 |
+| ZFS | 2.3.4 | 2.4 |
+| Debian base | Trixie 13.2 | Trixie 13.5 |
+| NVIDIA driver | 580.126.09 | 595.71.05 |
+
+For this GPU host, the practical breaking edge is NVIDIA. Driver 580.x cannot build cleanly against kernel 7.0 because of VMA API changes. The runbook standardizes on `595.71.05` through the `.run` installer because `nvidia-driver-595` was not installable through apt on this host.[^1]
+
+## Before You Start
+
+This runbook covers three operations in order:
+
+1. Back up all containers to PBS.
+2. Update OS packages inside containers.
+3. Upgrade the PVE host and verify the stack.
+
+Estimated time: 60-90 minutes, mostly waiting. Use SSH to `root@192.168.50.20` and keep PBS open at `https://192.168.50.191:8007`.
+
+## 1. Pre-Flight Checks
+
+Check the current PVE version:
+
+```bash
+pveversion
+```
+
+Expected output:
+
+```text
+pve-manager/9.1.6/71482d1833ded40a (running kernel: 6.17.13-2-pve)
+```
+
+Check root space:
+
+```bash
+df -h /
+```
+
+Expected output:
+
+```text
+Filesystem        Size  Used Avail Use% Mounted on
+rpool/ROOT/pve-1  1.4T   12G  1.4T   1% /
+```
+
+Check storage health:
+
+```bash
+zpool status rpool && zpool status pbspool
+```
+
+Both pools should be `ONLINE` with `No known data errors`. A warning about disabled ZFS features on `rpool` does not block this upgrade.
+
+Check PBS:
+
+```bash
+pvesm status -storage pbs-backups
+```
+
+Expected shape:
+
+```text
+Name               Type     Status     Total (KiB)      Used (KiB) Available (KiB)        %
+pbs-backups         pbs     active      1885860224       160102016      1725758208    8.49%
+```
+
+If it is inactive, start CT 301 first: `pct start 301`.
+
+Record the current NVIDIA driver:
+
+```bash
+nvidia-smi | head -3
+```
+
+Expected shape:
+
+```text
+Sat Jun  6 11:48:18 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
+```
+
+## 2. Back Up All Containers To PBS
+
+The upgrade changes the kernel and core components. Take the backup first, not after the host already feels weird.
+
+### Increase PBS Memory For The Backup Window
+
+```bash
+pct stop 301
+pct set 301 --memory 8192 --swap 4096
+pct start 301
+sleep 15
+```
+
+Verify PBS is back:
+
+```bash
+pvesm status -storage pbs-backups
+```
+
+### Run Sequential Backup Of All Containers
+
+```bash
+# Get all container IDs
+containers=$(pct list | tail -n +2 | awk '{print $1}' | tr '\n' ' ')
+echo "Backing up containers: $containers"
+echo ""
+
+# Run backup
+vzdump $containers \
+  --storage pbs-backups \
+  --mode snapshot \
+  --compress zstd \
+  --notes-template "pre-pve-9.2-{{guestname}}"
+```
+
+Watch for a final `INFO: Backup job finished successfully`. PBS deduplication means some containers may upload very little if the chunks already exist.
+
+### Verify The Backups
+
+The source script checks the expected backup date and VMIDs.
+
+```bash
+cat > /tmp/check-backups.sh << 'EOFSCRIPT'
+#!/bin/bash
+
+echo "🔍 Checking backups for 2026-06-06..."
+echo ""
+
+for vmid in 100 102 103 105 106 107 108 116 200 201 301 400; do
+  count=$(pct exec 301 -- find /mnt/backups/pbs-data-store/datastore/ct/$vmid -name "*2026-06-06*" 2>/dev/null | wc -l)
+  if [ $count -gt 0 ]; then
+    echo "✓ CT $vmid"
+  else
+    echo "✗ CT $vmid"
+  fi
+done
+EOFSCRIPT
+
+chmod +x /tmp/check-backups.sh
+/tmp/check-backups.sh
+```
+
+In the PBS UI, log in as `backup@pbs` with `PBS_PASSWORD`, then go to Datastore -> `backups` -> Content.
+
+### Optional Host Snapshot
+
+```bash
+zfs snapshot -r rpool@pre-pve-9.2-upgrade
+```
+
+### Backup Lock Recovery
+
+If a container fails with `CT is locked (snapshot-delete)`, clear the stale lock and retry that VMID.
+
+```bash
+# 1. Stop the affected container(s)
+pct stop 102  # (replace 102 with the failed container VMID)
+sleep 5
+
+# 2. Remove the stale lock from the container config
+sed -i '/^lock: snapshot-delete/d' /etc/pve/lxc/102.conf
+
+# 3. Start the container
+pct start 102
+sleep 10
+
+# 4. Retry backup for that container only
+vzdump 102 \
+  --storage pbs-backups \
+  --mode snapshot \
+  --compress zstd \
+  --notes-template "pre-pve-9.2-{{guestname}}"
+```
+
+If locks persist:
+
+```bash
+systemctl restart lxc.service
+sleep 10
+pct start 102  # restart the container
+sleep 10
+
+# Then retry the backup
+vzdump 102 \
+  --storage pbs-backups \
+  --mode snapshot \
+  --compress zstd \
+  --notes-template "pre-pve-9.2-{{guestname}}"
+```
+
+## 3. Update OS Packages Inside Containers
+
+This updates guest OS packages while the host is still on the current kernel. NVIDIA driver changes wait until after the host upgrade is confirmed.
+
+### Verify apt-cacher-ng
+
+```bash
+pct status 800
+pct exec 800 -- systemctl status apt-cacher-ng.service
+```
+
+If needed:
+
+```bash
+pct start 800
+sleep 5
+pct exec 800 -- systemctl start apt-cacher-ng.service
+```
+
+### Configure Host apt Proxy
+
+```bash
+printf '%s\n' \
+  'Acquire::http::Proxy "http://192.168.50.123:3142";' \
+  'Acquire::http::Proxy::localhost "DIRECT";' \
+  'Acquire::http::Proxy::127.0.0.1 "DIRECT";' \
+  > /etc/apt/apt.conf.d/02proxy
+apt update
+```
+
+### Update Running Containers
+
+```bash
+echo "Updating OS packages inside all containers via apt-cache..."
+echo ""
+
+for vmid in $(pct list | tail -n +2 | awk '{print $1}'); do
+  status=$(pct status $vmid | grep -o "running\|stopped")
+  container_name=$(pct exec $vmid -- hostname 2>/dev/null || echo "CT-$vmid")
+  
+  if [ "$status" = "running" ]; then
+    echo "📦 Updating $container_name (CT $vmid)..."
+    
+    # Skip proxy config on CT 800 (the cache server itself)
+    if [ "$vmid" != "800" ]; then
+      pct exec $vmid -- bash -c 'printf "%s\n" "Acquire::http::Proxy \"http://192.168.50.123:3142\";" "Acquire::http::Proxy::localhost \"DIRECT\";" "Acquire::http::Proxy::127.0.0.1 \"DIRECT\";" > /etc/apt/apt.conf.d/02proxy' 2>/dev/null
+    fi
+    
+    # Clear stale locks and kill existing apt processes
+    pct exec $vmid -- bash -c 'pkill -f "apt|unattended-upgrade"; rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null; sleep 1' 2>/dev/null
+    
+    # Run update and upgrade
+    pct exec $vmid -- bash -c 'apt update && apt upgrade -y' 2>/dev/null && echo "   ✓ Done" || echo "   ✗ Failed"
+  else
+    echo "⏸️  Skipping CT $vmid (stopped)"
+  fi
+done
+
+echo ""
+echo "✓ Container updates complete (via apt-cache at 192.168.50.123:3142)"
+```
+
+## 4. Upgrade The PVE Host
+
+### Open tmux
+
+```bash
+tmux new-session -s upgrade
+```
+
+If disconnected: `tmux attach -t upgrade`.
+
+### Verify Repos And Refresh
+
+```bash
+grep -r "trixie\|bookworm" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | grep -v "^Binary"
+```
+
+```bash
+apt update
+```
+
+### Preview The Upgrade
+
+```bash
+apt full-upgrade --simulate 2>&1 | grep -E "^(Inst|Remv|Conf)" | head -40
+```
+
+Look for `proxmox-ve`, `pve-kernel-7.0`, `qemu-server`, `lxc-pve`, and `zfsutils-linux`.
+
+### Run The Upgrade
+
+```bash
+apt dist-upgrade
+```
+
+If apt exits because NVIDIA packages are unauthenticated:
+
+```bash
+apt dist-upgrade -y --allow-unauthenticated
+```
+
+Use this config-file policy during prompts:
+
+| Config file | What to do | Why |
+|---|---|---|
+| `/etc/issue` | `N` - keep installed | PVE auto-generates this. |
+| `/etc/lvm/lvm.conf` | `Y` - install maintainer's | Take upstream changes for the new kernel. |
+| `/etc/ssh/sshd_config` | `Y` - install maintainer's | Removes deprecated SSH option. |
+| `/etc/default/grub` | `N` - keep installed after reading the diff | Preserves IOMMU/GPU passthrough flags. |
+
+During kernel installation, DKMS may fail for NVIDIA 580.x. That is expected here and handled after reboot.
+
+```text
+Building DKMS modules for kernel 7.0.x-x-pve ...
+nvidia/580.126.09: DKMS: Failed.
+```
+
+### Reboot
+
+```bash
+reboot
+```
+
+Wait about two minutes, then reconnect:
+
+```bash
+ssh root@192.168.50.20
+```
+
+If the host hangs at `ifupdown2-pre.service` after this reboot, move directly to [Kernel 7 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca). That is the documented side effect that appeared after this upgrade.
+
+## 5. Post-Upgrade Verification
+
+Check PVE:
+
+```bash
+pveversion -v
+```
+
+Check kernel:
+
+```bash
+uname -r
+```
+
+If it still shows a 6.x kernel, inspect boot entries:
+
+```bash
+proxmox-boot-tool kernel list
+```
+
+## 6. Upgrade NVIDIA For Kernel 7.0
+
+Confirm DKMS failed on 580.x:
+
+```bash
+dkms status
+```
+
+Install headers:
+
+```bash
+apt install pve-headers-$(uname -r)
+```
+
+Install 595.71.05:
+
+```bash
+# Remove the broken 580.x DKMS entry first
+dkms remove nvidia/580.126.09 --all
+
+# Download the 595.71.05 installer
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/595.71.05/NVIDIA-Linux-x86_64-595.71.05.run
+chmod +x NVIDIA-Linux-x86_64-595.71.05.run
+
+# Install with DKMS integration, without OpenGL (headless Proxmox host)
+# --no-opengl-files is important: avoids overwriting system OpenGL libs which can break the PVE web UI console
+./NVIDIA-Linux-x86_64-595.71.05.run --dkms --no-opengl-files
+```
+
+Verify:
+
+```bash
+dkms status
+```
+
+Expected:
+
+```text
+nvidia/595.71.05, 7.0.6-2-pve, x86_64: installed
+```
+
+Check GPU:
+
+```bash
+nvidia-smi
+```
+
+Verify idle power state:
+
+```bash
+nvidia-smi -q -d POWER | grep "Performance State"
+```
+
+## 7. Check Containers And Services
+
+```bash
+pct list
+```
+
+Start expected containers if needed:
+
+```bash
+pct start <VMID>
+```
+
+Verify PBS:
+
+```bash
+pvesm status -storage pbs-backups
+```
+
+Check OpenClaw:
+
+```bash
+pct exec 106 -- curl -s http://localhost:18789/health
+```
+
+Check llama.cpp GPU and health:
+
+```bash
+pct exec 102 -- nvidia-smi
+```
+
+```bash
+pct exec 102 -- curl -s http://localhost:8012/health
+```
+
+Hard-refresh the PVE web UI at `https://192.168.50.20:8006`.
+
+## 8. Sync NVIDIA Userspace In GPU Containers
+
+Host and container userspace versions must match because LXC GPU passthrough forwards device nodes while the host owns the kernel module.
+
+```bash
+# Host version:
+nvidia-smi | grep "Driver Version"
+
+# CT 102 (llama.cpp):
+pct exec 102 -- nvidia-smi | grep "Driver Version"
+
+# CT 100 (Ollama):
+pct exec 100 -- nvidia-smi | grep "Driver Version"
+```
+
+If a container still shows 580.126.09:
+
+```bash
+# Copy the installer into the container first
+pct push 102 /root/NVIDIA-Linux-x86_64-595.71.05.run /root/NVIDIA-Linux-x86_64-595.71.05.run
+pct push 100 /root/NVIDIA-Linux-x86_64-595.71.05.run /root/NVIDIA-Linux-x86_64-595.71.05.run
+
+# Install userspace libraries only (--no-kernel-modules: container uses host kernel module)
+pct exec 102 -- bash -c "chmod +x /root/NVIDIA-Linux-x86_64-595.71.05.run && /root/NVIDIA-Linux-x86_64-595.71.05.run --no-kernel-modules --no-opengl-files"
+pct exec 100 -- bash -c "chmod +x /root/NVIDIA-Linux-x86_64-595.71.05.run && /root/NVIDIA-Linux-x86_64-595.71.05.run --no-kernel-modules --no-opengl-files"
+```
+
+## 9. Cleanup
+
+After the host is stable for a few hours:
+
+```bash
+proxmox-boot-tool kernel list
+apt autoremove
+```
+
+Read the removal list before confirming.
+
+Remove the snapshot if you took it:
+
+```bash
+zfs destroy -r rpool@pre-pve-9.2-upgrade
+zfs list -t snapshot | grep pre-pve-9.2   # confirm it's gone
+```
+
+## Recovery Paths
+
+### Container Broken After Upgrade
+
+```bash
+# 1. Stop the broken container
+pct stop <VMID>
+
+# 2. Find the pre-upgrade backup (look for today's date)
+pvesm list pbs-backups | grep "/ct/<VMID>/" | grep "$(date +%Y-%m-%d)"
+
+# 3. Restore (replace SNAPSHOT_ID with the timestamp from step 2)
+pct restore <VMID> pbs-backups:backup/ct/<VMID>/<SNAPSHOT_ID> \
+  --storage local-zfs \
+  --force
+
+# 4. Start the restored container
+pct start <VMID>
+pct status <VMID>
+```
+
+### NVIDIA DKMS Failed
+
+```bash
+# 1. Confirm the failure is 580.x on kernel 7.0
+dkms status
+# Shows: nvidia/580.x, 7.0.x-x-pve: added  (not installed)
+
+# 2. Install kernel headers
+apt install pve-headers-$(uname -r)
+
+# 3. Check if 595 is in apt
+apt-cache policy nvidia-driver-595
+
+# 4a. If available via apt:
+apt install nvidia-driver-595
+
+# 4. apt install will fail ("Unable to locate package") — use .run installer:
+dkms remove nvidia/580.126.09 --all
+wget https://us.download.nvidia.com/XFree86/Linux-x86_64/595.71.05/NVIDIA-Linux-x86_64-595.71.05.run
+chmod +x NVIDIA-Linux-x86_64-595.71.05.run
+./NVIDIA-Linux-x86_64-595.71.05.run --dkms --no-opengl-files
+
+# 5. Verify
+dkms status       # should show: nvidia/595.71.05, 7.0.6-2-pve: installed
+nvidia-smi        # should show RTX 3090, Driver Version: 595.71.05
+```
+
+Do not use `nvidia-open` on RTX 3090 plus kernel 7.0 in this setup. The source notes recorded BAR1 VA exhaustion and hard reboot risk on that path.
+
+### Still On Old Kernel
+
+```bash
+# List installed kernels
+proxmox-boot-tool kernel list
+
+# Set kernel 7.0 as default
+proxmox-boot-tool kernel pin 7.0.x-x-pve
+
+# Reboot
+reboot
+```
+
+### Host-Level Rollback
+
+Use this only if per-container PBS restores are not enough.
+
+```bash
+# Run from Proxmox rescue ISO or live environment
+zpool import -f rpool
+zfs rollback -r rpool/ROOT/pve-1@pre-pve-9.2-upgrade
+reboot
+```
+
+## Related Topics
+
+- [Kernel 7 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) - the side effect exposed after this upgrade.
+- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) - the backup system used before touching the host.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - the broader NVIDIA host/container model.
+
+[^1]: Proxmox VE 9.2 release notes list the major component changes, including Linux kernel 7.0, QEMU 11.0, LXC 7.0, and ZFS 2.4: https://pve.proxmox.com/wiki/Roadmap#Proxmox_VE_9.2

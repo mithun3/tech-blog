@@ -2,7 +2,7 @@
 title: "GPU Passthrough On Proxmox"
 description: "Install NVIDIA drivers on the Proxmox host, expose GPUs into LXC containers, and keep single- or dual-GPU AI workloads stable inside the Proxmox stack."
 publishedAt: "2024-11-30"
-updatedAt: "2025-01-15"
+updatedAt: "2026-06-08"
 order: 2
 status: published
 ---
@@ -24,6 +24,8 @@ This guide assumes:
 - you want to expose that GPU into one or more LXC containers
 
 If your homelab does not include a dedicated GPU, skip this page entirely.
+
+If you are doing this during a PVE 9.2 upgrade, read [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) first. The generic examples below use the 580.x branch, while the PVE 9.2/kernel 7.0 host path in this lab required NVIDIA 595.71.05 and also exposed the [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca).
 
 ## Host Preparation
 

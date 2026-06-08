@@ -1,0 +1,44 @@
+---
+title: "PVE 9.2, Kernel 7, And The Boot Hang That Followed"
+publishedAt: "2026-06-08"
+summary: "A short note on the PVE 9.2 upgrade that moved the host to kernel 7.0, exposed a nova_core boot hang, and turned a clean runbook into an RCA worth keeping."
+tags:
+  - Proxmox
+  - Homelab
+  - RCA
+  - Backups
+---
+
+The PVE 9.2 upgrade was supposed to be ordinary in the responsible sense of the word.
+
+Backups first. Containers next. Host last. NVIDIA driver handled deliberately because kernel 7.0 was going to change the build surface. Nothing heroic, nothing clever, just the kind of maintenance window that respects the machine enough to prepare for it.
+
+And then the reboot stopped at `ifupdown2-pre.service`.
+
+That is the part I want to preserve: the boot hang was not a separate event. It came into the picture because PVE 9.2 made kernel `7.0.6-2-pve` the default. The upgrade completed, the host rebooted, kernel 7 touched the hardware differently, and the machine surfaced a problem that had been waiting there quietly.
+
+The short version:
+
+```text
+PVE 9.2 upgrade
+  -> kernel 7.0 became default
+  -> nova_core auto-loaded for both RTX 3090s
+  -> udev never settled cleanly
+  -> ifupdown2-pre blocked networking
+  -> old eth0 / missing vmbr0 config became visible
+  -> physical console saved the day
+```
+
+That last line matters. The Proxmox UI was gone. SSH was gone. The fix happened because there was still a way to stand next to the host and talk to it directly.
+
+The useful lesson is not "never upgrade." It is smaller and better than that: major host upgrades need a real recovery path before the reboot. PBS backups, a previous kernel still installed, console access, and a willingness to inspect the boring files are what kept this from becoming a rebuild.
+
+The exact runbooks now live in the wiki:
+
+- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) is the backup foundation that made the upgrade less scary.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) is the planned upgrade path: pre-flight, PBS backups, container updates, host upgrade, NVIDIA 595.71.05, and verification.
+- [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) is the side effect: `nova_core`, `udevadm settle`, `nic0`, `vmbr0`, and the fix that brought `192.168.50.20` back.
+
+The upgrade did what upgrades often do in a homelab. It did not invent every problem. It changed enough underneath the system that old assumptions stopped being free.
+
+That is the note worth keeping.

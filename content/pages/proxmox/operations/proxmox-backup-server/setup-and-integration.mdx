@@ -1,0 +1,221 @@
+---
+title: "PBS Setup And Integration"
+description: "The exact PBS migration path: clean old local backups, create pbspool, deploy CT 301, add the PBS datastore, and wire it into Proxmox as pbs-backups."
+publishedAt: "2026-06-08"
+order: 1
+status: published
+---
+
+# PBS Setup And Integration
+
+The migration was not about installing another dashboard. It was about getting backups off the same pool that was already under pressure.
+
+This page keeps the implementation path in one place: clean the old local backup behavior, create `pbspool`, deploy PBS inside CT 301, create the `backups` datastore, grant the `backup@pbs` user the right permissions, and register PBS in Proxmox as `pbs-backups`.
+
+Password values from the source runbook are redacted as `PBS_PASSWORD`. Everything else that matters operationally - host IPs, CT IDs, storage IDs, and the certificate fingerprint - is kept.
+
+## Target Shape
+
+| Component | Value |
+|---|---|
+| Proxmox host | `192.168.50.20` |
+| PBS container | CT 301, hostname `pbs` |
+| PBS address | `192.168.50.191` |
+| PBS UI | `https://192.168.50.191:8007` |
+| Backup pool | `pbspool` on `/dev/sdd` |
+| Dataset | `pbspool/backups` |
+| Host mount | `/mnt/pbs-backups` |
+| CT mount | `/mnt/backups` |
+| Datastore | `backups` |
+| Proxmox storage ID | `pbs-backups` |
+| PBS user | `backup@pbs` |
+
+## Phase 1: Stop The Old Local Backup Pressure
+
+The first move was to disable the old job and clear the local backup pile that had pushed `rpool/var-lib-vz` to 83%.
+
+```bash
+# Disabled existing job in /etc/pve/jobs.cfg
+sed -i 's/enabled 1/enabled 0/' /etc/pve/jobs.cfg
+```
+
+The actual cleanup kept only the most recent backup per container and removed the stale local copies.
+
+```bash
+# Kept only most recent backup per container, deleted 119 old backups
+# Freed: ~1.1TB on rpool/var-lib-vz
+```
+
+Result: `rpool/var-lib-vz` dropped from 1.3T used to 177GB used. That one cleanup moved the host from storage pressure back to a healthy operating level.
+
+## Phase 2: Create `pbspool`
+
+The dedicated SSD became a single-disk ZFS pool for the local backup tier.
+
+```bash
+# Wiped /dev/sdd and created single-disk ZFS pool
+wipefs -a /dev/sdd
+zpool create -f -o ashift=12 pbspool /dev/sdd
+
+# Created dataset with zstd compression
+zfs create pbspool/backups
+zfs set compression=zstd pbspool/backups
+zfs set mountpoint=/mnt/pbs-backups pbspool/backups
+```
+
+Expected pool shape:
+
+```text
+NAME        STATE     READ WRITE CKSUM
+pbspool     ONLINE       0     0     0
+  sdd       ONLINE       0     0     0
+```
+
+This is a local backup tier, not disk redundancy. The upside is speed, isolation from `rpool`, ZFS checksums, compression, and clean operational ownership. The next step is still an offsite tier.
+
+## Phase 3: Create CT 301
+
+PBS runs as an unprivileged LXC container with the backup dataset bind-mounted from the host.
+
+```bash
+pct create 301 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname pbs \
+  --cores 2 \
+  --memory 2048 \
+  --swap 512 \
+  --rootfs local-zfs:8 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+  --unprivileged 1 \
+  --features nesting=1 \
+  --onboot 1
+
+# Added bind mount for PBS storage
+pct set 301 -mp0 /mnt/pbs-backups,mp=/mnt/backups
+
+# Fixed permissions for unprivileged container (UID mapping 0→100000)
+chown -R 100000:100000 /mnt/pbs-backups
+
+# Started container
+pct start 301
+```
+
+The unprivileged container is enough here because PBS does not need a GPU, PCI passthrough, or direct disk ownership. It needs reliable storage, network access, and enough memory to deduplicate without dragging.
+
+## Phase 4: Install PBS And Create The Datastore
+
+Inside CT 301:
+
+```bash
+# Inside CT 301
+echo "deb http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription" > /etc/apt/sources.list.d/pbs.list
+wget https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+apt update
+apt install -y proxmox-backup-server
+```
+
+Create the datastore:
+
+```bash
+# Inside CT 301
+proxmox-backup-manager datastore create backups /mnt/backups
+```
+
+The datastore config is intentionally simple:
+
+```text
+datastore: backups
+        path /mnt/backups
+```
+
+PBS handles chunk storage under that path. ZFS provides the underlying dataset, compression, and health checks.
+
+## Phase 5: Create The PBS User And ACLs
+
+The source password is redacted here. Use your real value when running the command.
+
+```bash
+# Inside CT 301
+proxmox-backup-manager user create backup@pbs --password PBS_PASSWORD
+
+# Set password explicitly (required for web UI login)
+proxmox-backup-manager user update backup@pbs --password PBS_PASSWORD
+
+# Grant permissions: Audit for dashboard access, DatastoreAdmin for backup management
+proxmox-backup-manager acl update / Audit --auth-id backup@pbs
+proxmox-backup-manager acl update /datastore/backups DatastoreAdmin --auth-id backup@pbs
+```
+
+That gives the user dashboard visibility at `/` and backup/restore/prune rights on `/datastore/backups`. Proxmox documents ACLs as path-based, so keeping the broad read-only dashboard permission separate from datastore administration is a clean mental model.[^1]
+
+## Phase 6: Add PBS To Proxmox
+
+Retrieve the PBS certificate fingerprint:
+
+```bash
+# Inside CT 301
+proxmox-backup-manager cert info | grep Fingerprint
+# Output: 71:f9:d1:b1:8b:9c:31:63:51:60:2e:a2:b7:d6:a4:c9:c9:a0:b1:8e:ed:44:1a:39:33:41:b6:fa:42:ea:cb:cd
+```
+
+Add the storage backend on the Proxmox host:
+
+```bash
+# On Proxmox host — added to /etc/pve/storage.cfg
+pbs: pbs-backups
+        datastore backups
+        server 192.168.50.191
+        username backup@pbs
+        content backup
+        fingerprint 71:f9:d1:b1:8b:9c:31:63:51:60:2e:a2:b7:d6:a4:c9:c9:a0:b1:8e:ed:44:1a:39:33:41:b6:fa:42:ea:cb:cd
+        prune-backups keep-daily=14
+
+# Set password using pvesm to encrypt properly
+pvesm set pbs-backups --password PBS_PASSWORD
+```
+
+Then configure the daily job:
+
+```bash
+# On Proxmox host — created /etc/pve/jobs.cfg
+vzdump: pbs-daily-backup
+        enabled 1
+        schedule 02:00
+        storage pbs-backups
+        all 1
+        mode snapshot
+        compress zstd
+        notes-template {{guestname}}
+        notification-mode notification-system
+        prune-backups keep-daily=14
+        fleecing 0
+        node pve
+        repeat-missed 0
+```
+
+## Phase 7: Smoke Test
+
+The first test backup used CT 201.
+
+```bash
+vzdump 201 --storage pbs-backups --mode snapshot --compress zstd
+```
+
+The result was a small but useful proof: CT 201 went from 667MB raw to 234MB compressed, completed in 4.54 seconds, and appeared in the PBS datastore.
+
+If prune permissions fail, re-apply the datastore role:
+
+```bash
+# Upgraded backup@pbs role to DatastoreAdmin (includes Prune permission)
+proxmox-backup-manager acl update /datastore/backups DatastoreAdmin --auth-id backup@pbs
+
+# Added Audit role for dashboard access
+proxmox-backup-manager acl update / Audit --auth-id backup@pbs
+```
+
+## Related Topics
+
+- [Backup Policy And Maintenance](/pages/proxmox/operations/proxmox-backup-server/backup-policy-and-maintenance) - schedule, retention, verification, and recurring care.
+- [Restore And Troubleshooting](/pages/proxmox/operations/proxmox-backup-server/restore-and-troubleshooting) - restore paths and failure recovery.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) - the underlying pool and dataset hygiene.
+
+[^1]: Proxmox Backup Server user management documents users, roles, ACL paths, and the datastore permission model: https://pbs.proxmox.com/docs/user-management.html

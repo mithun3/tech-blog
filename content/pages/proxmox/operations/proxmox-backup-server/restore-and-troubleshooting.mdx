@@ -1,0 +1,335 @@
+---
+title: "PBS Restore And Troubleshooting"
+description: "Restore containers from PBS, pull individual files, recover CT 301 itself, and fix the PBS failure modes that showed up during the migration."
+publishedAt: "2026-06-08"
+order: 3
+status: published
+---
+
+# PBS Restore And Troubleshooting
+
+Backups are only interesting because restore exists.
+
+This page keeps the recovery side close to the setup: full container restore, single-file restore, PBS self-restore, and the common PBS failures that are annoying but fixable when the commands are nearby.
+
+Password values from the original notes are redacted as `PBS_PASSWORD`.
+
+## Quick Health Check
+
+Start here before you assume the backup job is broken.
+
+```bash
+# Check PBS storage status
+pvesm status -storage pbs-backups
+
+# Expected output:
+# Name               Type     Status     Total      Used       Available  %
+# pbs-backups         pbs     active     1885863296 24960      1885838336 0.00%
+```
+
+List backups:
+
+```bash
+# View backups via Proxmox
+pvesm list pbs-backups
+
+# Or inside PBS container
+pct exec 301 -- proxmox-backup-manager backup list backups
+```
+
+Check the datastore from CT 301:
+
+```bash
+# Inside PBS container (CT 301)
+pct exec 301 -- proxmox-backup-manager datastore list
+pct exec 301 -- df -h /mnt/backups
+```
+
+## Full Container Restore
+
+The web UI path is usually the safest because it shows the exact snapshot you are choosing.
+
+1. Open Proxmox web UI: `https://192.168.50.20:8006`
+2. Go to Datacenter -> Storage -> `pbs-backups`
+3. Open the Backups tab
+4. Select the backup snapshot
+5. Restore either to a new VMID or over the existing container
+
+The CLI path is faster when you already know the snapshot.
+
+```bash
+# List available backups
+pvesm list pbs-backups
+
+# Restore CT 201 from backup (example)
+pct restore 201 pbs-backups:backup/ct/201/2026-05-16T05:03:22Z \
+  --storage local-zfs \
+  --force
+
+# Restore to new container ID
+pct restore 501 pbs-backups:backup/ct/201/2026-05-16T05:03:22Z \
+  --storage local-zfs
+```
+
+Use a new VMID when you are testing. Use `--force` only when you intentionally want to overwrite the existing guest.
+
+## Single-File Restore
+
+In the PBS UI, browse Datastore -> `backups` -> Content, open the relevant backup group, then inspect `root.pxar.didx`.
+
+The CLI path mounts the archive for browsing:
+
+```bash
+# Mount backup archive for browsing
+pct exec 301 -- proxmox-backup-client mount ct/201/2026-05-16T05:03:22Z root.pxar /mnt/restore \
+  --repository backup@pbs@localhost:backups
+
+# Browse and copy files
+pct exec 301 -- ls /mnt/restore
+pct exec 301 -- cp /mnt/restore/path/to/file /tmp/
+
+# Unmount when done
+pct exec 301 -- umount /mnt/restore
+```
+
+## Restore PBS Itself
+
+CT 301 backs itself up daily. That sounds funny until it saves you.
+
+```bash
+# PBS backs itself up daily
+# Restore from latest PBS backup snapshot
+pvesm list pbs-backups | grep "ct/301"
+pct restore 301 pbs-backups:backup/ct/301/YYYY-MM-DDTHH:MM:SSZ --storage local-zfs --force
+
+# Or create as new container if CT 301 still exists
+pct restore 302 pbs-backups:backup/ct/301/YYYY-MM-DDTHH:MM:SSZ --storage local-zfs
+
+# After restore, re-add bind mount if needed
+pct set 301 -mp0 /mnt/pbs-backups,mp=/mnt/backups
+```
+
+The bind mount is the important bit. The restored root filesystem is not the same thing as reconnecting `/mnt/pbs-backups` into the container.
+
+## Manual Verification
+
+PBS verification is the part that turns "a backup exists" into "the chunks still read cleanly."[^1]
+
+```bash
+# Trigger verification for a specific backup group
+pct exec 301 -- proxmox-backup-client verify ct/201/2026-05-16T05:03:22Z \
+  --repository backup@pbs@192.168.50.191:backups
+```
+
+## PBS Storage Inactive Or 401
+
+Symptom:
+
+```text
+pvesm status -storage pbs-backups
+# pbs-backups: error fetching datastores - 401 Unauthorized
+```
+
+Fix the password, confirm the fingerprint, then confirm CT 301 is alive.
+
+```bash
+# Re-set password using pvesm
+pvesm set pbs-backups --password PBS_PASSWORD
+
+# Verify fingerprint matches
+pct exec 301 -- proxmox-backup-manager cert info | grep Fingerprint
+# Compare with /etc/pve/storage.cfg fingerprint line
+```
+
+```bash
+pct status 301
+# If stopped: pct start 301
+```
+
+```bash
+# Test connectivity from Proxmox host to PBS
+curl -k https://192.168.50.191:8007
+# Should return HTML (certificate warning is OK)
+```
+
+## Permission Denied During Prune
+
+Symptom:
+
+```text
+ERROR: prune 'ct/XXX': proxmox-backup-client failed: Error: permission check failed
+```
+
+The user needs datastore permissions that include prune.
+
+```bash
+# Ensure backup@pbs has DatastoreAdmin role (includes Prune permission)
+pct exec 301 -- proxmox-backup-manager acl update /datastore/backups DatastoreAdmin --auth-id backup@pbs
+
+# Also ensure Audit role for dashboard access
+pct exec 301 -- proxmox-backup-manager acl update / Audit --auth-id backup@pbs
+
+# Verify ACL
+pct exec 301 -- proxmox-backup-manager acl list
+```
+
+## Datastore Full
+
+Symptom:
+
+```text
+ERROR: backup failed: out of space
+```
+
+Diagnosis:
+
+```bash
+# Check PBS storage usage
+pct exec 301 -- df -h /mnt/backups
+zfs list pbspool/backups
+
+# Check for failed garbage collection
+pct exec 301 -- journalctl -u proxmox-backup -n 100 | grep -i "gc\|garbage"
+```
+
+Fix:
+
+```bash
+# Manually trigger garbage collection
+pct exec 301 -- proxmox-backup-manager garbage-collect backups
+
+# Reduce retention if needed
+# Edit /etc/pve/jobs.cfg: change keep-daily=14 to keep-daily=7
+```
+
+## PBS Container Did Not Start
+
+Symptom:
+
+```text
+pct status 301
+# status: stopped
+```
+
+Diagnosis:
+
+```bash
+# Check autostart setting
+pct config 301 | grep onboot
+# Should show: onboot: 1
+
+# Check container logs
+journalctl -u pve-container@301 --no-pager | tail -50
+```
+
+Fix:
+
+```bash
+# Enable autostart if disabled
+pct set 301 --onboot 1
+
+# Manually start
+pct start 301
+
+# Check mount point is accessible
+pct exec 301 -- df -h /mnt/backups
+```
+
+## Slow Backups
+
+Diagnosis:
+
+```bash
+# Check CPU/RAM usage during backup
+top
+# Or: htop
+
+# Check disk I/O
+iostat -x 2 10
+
+# Check ZFS ARC hit rate
+arc_summary | grep "Hit Rate"
+```
+
+Optimization:
+
+```bash
+# Adjust backup ionice priority (lower = higher priority)
+# Edit /etc/pve/jobs.cfg:
+#   ionice 5  (instead of default 7)
+
+# Increase PBS container resources if needed
+pct set 301 --cores 4 --memory 4096
+
+# Stagger backup jobs (see Maintenance section)
+```
+
+## PBS UI Not Accessible
+
+Diagnosis:
+
+```bash
+# Check PBS service status
+pct exec 301 -- systemctl status proxmox-backup --no-pager
+pct exec 301 -- systemctl status proxmox-backup-proxy --no-pager
+
+# Check listening ports inside container
+pct exec 301 -- ss -tlnp | grep 8007
+```
+
+Fix:
+
+```bash
+# Restart PBS services
+pct exec 301 -- systemctl restart proxmox-backup proxmox-backup-proxy
+
+# Verify services started
+pct exec 301 -- systemctl status proxmox-backup proxmox-backup-proxy --no-pager
+
+# Check firewall (Proxmox host)
+# PBS container is behind host NAT, should be accessible from LAN by default
+```
+
+## 403 Forbidden After Login
+
+The `backup@pbs` user can exist and still lack the root-level Audit role needed for dashboard visibility.
+
+```bash
+# Grant Audit role for dashboard access
+pct exec 301 -- proxmox-backup-manager acl update / Audit --auth-id backup@pbs
+
+# Verify permissions
+pct exec 301 -- proxmox-backup-manager acl list
+
+# Should show:
+# backup@pbs | / | Audit
+# backup@pbs | /datastore/backups | DatastoreAdmin
+```
+
+After that, log out, clear browser cookies for `192.168.50.191`, and log back in with `backup@pbs` and `PBS_PASSWORD`.
+
+## `pbspool` Degraded Or Reporting Errors
+
+```bash
+# If errors detected, run scrub
+zpool scrub pbspool
+
+# Monitor scrub progress
+zpool status -v pbspool
+
+# If disk failure suspected (unlikely on single-disk pool)
+# Check SMART status
+smartctl -a /dev/sdd
+
+# If disk failing, immediately backup critical data to external storage
+```
+
+A single-disk backup pool is still a single disk. If it starts failing, treat it as urgent, not as a normal maintenance ticket.
+
+## Related Topics
+
+- [Backup Policy And Maintenance](/pages/proxmox/operations/proxmox-backup-server/backup-policy-and-maintenance) - the recurring tasks that prevent most of these errors.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) - the first major upgrade where PBS became the safety net.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) - make backup failures leave the host.
+
+[^1]: PBS verification jobs are documented as a way to re-check backup snapshots and detect corrupted chunks before restore day: https://pbs.proxmox.com/docs/maintenance.html

@@ -1,0 +1,71 @@
+---
+title: "Proxmox Backup Server"
+description: "A practical PBS section for moving Proxmox backups off the root pool, using deduplicated daily backups, and keeping restore work boring."
+publishedAt: "2026-06-08"
+order: 3
+status: published
+---
+
+# Proxmox Backup Server
+
+This section exists because local backups became too local.
+
+The old shape worked until it did not: `vzdump` archives collected under `rpool/var-lib-vz`, the root pool climbed to 83%, and backup files became the thing threatening the host they were supposed to protect. PBS fixed the shape of the problem, not just the immediate disk pressure.
+
+The lab now uses CT 301 as a lightweight Proxmox Backup Server backed by a dedicated `pbspool` SSD. It is still a local backup tier, not a complete offsite strategy, but it moved daily container backups away from the OS and VM pool and made restore testing a normal operation instead of a panic move.[^1]
+
+## Current Shape
+
+```text
+Proxmox VE host: 192.168.50.20
+
+rpool
+  OS, VM disks, container root filesystems
+
+pbspool
+  dataset: pbspool/backups
+  mount:   /mnt/pbs-backups
+
+CT 301: pbs
+  IP:        192.168.50.191
+  datastore: backups -> /mnt/backups
+  storage:   pbs-backups
+  schedule:  daily at 02:00
+  retention: keep-daily=14
+```
+
+## What PBS Changed
+
+| Before PBS | After PBS |
+|---|---|
+| 131 local `vzdump` files under the root pool | Daily backups land on `pbspool` through PBS |
+| Full-copy backup growth | PBS chunks, deduplicates, and reuses unchanged data |
+| Manual cleanup pressure | Retention is expressed as `keep-daily=14` |
+| Backup visibility lived in scattered task logs | PBS has its own datastore, task log, verification, prune, and GC workflow |
+| Root pool filled to 83% | `rpool/var-lib-vz` dropped to 12% after cleanup |
+
+PBS snapshots still represent full restore points from the operator's point of view, but the storage backend uploads and stores changed chunks incrementally. That is the quiet win: each day looks like a complete recovery point without paying the cost of a full duplicate every day.[^2]
+
+## In This Section
+
+- [Setup And Integration](/pages/proxmox/operations/proxmox-backup-server/setup-and-integration) - the exact host, storage, CT 301, datastore, user, storage backend, and backup job setup.
+- [Backup Policy And Maintenance](/pages/proxmox/operations/proxmox-backup-server/backup-policy-and-maintenance) - the daily schedule, retention, verification, prune, garbage collection, and health rhythm.
+- [Restore And Troubleshooting](/pages/proxmox/operations/proxmox-backup-server/restore-and-troubleshooting) - full restores, single-file recovery, PBS self-restore, and the failure modes that showed up in practice.
+
+## How To Read It
+
+Start with [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) if you want the broader backup model first. It explains where snapshots and simple `vzdump` still fit.
+
+Use this section once the lab is ready for a dedicated backup target. If the root pool is already full, pair this with [Disk Space Recovery On Proxmox](/pages/proxmox/operations/disk-space-recovery) so the old local backup pile gets cleaned up deliberately instead of deleted in a hurry.
+
+The commands in these pages come from the migration runbook. Password values are intentionally replaced with `PBS_PASSWORD`; host IPs, VMIDs, storage IDs, and fingerprints are kept because they are part of the operational record.
+
+## Related Topics
+
+- [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) - the backup layers underneath this PBS setup.
+- [Disk Space Recovery On Proxmox](/pages/proxmox/operations/disk-space-recovery) - the pressure that made PBS worth doing.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) - where PBS became the pre-upgrade safety net.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) - the alert path for backup failures.
+
+[^1]: Proxmox documents PBS integration as a dedicated Proxmox VE storage backend for backup content: https://pbs.proxmox.com/docs/pve-integration.html
+[^2]: Proxmox Backup Server stores backup data in chunks and deduplicates identical chunks across snapshots: https://pbs.proxmox.com/docs/technical-overview.html

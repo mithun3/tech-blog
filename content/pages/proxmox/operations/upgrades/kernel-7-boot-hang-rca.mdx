@@ -1,0 +1,291 @@
+---
+title: "Kernel 7 Boot Hang RCA"
+description: "How the PVE 9.2 reboot exposed a kernel 7.0 nova_core boot hang, blocked ifupdown2-pre, and forced a nova_core blacklist plus vmbr0 network repair."
+publishedAt: "2026-06-08"
+order: 2
+status: published
+---
+
+# Kernel 7 Boot Hang RCA
+
+This RCA belongs after the [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade), not beside it as a random failure note.
+
+The upgrade moved the host to kernel `7.0.6-2-pve`. The reboot after that upgrade exposed a new boot path: `nova_core` auto-loaded for both RTX 3090s, udev never settled, `ifupdown2-pre.service` hung, and an old network config mistake finally mattered.
+
+The host was fixed from physical console access and returned on `192.168.50.20`.
+
+## Symptom
+
+After upgrading from PVE 9.1 to 9.2 and rebooting into kernel `7.0.6-2-pve`, the physical console stopped here:
+
+```text
+[  OK  ] (1 of 2) Job ifupdown2-pre.service start running (3s / 3min)
+```
+
+It stayed there for more than 30 minutes. SSH to `192.168.50.20` and the PVE UI at `https://192.168.50.20:8006` were both unreachable.
+
+Booting the previous kernel, `6.17.13-13-pve`, worked with no other changes.
+
+## Environment
+
+| Component | Value |
+|---|---|
+| Proxmox VE | 9.2.0 |
+| Broken kernel | `7.0.6-2-pve` |
+| Working kernel | `6.17.13-13-pve` |
+| Host IP | `192.168.50.20` |
+| NIC | Realtek RTL8125 2.5GbE, MAC `2c:f0:5d:d6:08:48`, PCI `26:00.0` |
+| Working NIC name | `nic0` through installer-created `.link` file |
+| Emergency NIC name | `enp38s0` because udev had not settled |
+| GPUs | 2x NVIDIA GeForce RTX 3090, GA102 |
+| Working GPU stack | `nouveau` only |
+| Broken GPU stack | `nova_core` plus `nouveau` |
+| Network config | referenced `eth0`; no `vmbr0` bridge present |
+
+## Diagnostic Path
+
+The TTYs were unavailable, so the broken kernel was booted into emergency mode.
+
+At GRUB: highlight `Proxmox VE 9.2 (kernel 7.0.6-2-pve)`, press `e`, append `systemd.unit=emergency.target` to the `linux` line, then press `Ctrl+X`.
+
+Emergency mode bypassed `networking.service` and `ifupdown2-pre.service`, which was enough to get a root shell.
+
+The NIC visible in emergency mode was not the expected `nic0`:
+
+```text
+2: enp38s0: <BROADCAST,MULTICAST> mtu 1500 ... state DOWN
+    link/ether 2c:f0:5d:d6:08:48
+```
+
+The interfaces file was also wrong:
+
+```text
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet static
+    address 192.168.50.20/24
+    gateway 192.168.50.1
+    dns-nameservers 8.8.8.8 8.8.4.4
+```
+
+`eth0` did not exist, and the host had no `vmbr0` bridge definition.
+
+Then the GPU driver path was compared across kernels.
+
+```bash
+# On 6.17.13-13-pve (working):
+lspci -k | grep -A3 -i nvidia
+# → Kernel modules: nvidiafb, nouveau
+# nova_core NOT listed
+
+lsmod | grep -iE 'nvidia|nouveau|nova|drm'
+# → nouveau loaded, nova_core absent
+```
+
+```bash
+# On 7.0.6-2-pve (emergency shell):
+lspci -k | grep -A3 -i nvidia
+# → Kernel modules: nvidiafb, nouveau, nova_core
+# nova_core IS listed for BOTH RTX 3090s
+```
+
+The NIC pinning file existed:
+
+```bash
+find /etc/systemd/network /usr/local/lib/systemd/network -name "*.link" | xargs cat
+# Output:
+# # setup by the Proxmox installer.
+# [Match]
+# MACAddress=2c:f0:5d:d6:08:48
+# Type=ether
+# [Link]
+# Name=nic0
+```
+
+That meant the installer had pinned the NIC correctly, but the boot path never got far enough for the rename to settle.
+
+## Root Cause
+
+Two problems stacked.
+
+### Primary Cause: `nova_core` Blocked `udevadm settle`
+
+`nova_core` is the new in-kernel open source NVIDIA GSP driver path. Kernel `7.0.6-2-pve` included it, and it auto-loaded for both RTX 3090s because no blacklist existed.[^1]
+
+During boot, the GPUs generated continuous asynchronous udev events for PCIe enumeration, firmware loading, DRM registration, and device node creation.
+
+`ifupdown2-pre.service` waits on `udevadm settle`:
+
+```ini
+[Service]
+Type=oneshot
+TimeoutSec=180
+ExecStart=/sbin/udevadm settle
+```
+
+`udevadm settle` waits for the udev queue to empty. With `nova_core` generating events from two GPUs, the queue did not reach zero. Networking was gated behind that service, so the host appeared frozen at the network pre-step.
+
+### Secondary Cause: Broken Network Config
+
+Even after the boot hang was fixed, networking would still have failed because `/etc/network/interfaces` referenced `eth0` and did not define `vmbr0`.
+
+Proxmox bridge networking expects the physical NIC to be manual and the host IP to live on the bridge. The default bridge is `vmbr0`, and containers depend on it for LAN connectivity.[^2]
+
+## Fix Part 1: Blacklist `nova_core`
+
+Run this from the kernel 7 emergency shell, or from the working 6.17.x kernel over SSH.
+
+```bash
+# Step 1: Blacklist nova_core
+echo "blacklist nova_core" > /etc/modprobe.d/blacklist-nova-core.conf
+
+# Step 2: Bake the blacklist into the initramfs for ALL installed kernels.
+# This is critical — without it, the blacklist only takes effect after initramfs
+# loads, but nova_core is loaded FROM the initramfs on 7.0.6.
+update-initramfs -u -k all
+```
+
+The `-k all` matters because the host has multiple kernels installed. Initramfs-level changes need to exist for the kernel you are about to boot, not only the kernel you happen to be running.
+
+After this, `nova_core` no longer loaded, `nouveau` took over, and `udevadm settle` completed normally.
+
+## Fix Part 2: Repair `vmbr0`
+
+After the `nova_core` blacklist, the host booted past the hang but still had no IP. The physical console confirmed `nic0` was present and down, and `/etc/network/interfaces` still referenced `eth0`.
+
+```bash
+ip link show
+# 2: nic0: <BROADCAST,MULTICAST> mtu 1500 ... state DOWN
+#    link/ether 2c:f0:5d:d6:08:48
+
+cat /etc/network/interfaces
+# references eth0 — wrong name, no vmbr0
+```
+
+The fix applied at the physical console:
+
+```bash
+cat > /etc/network/interfaces << 'EOF'
+auto lo
+iface lo inet loopback
+
+iface nic0 inet manual
+
+auto vmbr0
+iface vmbr0 inet static
+    address 192.168.50.20/24
+    gateway 192.168.50.1
+    bridge-ports nic0
+    bridge-stp off
+    bridge-fd 0
+    dns-nameservers 8.8.8.8 8.8.4.4
+EOF
+
+# Apply live without reboot (ifupdown2 supports hot-reload)
+ifreload -a
+```
+
+Result: `192.168.50.20/24` came up on `vmbr0`; SSH and the PVE web UI returned; containers regained connectivity through the bridge.
+
+## Why Kernel 6.17 Worked
+
+| Attribute | `6.17.13-13-pve` | `7.0.6-2-pve` |
+|---|---|---|
+| `nova_core` present | No | Yes |
+| GPU module path | `nouveau` only | `nova_core` plus `nouveau` |
+| udev event storm | No | Yes |
+| `udevadm settle` | completes in about 2s | hangs until timeout |
+| `.link` rename to `nic0` | runs | does not settle |
+| Networking | came up | did not come up |
+
+The old kernel hid the network config mistake because the NIC rename and existing state still worked. Kernel 7 changed the GPU driver path and exposed the weakness.
+
+## What Was Missing Before The Upgrade
+
+The runbook had backups and driver planning, but the failure showed two pre-flight gaps:
+
+- network interface naming and `vmbr0` were not validated immediately before reboot
+- independent console access was necessary and, fortunately, available
+
+The official Proxmox upgrade guide explicitly recommends running the upgrade checker and having host-independent access such as IKVM/IPMI or physical console before major upgrades.[^3]
+
+## Prevention
+
+Keep the blacklist:
+
+```bash
+cat /etc/modprobe.d/blacklist-nova-core.conf
+# blacklist nova_core
+```
+
+After new kernels:
+
+```bash
+update-initramfs -u -k all
+```
+
+Use interface pinning for future NIC changes:
+
+```bash
+# Generates .link files AND updates /etc/network/interfaces atomically
+pve-network-interface-pinning generate
+
+# Review the diff before applying
+diff /etc/network/interfaces /etc/network/interfaces.new
+```
+
+If the failure recurs:
+
+1. Boot the broken kernel with `systemd.unit=emergency.target`.
+2. Or boot the previous working kernel from GRUB Advanced options.
+3. Check `lspci -k | grep -A3 -i nvidia` for unexpected modules.
+4. Check `cat /etc/network/interfaces` against `ip link show`.
+5. Apply fixes, run `update-initramfs -u -k all`, reboot normally.
+
+## Quick Reference
+
+Files changed:
+
+| File | Change |
+|---|---|
+| `/etc/modprobe.d/blacklist-nova-core.conf` | created, blacklists `nova_core` |
+| `/etc/network/interfaces` | fixed `eth0` to `nic0`, added `vmbr0` |
+
+Full command sequence:
+
+```bash
+# Fix 1: Blacklist nova_core and rebuild initramfs
+echo "blacklist nova_core" > /etc/modprobe.d/blacklist-nova-core.conf
+update-initramfs -u -k all
+
+# Fix 2: Correct network config
+cat > /etc/network/interfaces << 'EOF'
+auto lo
+iface lo inet loopback
+
+iface nic0 inet manual
+
+auto vmbr0
+iface vmbr0 inet static
+    address 192.168.50.20/24
+    gateway 192.168.50.1
+    bridge-ports nic0
+    bridge-stp off
+    bridge-fd 0
+    dns-nameservers 8.8.8.8 8.8.4.4
+EOF
+
+ifreload -a
+```
+
+## Related Topics
+
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) - the upgrade that exposed this side effect.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - the wider NVIDIA driver model.
+- [Linux Bridges On Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox) - the bridge behavior that `vmbr0` provides.
+
+[^1]: The Linux kernel nova documentation describes the nova driver split, including `nova-core` and `nova-drm`, for NVIDIA GSP-based GPUs: https://docs.kernel.org/gpu/nova/index.html
+[^2]: Proxmox documents the default bridge model with `vmbr0`, manual physical interfaces, and `ifreload -a`: https://pve.proxmox.com/wiki/Network_Configuration
+[^3]: Proxmox's upgrade guide recommends pre-upgrade checks and host-independent console access for major upgrades: https://pve.proxmox.com/wiki/Upgrade_from_8_to_9

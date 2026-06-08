@@ -1,0 +1,45 @@
+---
+title: "Proxmox Upgrades"
+description: "Major Proxmox upgrade runbooks, post-upgrade checks, and RCA notes for when a kernel or driver change exposes hidden host assumptions."
+publishedAt: "2026-06-08"
+order: 4
+status: published
+---
+
+# Proxmox Upgrades
+
+Routine updates are one thing. A Proxmox point release with a new kernel is another creature entirely.
+
+This section is for the higher-risk path: the work that starts with a backup window, touches the host kernel, crosses GPU driver boundaries, and can expose old assumptions in networking, initramfs, or hardware drivers.
+
+The current story has a very specific order:
+
+```text
+PVE 9.2 upgrade
+  -> kernel 7.0 becomes the default
+  -> reboot exposes a nova_core + ifupdown2-pre boot hang
+  -> emergency shell diagnosis
+  -> nova_core blacklist and vmbr0 repair
+  -> host returns on 192.168.50.20
+```
+
+The boot hang is not a separate incident. It is the side effect that came into view after the PVE 9.2 upgrade.
+
+## In This Section
+
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) - the pre-flight checks, PBS backup window, container package updates, host upgrade, NVIDIA 595.71.05 driver sync, verification, cleanup, and recovery paths.
+- [Kernel 7 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) - the post-upgrade failure where kernel `7.0.6-2-pve` auto-loaded `nova_core`, blocked `udevadm settle`, and exposed a broken `eth0`/missing `vmbr0` network config.
+
+## How To Read It
+
+Read the PVE 9.2 runbook first. It is the planned work.
+
+Read the RCA second. It is what the reboot taught the machine.
+
+If you are not doing a major upgrade yet, start with [Update And Maintenance](/pages/proxmox/operations/update-maintenance). That page covers the normal maintenance rhythm. Come back here when the operation includes a new kernel, DKMS, NVIDIA driver changes, or network-interface risk.
+
+## Related Topics
+
+- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) - the backup safety net used before the upgrade.
+- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) - the broader host/container driver model behind the NVIDIA steps.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) - the ZFS and snapshot layer underneath rollback planning.
