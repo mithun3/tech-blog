@@ -1,0 +1,233 @@
+---
+title: "Apt-Cacher-NG LXC On Proxmox"
+description: "Add a dedicated apt-cacher-ng LXC container so repeated Debian package downloads across Proxmox guests are cached once and reused locally."
+publishedAt: "2026-06-08"
+updatedAt: "2026-06-08"
+order: 1
+status: published
+---
+
+# Apt-Cacher-NG LXC On Proxmox
+
+While carrying out upgrades across the lab, I kept seeing the same pattern: every container reached out and downloaded the same packages again.
+
+That is not a disaster. It is just wasteful. And once you notice the waste, it becomes hard to unsee it.
+
+So the fix became a small piece of infrastructure: one LXC container dedicated to apt-cacher-ng. The first container that asks for a package pays the download cost. Every container after that gets the package from the local cache.
+
+Some people may call this overengineering. Fair enough. But the redundant step is gone, and that is the point.
+
+## Problem Statement
+
+Updating a Proxmox host with several Debian-based LXC containers creates repeat downloads:
+
+- the same package indexes are fetched again
+- the same `.deb` files are downloaded again
+- every container depends on upstream mirrors even when another local container just downloaded the same file
+
+For one or two containers, this is background noise. For a homelab with a growing container fleet, it becomes unnecessary bandwidth, slower maintenance windows, and one more external dependency during updates.
+
+## Solution
+
+Run apt-cacher-ng as its own LXC container and point downstream containers at it for APT HTTP traffic.
+
+Apt-Cacher NG is still the current Debian-friendly tool for this job: a caching proxy for software package downloads, especially Debian and Debian-based repositories.[^1] Debian Trixie ships `apt-cacher-ng` `3.7.5-1`, while testing and unstable currently show `3.7.5-1.1`.[^2]
+
+In this lab, the cache service lives here:
+
+```text
+Container ID: 800
+Hostname: apt-cacher-ng
+IP Address: 192.168.50.123/24
+Gateway: 192.168.50.1
+Service: apt-cacher-ng (active)
+Port: 3142
+Config: /etc/apt-cacher-ng/acng.conf
+Cache: /var/cache/apt-cacher-ng (30GB)
+Logs: /var/log/apt-cacher-ng/
+```
+
+The default apt-cacher-ng configuration directory remains `/etc/apt-cacher-ng`, and the package is designed to work with minimal server-side changes for a basic setup.[^3]
+
+## Validated Container Shape
+
+| Setting | Value |
+|---|---|
+| Container ID | **800** |
+| Hostname | `apt-cacher-ng` |
+| IPv4 | **192.168.50.123/24** |
+| Gateway | `192.168.50.1` |
+| CPU | **1 core** |
+| RAM | **1024 MiB** |
+| Swap | **512 MiB** |
+| Disk | **30 GB** on `local-zfs` |
+| OS | Debian 13 Trixie |
+| Unprivileged | Enabled |
+| Nesting | Enabled |
+| OnBoot | Enabled |
+| Startup Order | 2 |
+| Service Port | `3142` |
+| Config | `/etc/apt-cacher-ng/acng.conf` |
+| Cache | `/var/cache/apt-cacher-ng` |
+| Logs | `/var/log/apt-cacher-ng/` |
+
+## What Was Built
+
+The validated implementation completed these phases:
+
+1. Verified that CT `800` was available.
+2. Confirmed network connectivity through gateway `192.168.50.1`.
+3. Confirmed enough storage on `local-zfs` for a 30 GB cache disk.
+4. Reused the locally cached Debian 13 template.
+5. Created and booted CT `800` as an unprivileged Debian 13 container.
+6. Installed and started `apt-cacher-ng`.
+7. Prepared `/var/cache/apt-cacher-ng` and `/var/log/apt-cacher-ng/`.
+
+The resulting service was active on port `3142`.
+
+```text
+apt-cacher-ng.service - Apt-Cacher NG software download proxy
+Loaded: loaded (/lib/systemd/system/apt-cacher-ng.service; enabled)
+Active: active (running)
+Process: /usr/sbin/apt-cacher-ng -c /etc/apt-cacher-ng ForeGround=1
+User: root (temporary for testing - can revert to apt-cacher-ng with proper permissions)
+```
+
+## How The Cache Flow Works
+
+APT reads configuration fragments from `/etc/apt/apt.conf.d/`, and the client-side proxy pattern is still the standard way to send HTTP package traffic through apt-cacher-ng.[^4][^5]
+
+Once a downstream container is configured:
+
+1. The first request for a package goes through apt-cacher-ng to the upstream mirror.
+2. apt-cacher-ng stores the downloaded package in `/var/cache/apt-cacher-ng`.
+3. Later containers requesting the same package receive it from the local cache.
+4. The update path becomes less chatty, less repetitive, and easier to reason about.
+
+The first run still downloads packages. The savings show up when the second, third, and tenth container ask for the same files.
+
+## Downstream Container Configuration
+
+The command below is the tested downstream proxy configuration from this lab. It intentionally uses the working client-side proxy path from the implementation notes.
+
+For each downstream container, execute:
+
+```bash
+pct exec <container_id> -- cat > /etc/apt/apt.conf.d/02proxy << 'EOF'
+Acquire::http::Proxy "http://10.0.3.1:3142";
+Acquire::http::Proxy::localhost "DIRECT";
+Acquire::http::Proxy::127.0.0.1 "DIRECT";
+EOF
+```
+
+The `localhost` and `127.0.0.1` exceptions keep local package sources from accidentally looping through the proxy.
+
+## Upstream Proxies
+
+If a private repository should bypass the cache or use a different route, add a per-host override.
+
+```bash
+pct exec <container_id> -- echo 'Acquire::http::Proxy::private-repo.local "DIRECT";' >> /etc/apt/apt.conf.d/02proxy
+```
+
+## Expected Bandwidth Savings
+
+This is the practical payoff:
+
+- first container: packages are pulled through the cache and stored
+- later containers: repeated packages are served locally
+- routine update windows: less repeated upstream traffic after the cache warms up
+
+The original estimate was roughly 80% useful caching on the first pass and around 90% bandwidth saved for repeated package sets afterward. The exact number depends on how similar the containers are and how often their package sets overlap.
+
+## Verification Commands
+
+### Container 800
+
+```bash
+# Check service status
+ssh root@192.168.50.20 "pct exec 800 -- systemctl status apt-cacher-ng"
+
+# View access log
+ssh root@192.168.50.20 "pct exec 800 -- tail -f /var/log/apt-cacher-ng/apt-cacher.log"
+
+# Check cache size
+ssh root@192.168.50.20 "pct exec 800 -- du -sh /var/cache/apt-cacher-ng/"
+
+# Test from Proxmox host (if container 10.0.3.1 gateway is routing)
+curl -x http://192.168.50.123:3142 http://deb.debian.org/debian/
+```
+
+### Downstream Containers
+
+```bash
+# Verify proxy config installed
+ssh root@192.168.50.20 "pct exec <container_id> -- cat /etc/apt/apt.conf.d/02proxy"
+
+# Test apt update (will create cache entries)
+ssh root@192.168.50.20 "pct exec <container_id> -- apt update"
+
+# Monitor cache hits on second update
+ssh root@192.168.50.20 "pct exec 800 -- tail -f /var/log/apt-cacher-ng/apt-cacher.log"
+```
+
+The second update is the interesting one. That is where the cache stops being a theory and starts showing hits.
+
+## Important Notes
+
+The service is currently running as `root` for debugging. To revert to the `apt-cacher-ng` user:
+
+1. Fix directory permissions: `chown -R apt-cacher-ng:apt-cacher-ng /var/cache/apt-cacher-ng /var/log/apt-cacher-ng /etc/apt-cacher-ng`
+2. Edit `/lib/systemd/system/apt-cacher-ng.service` and change `User=root` back to `User=apt-cacher-ng`
+3. Reload and restart: `systemctl daemon-reload && systemctl restart apt-cacher-ng`
+
+Port `3142` is the standard apt-cacher-ng port. Make sure traffic between downstream containers and `192.168.50.123:3142` is allowed.
+
+Monitor cache growth:
+
+```bash
+ssh root@192.168.50.20 "pct exec 800 -- du -sh /var/cache/apt-cacher-ng/"
+```
+
+Create a snapshot after the install:
+
+```bash
+ssh root@192.168.50.20 "pct snapshot 800 post-install"
+```
+
+Debian installs include automated apt-cacher-ng cache expiration through `/etc/cron.daily/apt-cacher-ng`, so basic cleanup is already part of the package behavior.[^6]
+
+## Security Boundary
+
+Keep this service LAN-only.
+
+Apt-cacher-ng is a package cache, not a public web application. The upstream manual recommends access control through local interfaces or firewall rules, and it also warns that cache and log directories should only be writable by the service account.[^7]
+
+Debian's security tracker currently shows `CVE-2025-11146` fixed in Trixie but vulnerable in Bookworm, and `CVE-2025-11147` as undetermined across tracked releases.[^8] That does not make this design a bad idea. It just means the cache should be patched, scoped to trusted networks, and treated like real infrastructure.
+
+## Rollback
+
+If the proxy causes trouble, remove the client-side APT proxy configuration first.
+
+```bash
+for id in 101 102 103 105 106 107 108 116 200 201 301 400; do
+  ssh root@192.168.50.20 "pct exec $id -- rm /etc/apt/apt.conf.d/02proxy"
+done
+```
+
+To remove the cache container entirely:
+
+```bash
+ssh root@192.168.50.20 "pct stop 800 && pct destroy 800"
+```
+
+The cache is an accelerator, not the source of truth. Removing it should return containers to direct upstream APT behavior once the proxy file is gone.
+
+[^1]: Apt-Cacher NG upstream describes the project as a caching proxy specialized for software package downloads from Linux distribution mirrors: https://www.unix-ag.uni-kl.de/~bloch/acng/
+[^2]: Debian package tracker for `apt-cacher-ng`, showing stable, testing, and unstable package versions: https://tracker.debian.org/pkg/apt-cacher-ng
+[^3]: The Debian Trixie `apt-cacher-ng(8)` manpage documents `/etc/apt-cacher-ng` as the typical configuration directory: https://manpages.debian.org/trixie/apt-cacher-ng/apt-cacher-ng.8.en.html
+[^4]: The Debian Trixie `apt.conf(5)` manpage documents APT configuration fragments under `/etc/apt/apt.conf.d/`: https://manpages.debian.org/trixie/apt/apt.conf.5.en.html
+[^5]: Apt-Cacher NG's client configuration guide shows the APT proxy pattern using `Acquire::http::proxy "http://CacheServerIp:3142";`: https://www.unix-ag.uni-kl.de/~bloch/acng/html/config-servquick.html
+[^6]: Apt-Cacher NG maintenance documentation describes automated cache cleanup through `/etc/cron.daily/apt-cacher-ng` on Debian installations: https://www.unix-ag.uni-kl.de/~bloch/acng/html/maint.html
+[^7]: Apt-Cacher NG security documentation covers LAN/interface access control, firewall restriction, and service-account permissions: https://www.unix-ag.uni-kl.de/~bloch/acng/html/secure.html
+[^8]: Debian security tracker entry for the `apt-cacher-ng` source package: https://security-tracker.debian.org/tracker/source-package/apt-cacher-ng

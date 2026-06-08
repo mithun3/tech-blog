@@ -2,7 +2,7 @@
 title: "Proxmox Workloads"
 description: "Service and workload guides that depend on Proxmox mechanics: LXC deployments, passthrough, and application setups that live on top of the host."
 publishedAt: "2024-12-05"
-updatedAt: "2026-05-09"
+updatedAt: "2026-06-08"
 order: 4
 status: published
 ---
@@ -24,6 +24,7 @@ If the workload is common and the immediate question is just "what is the fastes
 ## In This Section
 
 - [Proxmox Helper Scripts](/pages/proxmox/workloads/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
+- [Apt-Cacher-NG LXC On Proxmox](/pages/proxmox/workloads/apt-cacher-ng-lxc) - the small infrastructure container that caches repeated Debian package downloads across LXC maintenance windows.
 - [Pi-hole LXC On Proxmox](/pages/proxmox/workloads/pihole-lxc) - the Proxmox-specific container build for the secondary Pi-hole instance after the networking design is already settled.
 - [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) - the path for moving a host-side `naspool` into a managed NAS VM with SMB, NFS, alerting, and a mirror-plus-spare layout.
 - [Kubernetes On Proxmox With k3s](/pages/proxmox/workloads/kubernetes) - the path when a single Docker-style guest stops being enough and the lab actually wants a small Kubernetes cluster with storage, ingress, and LAN-facing service IPs.
