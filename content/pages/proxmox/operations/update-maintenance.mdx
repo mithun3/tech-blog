@@ -280,18 +280,32 @@ curl -s http://192.168.50.45:8012/health
 
 ### Open WebUI (CT 103)
 
+Use the same `uv tool install --force` shape as the Community-Scripts installer. The shorter upgrade shortcut skips the install constraint used by the helper script, so keep it out of routine maintenance.
+
+For backup, rollback, and database-migration notes, use [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc#update-open-webui).
+
 ```bash
 # Check current version
-pct exec 103 -- open-webui version 2>/dev/null || pct exec 103 -- pip show open-webui 2>/dev/null | grep Version
+pct exec 103 -- /root/.local/bin/uv tool list | grep open-webui
 
-# Update Open WebUI
-pct exec 103 -- uv tool upgrade open-webui
+# Snapshot before updating
+pct snapshot 103 pre-openwebui-update-$(date +%Y%m%d) --description "Before OpenWebUI update"
+
+# Enter the container
+pct enter 103
+
+# Stop the service
+systemctl stop open-webui
+
+# Update Open WebUI using the same method as the installer
+uv tool install --force --python 3.12 --constraint <(echo "numba>=0.60") open-webui[all]
 
 # Restart the service
-pct exec 103 -- systemctl restart open-webui
+systemctl restart open-webui
 
-# Verify
-pct exec 103 -- systemctl status open-webui --no-pager
+# Verify running version and service status
+journalctl -u open-webui -n 30 --no-pager | grep "v0\."
+systemctl status open-webui --no-pager
 ```
 
 ```bash

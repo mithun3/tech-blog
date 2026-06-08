@@ -2,7 +2,7 @@
 title: "Open WebUI Standalone Frontend On Proxmox"
 description: "Run Open WebUI in a lightweight Proxmox LXC, keep inference on remote Ollama or llama.cpp nodes, and move the browser layer out of the heavier combined stack."
 publishedAt: "2025-01-31"
-updatedAt: "2025-01-31"
+updatedAt: "2026-06-08"
 order: 4
 status: published
 ---
@@ -410,6 +410,8 @@ Verify that the login page loads, the model dropdown shows the remote backends, 
 
 ## Management Commands
 
+### Service Control
+
 Inside the container:
 
 ```bash
@@ -419,12 +421,17 @@ systemctl status open-webui
 # Restart
 systemctl restart open-webui
 
+# Check installed version
+uv tool list | grep open-webui
+
 # View logs (live)
 journalctl -u open-webui -f
 
 # View recent logs
 journalctl -u open-webui --since "10 minutes ago"
 ```
+
+### Container Control
 
 From the host:
 
@@ -440,16 +447,138 @@ pct enter 103
 pct exec 103 -- systemctl status open-webui
 ```
 
-Update Open WebUI:
+### Update Open WebUI
+
+Open WebUI updates are small when nothing migrates and annoying when the database changes under you. Treat every update as a data operation first and a package operation second.
+
+Before updating, check the release notes for breaking changes or database migrations.[^5] If a release runs a one-way migration, a package downgrade alone will not put the SQLite schema back.
+
+Check the current installed version from the host:
+
+```bash
+pct exec 103 -- /root/.local/bin/uv tool list | grep open-webui
+```
+
+`uv` lives in `/root/.local/bin/`, which is not always in `PATH` for non-login `pct exec` shells. Use the full path when calling it from the Proxmox host.
+
+#### Back Up First
+
+Run this from the Proxmox host before every Open WebUI update:
+
+```bash
+# Stop the service to ensure a clean SQLite snapshot
+pct exec 103 -- systemctl stop open-webui
+
+# Back up data directory and env file (timestamped)
+pct exec 103 -- bash -c "cp -a /root/.open-webui /root/.open-webui-backup-$(date +%Y%m%d)"
+pct exec 103 -- bash -c "cp /root/.env /root/.env-backup-$(date +%Y%m%d) 2>/dev/null || true"
+
+# Confirm backup was created
+pct exec 103 -- ls -la /root/ | grep open-webui
+
+# Restart before updating (update will restart again after)
+pct exec 103 -- systemctl start open-webui
+```
+
+For larger jumps, take a Proxmox snapshot too. That captures the Python environment as well as the app database:
+
+```bash
+# From the Proxmox host shell
+pct snapshot 103 pre-update-$(date +%Y%m%d) --description "Before OpenWebUI update"
+```
+
+#### Run The Update
+
+The Community-Scripts installer uses `uv tool install --force` with a `numba>=0.60` constraint. Use the same shape for upgrades. Do not use `uv tool upgrade`; it does not apply the constraint from the install path.
 
 ```bash
 pct enter 103
 
-# Update via uv
-uv tool upgrade open-webui
+# Update to latest via uv (mirrors community script install method)
+uv tool install --force --python 3.12 --constraint <(echo "numba>=0.60") open-webui[all]
 
-# Restart after update
+# Restart the service
 systemctl restart open-webui
+```
+
+You can also use the Community-Scripts update path by re-running the script from the Proxmox host. It detects the existing Open WebUI container and invokes its update function:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/openwebui.sh)"
+# Select CT 103 when prompted
+```
+
+#### Verify The Update
+
+Run these from inside CT 103:
+
+```bash
+# 1. Confirm the installed package version (uv metadata — not the running version)
+uv tool list | grep open-webui
+
+# 2. Restart the service to load the newly installed binary
+systemctl restart open-webui
+
+# 3. Confirm the RUNNING version from the startup banner
+journalctl -u open-webui -n 30 --no-pager | grep "v0\."
+# Expected: v0.9.x - building the best AI user interface.
+
+# 4. Confirm UI is responding
+curl -s http://localhost:42 | head -5
+# Expected: HTML response from OpenWebUI
+```
+
+`uv tool list` shows what is installed on disk. The running version is the startup banner in `journalctl`. If the banner still shows the old version after `systemctl restart`, rerun the `uv tool install --force` command and restart again.
+
+After updating, hard-refresh the browser tab so stale frontend assets do not make the old UI look like it survived the upgrade.
+
+#### Roll Back Without A Migration
+
+If no database migration ran, pin the previous package version and restart:
+
+```bash
+pct enter 103
+
+# Downgrade to a specific version
+uv tool install --force --python 3.12 --constraint <(echo "numba>=0.60") "open-webui[all]==0.5.20"
+
+systemctl restart open-webui
+```
+
+Replace `0.5.20` with the version you recorded before updating.
+
+#### Restore After A Failed Migration
+
+If the update migrated the database and the new release fails, restore the pre-update data backup and reinstall the previous package:
+
+```bash
+pct enter 103
+
+# Stop the service
+systemctl stop open-webui
+
+# Remove the migrated database and restore from backup
+# Replace YYYYMMDD with your backup date
+rm -rf /root/.open-webui
+cp -a /root/.open-webui-backup-YYYYMMDD /root/.open-webui
+
+# Restore env file if needed
+cp /root/.env-backup-YYYYMMDD /root/.env
+
+# Downgrade the package to the pre-update version
+uv tool install --force --python 3.12 --constraint <(echo "numba>=0.60") "open-webui[all]==<pre-update-version>"
+
+# Restart
+systemctl restart open-webui
+```
+
+If you took a Proxmox snapshot first, use the snapshot rollback instead:
+
+```bash
+# From the Proxmox host — stop, restore snapshot, start
+pct stop 103
+pct rollback 103 pre-update-YYYYMMDD
+pct start 103
 ```
 
 ## Choose A Secure Exposure Path
@@ -524,3 +653,4 @@ pct start 103
 [^2]: The Community-Scripts build framework defines the install menu, App Defaults precedence, and the variables used by each application entrypoint: [Community-Scripts build.func](https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func).
 [^3]: The current Open WebUI Community-Scripts entrypoint installs Open WebUI with `uv`, creates `open-webui.service`, stores data in `/root/.open-webui`, and exposes `/root/.env` for runtime overrides: [Community-Scripts openwebui.sh](https://github.com/community-scripts/ProxmoxVE/raw/refs/heads/main/ct/openwebui.sh).
 [^4]: Open WebUI documents the environment variables used for backend connection behaviour, including persistent config and request timeouts: [Open WebUI Environment Variables](https://docs.openwebui.com/getting-started/env-configuration).
+[^5]: Open WebUI publishes release notes for version changes, breaking changes, and migration warnings: [Open WebUI Releases](https://github.com/open-webui/open-webui/releases).
