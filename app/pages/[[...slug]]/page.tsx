@@ -98,8 +98,8 @@ const mdxComponents = {
 
 function remarkMermaid() {
   return (tree: any) => {
-    visit(tree, 'code', (node: any, index: number, parent: any) => {
-      if (node.lang === 'mermaid') {
+    visit(tree, 'code', (node: any, index: number | undefined, parent: any) => {
+      if (node.lang === 'mermaid' && index !== undefined && parent) {
         parent.children[index] = {
           type: 'mdxJsxFlowElement',
           name: 'Mermaid',

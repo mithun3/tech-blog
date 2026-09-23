@@ -70,7 +70,7 @@ interface MermaidProps {
  * @param {MermaidProps} props - The component properties.
  * @returns {JSX.Element} The rendered SVG diagram within a framed container, or a loading skeleton.
  */
-export function Mermaid({ chart }: MermaidProps): JSX.Element {
+export function Mermaid({ chart }: MermaidProps): React.ReactElement | null {
   const containerRef = useRef<HTMLDivElement>(null)
   const [svg, setSvg] = useState<string>('')
   
