@@ -33,6 +33,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     Video,
     Audio,
     Callout,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     code: (props: any) => {
       const match = /language-(\w+)/.exec(props.className || '')
       if (match && match[1] === 'mermaid') {

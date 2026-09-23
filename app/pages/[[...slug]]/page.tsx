@@ -97,7 +97,9 @@ const mdxComponents = {
 // ─── Remark Plugin for Mermaid ────────────────────────────────────────────────
 
 function remarkMermaid() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     visit(tree, 'code', (node: any, index: number | undefined, parent: any) => {
       if (node.lang === 'mermaid' && index !== undefined && parent) {
         parent.children[index] = {
