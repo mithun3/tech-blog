@@ -1,6 +1,6 @@
 ---
 title: "TrueNAS SCALE On Proxmox"
-description: "Run TrueNAS SCALE as a Proxmox VM when you want a managed NAS tier, NFS and SMB shares, and hot-spare-backed ZFS without adding separate hardware yet."
+description: "Run TrueNAS SCALE as a Proxmox VM with PCIe HBA passthrough to guarantee data integrity via a bare-metal RAID-Z1 ZFS array."
 publishedAt: "2024-12-18"
 updatedAt: "2025-01-31"
 order: 1
@@ -17,7 +17,7 @@ The Proxmox host still needs to be the hypervisor. The NAS layer still needs sna
 
 - you already have a stable Proxmox host and the storage role is growing beyond a simple host export
 - you want managed SMB and NFS shares, snapshot schedules, SMART monitoring, and alerting from a dedicated NAS UI
-- you have three NAS drives and want a mirror plus hot spare layout rather than a bigger but slower-to-recover parity layout
+- you have an LSI HBA card and three NAS drives, and you want to use industry-standard PCI-e passthrough and a RAID-Z1 layout to maximize data integrity and self-healing.
 
 ## Why Move Beyond Host-Side `naspool`
 
@@ -35,9 +35,9 @@ The reason to move is not because host-side ZFS is wrong. It is because once the
 
 ## In This Cluster
 
-- [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) - reallocate RAM, retire the old `naspool`, create the VM, pass drives through by stable ID, and build `tank` as a mirror plus hot spare.
+- [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) - reallocate RAM, retire the old `naspool`, create the VM, configure LSI 9400 HBA PCIe passthrough, and build `tank` as a RAID-Z1 array.
 - [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration) - create child datasets, publish NFS and SMB shares, mount them on the Proxmox host, wire them into containers, and move `vzdump` jobs over.
-- [TrueNAS Protection, Verification, And Failure Handling](/pages/proxmox/workloads/truenas-scale/protection-verification-and-failure-handling) - set snapshot schedules, SMART tests, scrubs, alerting, UPS integration, and rehearse what actually happens when a mirror leg fails.
+- [TrueNAS Protection, Verification, And Failure Handling](/pages/proxmox/workloads/truenas-scale/protection-verification-and-failure-handling) - set snapshot schedules, SMART tests, scrubs, alerting, UPS integration, and rehearse what actually happens when a drive fails in the RAID-Z1 array.
 
 ## Read This With
 

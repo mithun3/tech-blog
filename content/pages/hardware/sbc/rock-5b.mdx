@@ -1,0 +1,27 @@
+---
+title: "Radxa Rock 5B"
+description: "Deployment strategy for the Radxa Rock 5B, acting as the Observability Bastion in the homelab."
+publishedAt: "2025-11-10"
+order: 1
+status: published
+---
+
+# Radxa Rock 5B
+
+## Role: Prometheus (The Observability Bastion)
+
+- **Primary Role**: App Server / Observability Hub (Prometheus).
+- **Network**: Plug into the 2.5GbE port on the CRS310. (The Rock 5B has a native 2.5G NIC).
+
+## The Prod Logic
+
+If you run Grafana and Prometheus inside a Proxmox VM, and Proxmox crashes, you lose your monitoring exactly when you need it most.
+
+## The Play
+
+Install Debian on the Rock 5B and plug it into VLAN 10 (Management). Let it constantly scrape the Supermicro IPMI, the MikroTik switches, and the JetKVM. If your main servers catch fire, the Rock 5B stays online on an independent power supply and emails the alert.
+
+## Peripherals to Leverage
+
+- **Standard Upgrade**: Add an M.2 NVMe SSD. Prometheus constantly writes thousands of small metrics per second. A MicroSD card will burn out quickly.
+- **Extreme Upgrade**: Buy an M.2-to-PCIe x4 adapter, plug a Mellanox ConnectX-4 25GbE network card into the Rock 5B, and connect it directly to the core switch.

@@ -1,86 +1,39 @@
 ---
 title: "TrueNAS VM Build And Pool Design"
-description: "Create the TrueNAS SCALE VM on Proxmox, pass through the NAS disks by stable ID, and build the mirror-plus-spare pool without drifting from the validated host commands."
+description: "Create the TrueNAS SCALE VM on Proxmox, pass through the LSI 9400 HBA via PCIe IOMMU, and build the RAID-Z1 pool without drifting from validated host commands."
 publishedAt: "2024-12-19"
-updatedAt: "2025-01-31"
+updatedAt: "2026-09-23"
 order: 1
 status: published
 ---
 
 # TrueNAS VM Build And Pool Design
 
-This page covers the mechanical part of the move: make room, back up the old `naspool`, build the VM, pass the disks through properly, and recreate storage as a TrueNAS-managed `tank`.
+This page covers the mechanical part of the move: configuring PCIe passthrough for the LSI 9400 HBA, building the TrueNAS SCALE virtual machine, and initializing the 3x 8TB drives as a raw RAID-Z1 ZFS array.
 
-The commands below stay close to the original host notes on purpose.
+By passing through the entire HBA controller rather than individual virtualized disks, TrueNAS gains direct bare-metal access to the drives. This is the industry-standard requirement for ZFS to accurately monitor SMART data, detect silent bit-rot, and perform self-healing scrubs.
 
-## Why Mirror Plus Hot Spare
+## Why RAID-Z1 (3 Drives)
 
-The source layout uses three 8 TB WD RED drives. For that shape, the original choice was not more raw capacity. It was faster recovery and less manual intervention.
+With three 8TB NAS drives, RAID-Z1 (single parity) is the optimal topology.
 
-| Topology | Drives | Usable Space | Read Speed | Resilver Time (8TB) | Failure Tolerance |
-|----------|--------|--------------|------------|---------------------|-------------------|
-| Mirror + Hot Spare | 2 active + 1 spare | about 8 TB | about 2x single drive | about 4-6 hours | 1 drive plus automatic recovery |
-| RAIDZ1 (3 drives) | 3 active | about 16 TB | about 2x single drive | about 12-24 hours | 1 drive, manual replace |
-| RAIDZ1 (2 drives) | 2 active | about 8 TB | about 1x single drive | about 12-24 hours | 1 drive, manual replace |
+| Topology | Drives | Usable Space | Fault Tolerance | 
+|----------|--------|--------------|-------------------|
+| RAID-Z1 | 3 active | ~16 TB | 1 drive failure |
+| Mirror + Spare | 2 active + 1 spare | ~8 TB | 1 drive plus automatic recovery |
 
-The trade is simple: less usable space, shorter vulnerability window.
-
-## Physical Drive Map
-
-| Port | Drive | Capacity | Linux Device | Role |
-|------|-------|----------|--------------|------|
-| M.2_2 | NVMe | 2 TB | `/dev/nvme0n1` | `rpool` - Proxmox OS and container storage |
-| SATA 1 | HDD | 1 TB | `/dev/sda` | `backup` mirror leg 1 |
-| SATA 2 | HDD | 1 TB | `/dev/sdb` | `backup` mirror leg 2 |
-| SATA 3 | WD RED NAS HDD | 8 TB | `/dev/sdc` | `tank` mirror leg 1 |
-| SATA 4 | WD RED NAS HDD | 8 TB | `/dev/sdd` | `tank` mirror leg 2 |
-| SATA 5 | WD RED NAS HDD | 8 TB | `/dev/sde` | `tank` hot spare |
-
-Always pass the WD RED disks through with `/dev/disk/by-id/` paths, not `/dev/sdX`. Device letters are not stable across reboots.
+RAID-Z1 doubles our usable capacity compared to a mirror, while still surviving a complete drive failure. ZFS handles the parity striping automatically.
 
 ## Phase 0: Resource Reallocation
 
-TrueNAS SCALE needs real RAM. The original host made room by trimming the GPU containers and capping host ARC.
+TrueNAS SCALE relies heavily on memory for ZFS ARC. The EPYC host must allocate sufficient RAM to the VM while ensuring the host itself is not starved.
 
-### Audit current allocation
+### Limit Host ZFS ARC
 
-```bash
-ssh root@192.168.50.20
-
-# Show actual vs allocated RAM per container
-for ct in $(pct list | awk 'NR>1 {print $1}'); do
-  name=$(pct list | awk -v id="$ct" '$1==id {print $3}')
-  alloc=$(pct config $ct | grep memory | awk '{print $2}')
-  echo "CT $ct ($name): ${alloc}MB allocated"
-done
-
-# Host memory overview
-free -h
-
-# ZFS ARC usage (this is reclaimable memory)
-grep -E "^size" /proc/spl/kstat/zfs/arcstats | awk '{printf "ZFS ARC: %.1f GB\n", $3/1024/1024/1024}'
-```
-
-### Reduce GPU container RAM allocations
+Since the massive storage pool will be managed by the TrueNAS VM, the Proxmox host's ZFS ARC only needs enough memory for the root OS pool (`rpool`).
 
 ```bash
-# Reduce Ollama from 30GB -> 16GB
-# (Models load into 24GB VRAM, not system RAM. 16GB is plenty for the inference server process)
-pct set 100 -memory 16384
-
-# Reduce llama-cpp from 30GB -> 16GB
-# (Same reasoning - llama-cpp offloads all layers to GPU VRAM)
-pct set 102 -memory 16384
-
-# Verify changes
-pct config 100 | grep memory
-pct config 102 | grep memory
-```
-
-### Limit host ZFS ARC
-
-```bash
-# Set host ZFS ARC max to 4GB (sufficient for rpool + backup)
+# Set host ZFS ARC max to 4GB
 echo "options zfs zfs_arc_max=4294967296" > /etc/modprobe.d/zfs.conf
 
 # Apply without reboot
@@ -92,130 +45,39 @@ cat /sys/module/zfs/parameters/zfs_arc_max
 
 ## Phase 1: Physical Install And Pre-Migration
 
-### Install the third WD RED and verify detection
+Ensure the LSI 9400 HBA is installed in the EPYC motherboard and flashed to IT mode (Initiator Target mode). IT mode disables any hardware RAID logic on the card, presenting the disks as raw block devices to the OS.
+
+### Identify the HBA PCI Address
+
+We need the exact PCI address of the HBA to pass it through to the VM.
 
 ```bash
-# Verify all 3 WD RED drives are visible
-lsblk -o NAME,SIZE,MODEL,SERIAL
+# Find the LSI card's PCI address
+lspci | grep -i lsi
 
-# Expected output should show 3x 8TB drives:
-# sdc   7.3T  WDC WD80EFAX-...  <SERIAL1>
-# sdd   7.3T  WDC WD80EFAX-...  <SERIAL2>
-# sde   7.3T  WDC WD80EFAX-...  <SERIAL3>
+# Expected output example:
+# 04:00.0 Serial Attached SCSI controller: Broadcom / LSI SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip
 ```
 
-### Record stable drive identities
+Note the `04:00.0` prefix. This is the IOMMU group ID we will use.
+
+## Phase 2: Create The VM & Pass Through The HBA
+
+### Download the ISO
 
 ```bash
-# Get stable by-id paths for all 3 WD RED drives
-ls -la /dev/disk/by-id/ | grep -E "^l.*ata-WD" | grep -v part
-
-# Save output - you'll need these exact paths for VM passthrough
-# Example output:
-# ata-WDC_WD80EFAX_<SERIAL1> -> ../../sdc
-# ata-WDC_WD80EFAX_<SERIAL2> -> ../../sdd
-# ata-WDC_WD80EFAX_<SERIAL3> -> ../../sde
-
-# Also record serial numbers for reference
-smartctl -i /dev/sdc | grep "Serial Number"
-smartctl -i /dev/sdd | grep "Serial Number"
-smartctl -i /dev/sde | grep "Serial Number"
-```
-
-### Back up the existing `naspool`
-
-```bash
-# Create a final snapshot of everything in naspool
-zfs snapshot -r naspool@pre-truenas-migration
-
-# Option A: Copy to backup pool (if space permits - 1TB mirror may be too small)
-zfs send -R naspool@pre-truenas-migration | zfs receive -F backup/naspool-backup
-
-# Option B: Copy to external USB drive (recommended for large datasets)
-# Plug in a USB drive, identify it:
-lsblk
-# Mount it:
-mkdir -p /mnt/usb-backup
-mount /dev/sdX1 /mnt/usb-backup
-
-# Copy data
-rsync -avP /naspool/media/ /mnt/usb-backup/naspool-media/
-rsync -avP /naspool/documents/ /mnt/usb-backup/naspool-documents/
-rsync -avP /naspool/vm-backups/ /mnt/usb-backup/naspool-vm-backups/
-
-# Verify backup integrity
-ls -laR /mnt/usb-backup/
-
-# Unmount USB
-umount /mnt/usb-backup
-```
-
-### Save current storage and cron state
-
-```bash
-# Save current vzdump crontab for reference
-crontab -l > /root/crontab-backup-pre-truenas.txt
-
-# Save naspool properties
-zfs get all naspool > /root/naspool-properties-backup.txt
-zpool status naspool > /root/naspool-status-backup.txt
-```
-
-## Phase 2: Retire `naspool` And Create The VM
-
-### Remove `naspool` from Proxmox storage config if needed
-
-```bash
-# Check if naspool is registered as Proxmox storage
-pvesm status | grep naspool
-
-# If listed, remove it
-pvesm remove naspool
-
-# Verify removal
-pvesm status
-```
-
-### Export or destroy the host-side pool
-
-```bash
-# Export (cleanly unmount) the pool
-zpool export naspool
-
-# If export fails due to busy datasets:
-zpool export -f naspool
-
-# Verify naspool is gone
-zpool list
-# Should show only: rpool, backup
-```
-
-```bash
-# Alternative if you want to wipe metadata instead:
-zpool destroy naspool
-# Then wipe partition tables:
-wipefs -a /dev/sdc
-wipefs -a /dev/sdd
-```
-
-### Download the ISO and create the VM
-
-```bash
-# Download TrueNAS SCALE ISO (check for latest version at https://www.truenas.com/download-truenas-scale/)
 cd /var/lib/vz/template/iso/
-
-# Download latest stable release (update URL as needed)
+# Download TrueNAS SCALE ElectricEel
 wget https://download.truenas.com/TrueNAS-SCALE-ElectricEel/24.10.2/TrueNAS-SCALE-24.10.2.iso
-
-# Verify download
-ls -la /var/lib/vz/template/iso/TrueNAS-SCALE-*.iso
 ```
 
+### Create the TrueNAS VM
+
 ```bash
-# Create VM
+# Create the VM with 32GB RAM and 4 EPYC cores
 qm create 300 \
   --name truenas \
-  --memory 16384 \
+  --memory 32768 \
   --balloon 0 \
   --cores 4 \
   --cpu host \
@@ -231,97 +93,77 @@ qm create 300 \
   --startup order=1,up=120
 ```
 
-### Pass through the WD RED drives
+### PCIe Passthrough (IOMMU)
+
+Instead of passing individual virtual disks, we pass the entire HBA card.
 
 ```bash
-# Pass through all 3 WD RED 8TB drives using by-id paths
-# Replace <SERIAL1>, <SERIAL2>, <SERIAL3> with your actual drive serial values from Phase 1 Step 2
+# Map the PCI address identified earlier (e.g., 04:00.0) to the VM
+qm set 300 -hostpci0 04:00.0,pcie=1
 
-
-qm set 300 -scsi1 /dev/disk/by-id/ata-WDC_WD80EFZX-68UW8N0_VK0JEMLY
-qm set 300 -scsi2 /dev/disk/by-id/ata-WDC_WD80EFZX-68UW8N0_VK1GLR1Y
-qm set 300 -scsi3 /dev/disk/by-id/ata-WDC_WD80EFZX-68UW8N0_VLGTYHKY
-
-# Verify VM config shows all drives
-qm config 300 | grep scsi
-# Expected:
-# scsi0: local-zfs:vm-300-disk-0,discard=on,size=32G,ssd=1
-# scsi1: /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL1>,size=7452G
-# scsi2: /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL2>,size=7452G
-# scsi3: /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL3>,size=7452G
+# Verify VM config
+qm config 300 | grep hostpci
 ```
 
 ## Phase 3: Install TrueNAS SCALE
 
-### Boot the installer and remove the ISO after setup
+### Boot the installer
 
 ```bash
-# Start the VM
 qm start 300
 ```
 
-Install TrueNAS onto the 32 GB virtio disk, not any of the 8 TB WD RED drives. After the install finishes, remove the attached ISO from the Proxmox side:
+Install TrueNAS onto the 32 GB virtio disk (`scsi0`). The three 8TB drives attached to the HBA will appear in the installer, but **do not** install the OS onto them.
+
+After the install finishes, remove the ISO from the Proxmox side:
 
 ```bash
-# From Proxmox host, remove the CD-ROM
 qm set 300 --cdrom none
 ```
 
-### Initial host settings
+### Initial Settings
 
-Set a static IP in the TrueNAS console menu, then log in through the web UI. The original notes referenced the older `admin` path, but fresh SCALE 24.10 installs now use `truenas_admin` as the default administrative account instead.[^truenas-admin]
+Set a static IP in the TrueNAS console menu. Fresh SCALE 24.10 installs use `truenas_admin` as the default administrative account.
 
-- IP address: `192.168.50.50`
+- IP address: `10.0.10.50` (VLAN 10 Management)
 - subnet mask: `255.255.255.0`
-- default gateway: `192.168.50.1`
-- DNS: `192.168.50.10`
+- default gateway: `10.0.10.1`
 
-Set hostname, domain, timezone, and SMTP details from the UI once the web console is reachable.
-
-## Phase 4: Create `tank` As Mirror Plus Hot Spare
+## Phase 4: Create `tank` As RAID-Z1
 
 ### Verify the disks inside TrueNAS
 
-In the TrueNAS UI, check Storage -> Disks and confirm all three WD RED drives are visible and expose SMART data.
+In the TrueNAS UI, check **Storage -> Disks** and confirm all three 8TB drives are visible and expose SMART data. Because we passed through the HBA, TrueNAS has direct hardware communication with the platters.
 
-### Create the pool and enable compression
+### Create the pool
+
+You can create this via the UI, or via the Shell widget:
 
 ```bash
-# SSH into TrueNAS or use the Shell widget in web UI
 # Identify drive IDs
 ls -la /dev/disk/by-id/ | grep -v part | grep ata
 
-# Create pool: mirror of 2 drives + 1 hot spare
+# Create pool: RAID-Z1 of 3 drives
 zpool create -f tank \
-  mirror \
+  raidz1 \
     /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL1> \
     /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL2> \
-  spare \
     /dev/disk/by-id/ata-WDC_WD80EFAX_<SERIAL3>
 ```
 
 ```bash
-# Enable zstd compression on the pool (matches your existing convention)
+# Enable zstd compression on the pool
 zfs set compression=zstd tank
 ```
 
 ### Create datasets with tuned record sizes
 
 ```bash
-# Create all datasets
+# Create standard datasets
 zfs create -o recordsize=1M tank/media
-zfs create -o recordsize=128K -o quota=500G tank/documents
 zfs create -o recordsize=1M -o quota=2T tank/models
-zfs create -o recordsize=1M tank/backups
-zfs create -o recordsize=1M -o quota=2T tank/backups/vzdump
-zfs create -o recordsize=1M -o quota=1T tank/backups/timemachine
 zfs create -o recordsize=128K -o quota=500G tank/docker
-zfs create -o recordsize=128K -o quota=500G tank/scratch
-
-# Verify all datasets
-zfs list -r tank
+zfs create -o recordsize=128K -o quota=500G tank/documents
 ```
 
-Use `1M` record sizes for large sequential files like media, models, and backups. Keep `128K` for mixed or smaller-file datasets like documents and Docker volumes.
-
-[^truenas-admin]: TrueNAS documents that the legacy root login path was removed earlier in SCALE and that fresh 24.10 installs use `truenas_admin` instead of `admin`: https://www.truenas.com/docs/scale/24.10/scaletutorials/credentials/adminroles/
+Use `1M` record sizes for large sequential files (LLM models, media). Use `128K` for mixed or random I/O workloads (Docker, documents).

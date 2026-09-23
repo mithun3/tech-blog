@@ -1,5 +1,5 @@
 ---
-title: "Pi-hole On Raspberry Pi 4B"
+title: "Raspberry Pi 4B"
 description: "Deploy Pi-hole on a dedicated Raspberry Pi 4B with Pi OS Lite, SSH hardening, backups, and the Pi-side steps for active-passive DNS redundancy."
 publishedAt: "2025-12-04"
 updatedAt: "2026-05-08"
@@ -7,7 +7,16 @@ order: 1
 status: published
 ---
 
-# Pi-hole On Raspberry Pi 4B
+# Raspberry Pi 4B
+
+## Role: High-Availability DNS & Quorum
+
+Run Pi-hole on Pi 4(A) and Pi 4(B). Configure the MikroTik RB5009 DHCP server to hand out both Pi IPs. If one Pi dies or reboots for an update, internet resolution doesn't drop. Setup Keepalived for a VIP and Gravity-Sync to match ad-block lists.
+
+### The Secret Prod Weapon
+Install `corosync-qdevice` on one of these Pi 4Bs. Because the Proxmox cluster has 2 nodes (even votes), it can suffer from "split-brain" lockups. The Pi 4B acts as the impartial 3rd tie-breaking vote!
+
+---
 
 This page owns the Raspberry Pi side of the Pi-hole story.
 

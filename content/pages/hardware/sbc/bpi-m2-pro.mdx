@@ -1,0 +1,22 @@
+---
+title: "Banana Pi M2 Pro"
+description: "Deployment strategy for the Banana Pi M2 Pro as a physical subnet router for air-gap bypass and Tailscale access."
+publishedAt: "2025-11-10"
+order: 3
+status: published
+---
+
+# Banana Pi M2 Pro
+
+## Role: The Air-Gap Bypass (Physical Subnet Router)
+
+- **Primary Role**: Physical Subnet Router & Off-Site Backups.
+- **Network**: Plug it directly into VLAN 10.
+
+## The Play (Local)
+
+Make this board the singular Physical Subnet Router. This physical board guarantees that as long as the internet is online, you can always VPN into the house and access the Supermicro IPMI remotely, even if your massive servers are powered off.
+
+## The Off-Site Backup (RPi 3 alternative)
+
+You can also use remaining RPi 3s (or similar boards) for this role. Install Tailscale, attach external USB hard drives, and place them at trusted friends' houses. You now have a cryptographically secure, off-site Proxmox Backup Server (PBS) target.

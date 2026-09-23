@@ -1,0 +1,22 @@
+---
+title: "Banana Pi BPI-M2 Ultra"
+description: "Deployment strategy for the Banana Pi BPI-M2 Ultra as a dedicated config vault and light NAS."
+publishedAt: "2025-11-10"
+order: 2
+status: published
+---
+
+# Banana Pi BPI-M2 Ultra
+
+## Role: The Config Vault
+
+- **Primary Role**: Dedicated Backup / Light NAS.
+- **Network**: Plug into a 1GbE port on the RB5009.
+
+## The Play
+
+Use it as a dedicated configuration backup vault. Run a cron job to pull `.rsc` backups from the MikroTiks, `/etc/pve` backups from Proxmox, and Pi-hole databases daily to an independent physical drive.
+
+## Peripherals to Leverage
+
+This specific board has a native onboard SATA controller. Buy a 2.5" SATA SSD and a Banana Pi SATA cable. Set this up with OpenMediaVault (OMV) or a simple NFS/SMB share to automatically store backup configurations of your critical infrastructure.

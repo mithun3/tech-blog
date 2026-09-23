@@ -1,0 +1,22 @@
+---
+title: "Raspberry Pi 3"
+description: "Deployment strategy for grouping Raspberry Pi 3 boards into an experimental sandbox swarm."
+publishedAt: "2025-11-10"
+order: 4
+status: published
+---
+
+# Raspberry Pi 3
+
+## Role: The Experimental Swarm
+
+- **Primary Role**: K3s Kubernetes or Docker Swarm Cluster.
+- **Network**: Plug these into a dedicated unmanaged switch like the D-Link DGS-105.
+
+## Architecture
+
+Because older Pi 3 boards are frequently freed up as you upgrade to newer SBCs, they are perfect for grouping together into a sandbox environment.
+
+## Peripherals to Leverage
+
+Buy a Multi-Port USB PD Charger (like a 6-port Anker) to power all of them cleanly from a single wall plug, eliminating power-brick clutter. Use this cluster to run low-stakes services like Uptime Kuma (to monitor the primary Observability Bastion) or Home Assistant tests without risking production data.
