@@ -21,15 +21,11 @@ Open NAT/QoS -> VPN Director, enable the feature, then add policy rules.
 
 ## Common Scenarios
 
-```text
-NAS running Plex (needs full speed):
-  192.168.1.30  -> WAN
-
-Torrent client (needs privacy):
-  192.168.1.51  -> OpenVPN Client 1
-
-All other devices:
-  Default route -> WAN
+```mermaid
+flowchart LR
+  NAS["NAS running Plex<br/>(192.168.1.30)"] --> WAN["WAN (Full speed)"]
+  Torrent["Torrent client<br/>(192.168.1.51)"] --> VPN["OpenVPN Client 1 (Privacy)"]
+  All["All other devices<br/>(Default route)"] --> WAN
 ```
 
 ## CLI Approach

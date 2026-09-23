@@ -54,7 +54,10 @@ Side effects of NAT:
 
 ## Stateful Firewall
 
-Stateful Packet Inspection tracks conversations, not just destination ports.
+A **Stateful Firewall** remembers the state of a connection (Stateful Packet Inspection tracks conversations, not just destination ports).
+
+*   **Stateless:** You must write a rule allowing traffic *out*, and another separate rule allowing the response *in*.
+*   **Stateful:** You write one rule: "Allow VLAN 40 to talk to VLAN 10." The firewall tracks this outbound connection (`connection-state=new`). When the server in VLAN 10 responds, the firewall automatically allows the return traffic (`connection-state=established`), even if there is a strict "Drop all from VLAN 10 to VLAN 40" rule.
 
 ```text
 Outbound request:  Your PC -> google.com:443

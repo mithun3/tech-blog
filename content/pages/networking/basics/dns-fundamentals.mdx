@@ -10,29 +10,29 @@ status: published
 
 DNS converts human-readable names into IP addresses. Without it, every service would need to be reached by raw address.
 
-```text
-Without DNS:
-  You type:  http://openwebui.local:8080
-  Computer:  "I don't know the IP for that"
-
-With DNS:
-  You type:  http://openwebui.local:8080
-  Computer -> DNS server: "What is openwebui.local?"
-  DNS -> Computer: "192.168.1.25"
-  Computer -> 192.168.1.25:8080: request
-  OpenWebUI loads
+```mermaid
+flowchart TD
+  subgraph Without_DNS [Without DNS]
+    W_You["You type: http://openwebui.local:8080"] --- W_Comp["Computer: I don't know the IP for that"]
+  end
+  
+  subgraph With_DNS [With DNS]
+    You["You type: http://openwebui.local:8080"] --- Comp[Computer]
+    Comp ---|"What is openwebui.local?"| DNS[DNS server]
+    DNS ---|"192.168.1.25"| Comp
+    Comp ---|"request"| Server["192.168.1.25:8080"]
+    Server ---|"loads"| UI[OpenWebUI]
+  end
 ```
 
 ## DNS Resolution Chain
 
-```text
-Your device -> Router (local DNS relay)
-                  v if not cached
-              Upstream DNS (1.1.1.1 Cloudflare or 8.8.8.8 Google)
-                  v
-              Authoritative DNS server for that domain
-                  v
-              IP address returned, cached by router
+```mermaid
+flowchart TD
+  Device[Your device] --- Router[Router / local DNS relay]
+  Router -.->|"if not cached"| Upstream["Upstream DNS (1.1.1.1 or 8.8.8.8)"]
+  Upstream --- Auth[Authoritative DNS server for that domain]
+  Auth -.->|"IP address returned, cached by router"| Router
 ```
 
 ## Local DNS Names

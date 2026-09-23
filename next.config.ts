@@ -2,6 +2,7 @@ import createMDX from '@next/mdx'
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['192.168.20.20'],
   turbopack: {
     root: __dirname,
   },

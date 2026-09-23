@@ -10,62 +10,53 @@ status: published
 
 Network communication happens in seven layers. Each layer has a specific job and only needs to care about the layers directly above and below it.
 
-```text
-Layer 7: APPLICATION
-|- What: Web browsers, email, chat, databases
-|- Protocol: HTTP, HTTPS, SSH, DNS, FTP
-`- Example: OpenWebUI (web interface)
+## Traffic Types (How Data Moves)
 
-Layer 6: PRESENTATION
-|- What: Encryption, compression, formatting
-`- Example: TLS (HTTPS uses TLS)
+Our design heavily targets Layer 2 (L2) and Layer 3 (L3).
 
-Layer 5: SESSION
-|- What: Manages conversation flow
-`- Example: WebSocket connections
+*   **Layer 2 (Data Link - "The Same Room"):** This is traffic between devices on the *same* network segment using physical MAC addresses. It is handled by **switches**. Think of it as talking to someone in the same room. It is extremely fast because it happens entirely in hardware. 
+*   **Layer 3 (Network - "Different Cities"):** This is traffic between *different* network segments using IP addresses. It is handled by **routers**. Think of it as mailing a letter to another city; it must go through a post office (the router) to find its way. This often requires CPU cycles.
 
-Layer 4: TRANSPORT
-|- What: Ensures data arrives correctly
-|- Protocol: TCP (reliable), UDP (fast)
-`- Example: TCP port 80 (HTTP), 443 (HTTPS)
+**Example:** When your Proxmox EPYC Node (10.0.10.20) talks to your Proxmox Ryzen Node (10.0.10.21) on the same VLAN, that is **L2 traffic**. It never touches the router CPU. When your EPYC Node (10.0.10.20) talks to a container in the Client VLAN (10.0.40.50), that is **L3 traffic**. It must go to the router (default gateway) to be routed across VLANs.
 
-Layer 3: NETWORK
-|- What: Routes data across networks
-|- Protocol: IP (v4, v6)
-`- Example: 192.168.1.20 (Proxmox IP)
+```mermaid
+flowchart TB
+  L7["Layer 7: APPLICATION<br/>Web browsers, email, databases<br/>HTTP, DNS, SSH"]
+  L6["Layer 6: PRESENTATION<br/>Encryption, compression<br/>TLS"]
+  L5["Layer 5: SESSION<br/>Conversation flow<br/>WebSockets"]
+  L4["Layer 4: TRANSPORT<br/>Ensures data arrives correctly<br/>TCP, UDP"]
+  L3["Layer 3: NETWORK<br/>Routes data across networks<br/>IP (v4, v6)"]
+  L2["Layer 2: DATA LINK<br/>Moves data on same network<br/>Ethernet, MAC address"]
+  L1["Layer 1: PHYSICAL<br/>Cables, radio waves<br/>Cat6, WiFi antenna"]
 
-Layer 2: DATA LINK
-|- What: Moves data between devices on same network
-|- Protocol: Ethernet, WiFi
-`- Example: MAC address (physical hardware address)
-
-Layer 1: PHYSICAL
-|- What: Cables, radio waves, electricity
-`- Example: Cat6 ethernet cable, WiFi antenna
+  L7 --- L6 --- L5 --- L4 --- L3 --- L2 --- L1
 ```
 
 ## Layers Working Together
 
 Here is what the stack looks like when a browser request leaves your machine and is unpacked on the server.
 
-```text
-You open browser: http://192.168.1.20:8080
+```mermaid
+flowchart LR
+  subgraph Sending [Sending Request]
+    direction TB
+    S7["Layer 7: Browser sends GET /api/chat"] --> S6["Layer 6: Data compressed"]
+    S6 --> S5["Layer 5: Session established"]
+    S5 --> S4["Layer 4: TCP stream created"]
+    S4 --> S3["Layer 3: IP header (from=.. to=..)"]
+    S3 --> S2["Layer 2: Ethernet frame built"]
+    S2 --> S1["Layer 1: Electrical signals sent"]
+  end
 
--> Sending
-Layer 7: Browser sends GET /api/chat
-Layer 6: Data compressed/formatted
-Layer 5: WebSocket session established
-Layer 4: TCP stream created
-Layer 3: IP header added - from=192.168.1.100, to=192.168.1.20
-Layer 2: Ethernet frame built, MAC addresses added
-Layer 1: Electrical signals sent through cable
+  subgraph Receiving [Receiving Response]
+    direction TB
+    R1["Layer 1: Signals converted to bits"] --> R2["Layer 2: Frame unpacked"]
+    R2 --> R3["Layer 3: IP packet routed to Proxmox"]
+    R3 --> R4["Layer 4: TCP stream assembled"]
+    R4 --> R7["Layer 7: nginx processes the request"]
+  end
 
--> Receiving (server side, reversed)
-Layer 1: Signals -> bits
-Layer 2: Frame unpacked
-Layer 3: IP packet routed to Proxmox
-Layer 4: TCP stream assembled
-Layer 7: nginx processes the request
+  S1 ====|Physical Cable| R1
 ```
 
 The important practical point is that failures usually map to a layer. A DNS issue is not the same class of problem as a dropped TCP connection or a broken cable.

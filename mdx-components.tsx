@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Video } from '@/components/mdx/video'
 import { Audio } from '@/components/mdx/audio'
 import { Callout } from '@/components/mdx/callout'
+import { Mermaid } from '@/components/mdx/mermaid'
 
 export function useMDXComponents(components: MDXComponents): MDXComponents {
   return {
@@ -32,6 +33,13 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     Video,
     Audio,
     Callout,
+    code: (props: any) => {
+      const match = /language-(\w+)/.exec(props.className || '')
+      if (match && match[1] === 'mermaid') {
+        return <Mermaid chart={String(props.children)} />
+      }
+      return <code {...props} />
+    },
     ...components,
   }
 }

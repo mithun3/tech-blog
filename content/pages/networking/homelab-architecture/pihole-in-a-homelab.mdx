@@ -40,10 +40,10 @@ If the only DNS filter in the house disappears, users do not experience "ad bloc
 
 That is why the dual-instance pattern is so common in homelabs:
 
-```text
-Router DHCP
-  -> DNS 1: primary Pi-hole
-  -> DNS 2: secondary Pi-hole
+```mermaid
+flowchart LR
+  Router["Router DHCP"] --> D1["DNS 1: primary Pi-hole"]
+  Router --> D2["DNS 2: secondary Pi-hole"]
 ```
 
 When one node is down for maintenance, updates, storage issues, or simple bad luck, clients still have somewhere to resolve names.

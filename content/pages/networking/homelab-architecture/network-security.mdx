@@ -12,18 +12,26 @@ Good homelab security is layered. The router, the hypervisor, and the individual
 
 ## Layered Defense
 
-```text
-Layer 1 - ASUS Router (perimeter)
-|- NAT: hides private network
-|- SPI firewall: drops unsolicited inbound traffic
-`- Port forwarding: only explicitly opened ports are reachable
-
-Layer 2 - Proxmox host (iptables)
-|- Firewall rules per bridge
-`- Can block traffic between containers if needed
-
-Layer 3 - Container / service
-`- Application-level auth (passwords, API keys, mTLS)
+```mermaid
+flowchart TD
+  subgraph L1 [Layer 1 - ASUS Router perimeter]
+    direction TB
+    NAT["NAT: hides private network"]
+    SPI["SPI firewall: drops unsolicited inbound"]
+    PF["Port forwarding: explicitly opened ports"]
+  end
+  subgraph L2 [Layer 2 - Proxmox host]
+    direction TB
+    FW["Firewall rules per bridge"]
+    Iso["Can block traffic between containers"]
+  end
+  subgraph L3 [Layer 3 - Container / service]
+    direction TB
+    Auth["Application-level auth (passwords, API keys, mTLS)"]
+  end
+  
+  L1 --- L2
+  L2 --- L3
 ```
 
 ## Firewall Rule Example
@@ -41,18 +49,31 @@ iptables -I INPUT -i eth0 -p tcp --dport 23 -j DROP
 
 DNS-level filtering can stop entire classes of traffic before a client ever reaches them.
 
-```text
-Without Pi-hole:
-  Device -> DNS -> malware.com resolves -> device connects -> infected
+```mermaid
+flowchart TD
+  subgraph Without_Pihole [Without Pi-hole]
+    direction LR
+    D1["Device"] --> DNS1["DNS"]
+    DNS1 --> M1["malware.com resolves"]
+    M1 --> C1["device connects"]
+    C1 --> I1["infected"]
+  end
+  
+  subgraph With_Pihole [With Pi-hole]
+    direction LR
+    D2["Device"] --> DNS2["Pi-hole DNS"]
+    DNS2 --> M2["malware.com is blocked"]
+    M2 --> DRP["drops query"]
+    DRP --> S["safe"]
+  end
 
-With Pi-hole:
-  Device -> Pi-hole DNS -> "malware.com is blocked" -> drops query -> safe
-
-Benefits:
-|- Network-wide (all devices protected automatically)
-|- No per-device config
-|- Blocks ads and malicious domains
-`- Free, open-source
+  subgraph Benefits [Benefits]
+    direction TB
+    B1["Network-wide protection"]
+    B2["No per-device config"]
+    B3["Blocks ads and malicious domains"]
+    B4["Free, open-source"]
+  end
 ```
 
 That kind of filtering does not replace firewalling or authentication, but it is a useful low-cost control for home infrastructure.

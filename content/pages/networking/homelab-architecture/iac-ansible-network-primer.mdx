@@ -1,0 +1,128 @@
+---
+title: "Infrastructure as Code: Network Primer"
+description: "Automating enterprise homelab network configuration using Ansible, ensuring idempotency, safety backups, and secret management."
+publishedAt: "2026-09-23"
+order: 2
+status: published
+---
+
+# Infrastructure as Code (IaC) - Homelab Network Primer
+
+Welcome to the automated network configuration for the enterprise homelab. This repository uses **Ansible** to declaratively configure our network hardware (like MikroTik routers and switches).
+
+## What Does This Do?
+
+Instead of logging into a router's web interface and clicking around to create VLANs and firewall rules, we define our entire network in these YAML files (`playbooks/01_network.yml` and `roles/mikrotik_base`). Ansible acts as our agent, connecting to the router via its API and applying these settings instantly, safely, and predictably.
+
+## Industry Best Practices Adopted
+
+1. **Infrastructure as Code (IaC):** Complete reproducibility. If your router suffers a catastrophic failure, you can replace the hardware and restore the exact same configuration in seconds by running this script.
+2. **Idempotency:** You can run these scripts repeatedly. They are smart enough to only make changes if the router's configuration has drifted from what is defined in the script.
+3. **Automated Safety Backups:** Before the script makes any changes, it automatically commands the router to create a local backup (e.g., `pre_ansible_deploy.backup`) just in case you need to revert.
+4. **Secret Management:** Sensitive data (like passwords or API tokens) is kept safe using `ansible-vault` (see `group_vars/all/secrets.yml`). This means passwords are never exposed in plain text in version control.
+5. **Zero-Trust Network Segmentation:** Traffic is isolated by default. Explicit VLANs separate your Management interface from your regular Clients and Compute services, significantly reducing the attack surface.
+
+---
+
+## Execution Guide: Running The Scripts
+
+If you want to execute these scripts on your own router, follow these steps.
+
+### Prerequisites
+Make sure your control machine (your laptop or management VM) has Ansible and the required MikroTik router modules installed.
+```bash
+ansible-galaxy collection install community.routeros
+```
+*Note: Your MikroTik router must have its REST API enabled to receive these commands.*
+
+### Step 1: The Dry-Run (Check Mode)
+Industry best practice is to always perform a "dry run" first. This tells Ansible to ask the router, "If I ran this script, what would change?" without actually modifying anything. It is completely safe.
+```bash
+ansible-playbook playbooks/01_network.yml --check --diff
+```
+*(Note: Because we configured `ansible.cfg` to read from `~/.ansible_vault_pass.txt`, you do not need to append `--ask-vault-pass`!)*
+
+### Step 2: Apply the Configuration
+Once you are happy with the planned changes from the dry run, execute the playbook for real.
+```bash
+ansible-playbook playbooks/01_network.yml
+```
+
+---
+
+## Managing Secrets (Ansible Vault)
+
+Sensitive information, such as your router admin password, is managed using `ansible-vault`. There are two main ways to encrypt data:
+
+### 1. Encrypting an Entire File (Recommended)
+You can encrypt the entire `secrets.yml` file so that none of its contents are readable without the vault password.
+```bash
+# Encrypt the file for the first time
+ansible-vault encrypt group_vars/all/secrets.yml
+
+# Edit the encrypted file later
+ansible-vault edit group_vars/all/secrets.yml
+```
+
+### 2. Encrypting a Single Password String
+If you prefer to keep the file readable but only encrypt the specific password values, you can generate an encrypted string and paste it into your YAML file:
+```bash
+ansible-vault encrypt_string 'YourSuperSecretPassword123' --name 'vault_mikrotik_password'
+```
+
+*Note: Ansible is configured (via `ansible.cfg`) to automatically look for your vault password in `~/.ansible_vault_pass.txt`. You do not need to use the `--ask-vault-pass` flag as long as this file exists and contains your correct password.*
+
+### Step 3: Network Validation (Assurance)
+
+Once your network is deployed, you should routinely validate that its operational state matches your intended configuration. We use an industry-standard "Testing as Code" pattern for this, which leverages Ansible's `assert` module.
+
+Run the validation playbook:
+```bash
+ansible-playbook playbooks/02_network_validate.yml
+```
+
+This script makes **zero configuration changes**. Instead, it acts as an automated auditor. It connects to the live router, collects its operational data, and runs strict checks.
+
+#### What Exactly Is Validated?
+1. **L2 Isolation (VLAN Filtering):** It checks if the main bridge exists and mathematically asserts that hardware `vlan-filtering` is enabled. Without this, VLANs are not actually isolated.
+2. **VLAN Interfaces:** It verifies that every VLAN defined in your code (e.g., VLAN 10 for Management, VLAN 20 for Core Services) actually exists on the router.
+3. **L3 Routing (Routing Tables):** It checks the router's active routing table to ensure the local subnets are present. If a route is missing, inter-VLAN routing will fail.
+4. **Reachability (ICMP Pings):** It triggers the router to ping every single local gateway and asserts that packet loss is exactly `0%`.
+
+#### Example: Successful Run
+When your network is healthy, the script will output clean assertions for every test:
+```yaml
+ok: [mikrotik_router] => {
+    "changed": false,
+    "msg": "Bridge validation passed: VLAN filtering is enabled."
+}
+ok: [mikrotik_router] => (item={'id': 10, 'name': 'Management'}) => {
+    "changed": false,
+    "msg": "VLAN interface vlan10-management is correctly configured."
+}
+ok: [mikrotik_router] => (item={'id': 10, 'name': 'Management', 'gateway': '10.0.10.1'}) => {
+    "changed": false,
+    "msg": "Ping test successful for gateway 10.0.10.1"
+}
+```
+
+#### Example: Failed Run (Detecting an Issue)
+If someone accidentally disables a VLAN interface in the router UI, or a route drops, the script will immediately catch the discrepancy and fail with a clear, actionable message:
+```yaml
+fatal: [mikrotik_router]: FAILED! => {
+    "assertion": "'name=\"vlan10-management\"' in vlan_info.stdout[0]",
+    "changed": false,
+    "evaluated_to": false,
+    "msg": "VLAN validation failed for Management (VLAN 10)"
+}
+```
+
+**Best Practice:** Run this script routinely, or immediately after deploying changes, to ensure your physical network state remains perfectly synced with your code.
+
+---
+
+### Emergency Rollback
+If you lock yourself out of the router during configuration, remember that the script creates a backup before running. 
+1. Plug your laptop directly into the emergency untagged port (usually `ether1`).
+2. Login via WinBox using MAC-Telnet.
+3. Restore the `pre_ansible_deploy.backup` file from the router's file list.

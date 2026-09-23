@@ -12,31 +12,45 @@ At the transport layer, most homelab traffic reduces to a simple tradeoff: relia
 
 ## IP Addresses
 
-```text
-IPv4 Format: 192.168.1.20
-|- 4 octets, each 0-255
-`- Total: 4.3 billion addresses (now running out)
-
-Private ranges (not routable on the internet):
-|- 192.168.0.0 - 192.168.255.255  <- your homelab network
-|- 10.0.0.0 - 10.255.255.255
-`- 172.16.0.0 - 172.31.255.255
-
-Public IP: assigned by your ISP, unique on the internet
-`- Changes on router reboot unless you pay for a static IP
+```mermaid
+flowchart LR
+  subgraph IPv4 [IPv4 Format: 192.168.1.20]
+    direction TB
+    F2["4 octets, each 0-255"]
+    F3["Total: 4.3 billion addresses"]
+  end
+  
+  subgraph Private [Private Ranges]
+    direction TB
+    P1["Not routable on the internet"]
+    P1 --- P2["192.168.0.0 - 192.168.255.255 (homelab)"]
+    P1 --- P3["10.0.0.0 - 10.255.255.255"]
+    P1 --- P4["172.16.0.0 - 172.31.255.255"]
+  end
+  
+  subgraph Public [Public IP]
+    direction TB
+    Pub1["Assigned by ISP, unique on the internet"]
+    Pub1 --- Pub2["Changes on router reboot unless static"]
+  end
 ```
 
 ## TCP
 
 TCP guarantees that data arrives in order and that lost packets are retransmitted. It establishes a connection first, then starts sending data.
 
-```text
-Client                  Server
-  |-- SYN ------------> |    "I want to connect"
-  |<- SYN-ACK --------- |    "OK, ready"
-  |-- ACK ------------> |    "Great, starting"
-  |                      |
-  |=== data flowing ====|
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Server
+  
+  Client->>Server: SYN ("I want to connect")
+  Server-->>Client: SYN-ACK ("OK, ready")
+  Client->>Server: ACK ("Great, starting")
+  
+  rect rgba(128, 128, 128, 0.1)
+  Note over Client,Server: === Data Flowing ===
+  end
 ```
 
 Used by HTTP, HTTPS, SSH, and databases - anything where missing or reordered data is unacceptable.

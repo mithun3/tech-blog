@@ -13,7 +13,8 @@ import Comments from '@/components/comments'
 import { Video } from '@/components/mdx/video'
 import { Audio } from '@/components/mdx/audio'
 import { Callout } from '@/components/mdx/callout'
-
+import { Mermaid } from '@/components/mdx/mermaid'
+import { visit } from 'unist-util-visit'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -90,13 +91,37 @@ const mdxComponents = {
   Video,
   Audio,
   Callout,
+  Mermaid,
+}
+
+// ─── Remark Plugin for Mermaid ────────────────────────────────────────────────
+
+function remarkMermaid() {
+  return (tree: any) => {
+    visit(tree, 'code', (node: any, index: number, parent: any) => {
+      if (node.lang === 'mermaid') {
+        parent.children[index] = {
+          type: 'mdxJsxFlowElement',
+          name: 'Mermaid',
+          attributes: [
+            {
+              type: 'mdxJsxAttribute',
+              name: 'chart',
+              value: node.value,
+            },
+          ],
+          children: [],
+        }
+      }
+    })
+  }
 }
 
 // ─── MDX processing options ───────────────────────────────────────────────────
 
 const mdxOptions = {
   mdxOptions: {
-    remarkPlugins: [remarkGfm],
+    remarkPlugins: [remarkMermaid, remarkGfm],
     rehypePlugins: [
       rehypeSlug,
       [
