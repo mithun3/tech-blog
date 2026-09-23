@@ -1,0 +1,127 @@
+---
+title: "Dual Boot: Proxmox & Rocky Linux"
+description: "Creating an ultra-low latency baremetal proving ground on NVMe drives while preserving Proxmox ZFS RAID1 redundancy."
+publishedAt: "2026-08-31"
+order: 3
+status: published
+---
+
+# Dual Boot: Proxmox & Rocky Linux
+
+This runbook outlines the exact sequence to carve out dedicated baremetal hardware access on the primary homelab machine. 
+
+The goal is to create an ultra-low latency proving ground using Rocky Linux to benchmark workloads without the 10–30ms penalty introduced by VMs, while retaining the Proxmox host's ZFS RAID1 redundancy.
+
+## The Architectural Constraint
+
+The host runs two 2TB NVMe drives in a ZFS RAID1 mirror for the root filesystem. 
+
+**ZFS pools cannot be shrunk in-place.** There is no way to non-destructively shrink the Proxmox partition to make room for Rocky Linux. The only architecturally sound way to share these ultra-fast drives between a ZFS hypervisor and another OS is a clean reinstall of Proxmox that explicitly caps its storage allocation at install time.
+
+## Target Hardware Shape
+
+- **`nvme0n1` and `nvme1n1` (2TB each):** 
+  - Majority (~1800GB): Proxmox ZFS RAID1 (Mirrored)
+  - Remaining ~50GB: Rocky Linux Software RAID1 (Mirrored)
+- **`sdd` (SATA SSD):** `pbspool` containing Proxmox Backup Server data. (Completely untouched during this process).
+
+---
+
+## Phase 1: Pre-Flight and Backups
+
+This process is destructive to the host OS. The backup tier is what makes this safe.
+
+1. **Verify Backups:** Ensure all critical VMs and LXCs (TrueNAS, Pi-Hole, OpenWebUI) have a current, successful backup run to `pbspool` on `sdd`.
+2. **Export Host Configs:** SCP or copy the `/etc/pve` and `/etc/network/interfaces` directories to a safe offline location for reference.
+3. **Prepare Media:** 
+   - Flash **Proxmox VE 9.2 ISO** (pve-manager/9.2.3, kernel 7.0) to a USB drive.
+   - Flash **Rocky Linux 10.2 LTS ISO** to a separate USB drive.
+
+---
+
+## Phase 2: Proxmox Reinstallation (Reserving Space)
+
+Reinstall Proxmox, but intentionally reserve ~50GB at the end of the NVMe drives.
+
+1. Boot the server from the Proxmox USB installer.
+2. In the target hard disk configuration, select **zfs (RAID1)**.
+3. Select both `nvme0n1` and `nvme1n1` as the target disks.
+4. Click **Options** (Advanced Options).
+5. Set the **`hdsize`** parameter to **1800** (reserving space on a 2TB drive). 
+   - *Why:* A 2TB drive has ~1863GB of usable space. Setting this to 1800 instructs the installer to only use the first 1800GB of the drives, leaving roughly 60GB completely unallocated for Rocky Linux.
+6. Complete the installation and verify Proxmox boots successfully.
+7. Import your backup pool: `zpool import pbspool`.
+
+---
+
+## Phase 2.5: The PBS Chicken-and-Egg Recovery
+
+Because your Proxmox Backup Server (PBS) runs as a container (CT 301) on the NVMe drives you just wiped, you are now in a "chicken-and-egg" scenario: you need PBS running to restore your VMs, but your PBS container is inside the backups.
+
+To break the loop, install PBS temporarily on the baremetal Proxmox host:
+
+1. **Install PBS on the host temporarily:**
+   ```bash
+   apt update
+   apt install -y proxmox-backup-server
+   ```
+2. **Mount the datastore:**
+   The `pbspool` should be mounted at `/pbspool` or `/mnt/pbs-backups`. Add it as a datastore in the temporary host PBS:
+   ```bash
+   proxmox-backup-manager datastore create temp-restore /pbspool/backups
+   ```
+3. **Add to Proxmox:**
+   In the Proxmox UI, go to Datacenter -> Storage -> Add -> Proxmox Backup Server.
+   - ID: `temp-pbs`
+   - Server: `127.0.0.1`
+   - Username: `root@pam` (and your Proxmox root password)
+   - Datastore: `temp-restore`
+4. **Restore CT 301 (The real PBS):**
+   Go to the `temp-pbs` storage, find the latest backup of CT 301, and restore it to your `local-zfs` storage.
+5. **Restore the rest of the lab:**
+   Start CT 301. In Proxmox, re-add your normal `pbs-backups` storage pointing to CT 301's IP (`192.168.50.191`). Restore TrueNAS, Pi-hole, and OpenWebUI.
+6. **Cleanup:**
+   Remove `temp-pbs` from Datacenter Storage, and `apt remove proxmox-backup-server` from the host.
+---
+
+## Phase 3: Hardware Isolation Warning
+
+<Callout type="warning">
+The Rocky Linux installer may attempt to install its EFI bootloader onto the existing Proxmox EFI System Partition (ESP). Because we need both drives active to create a Software RAID1 for Rocky Linux, **do not disable any drives in the BIOS.** Instead, we will manage this carefully in the Rocky Linux installer.
+</Callout>
+
+---
+
+## Phase 4: Rocky Linux Installation (Software RAID1)
+
+1. Boot from the Rocky Linux 10.2 LTS USB installer.
+2. In the storage configuration, select **BOTH** `nvme0n1` and `nvme1n1`.
+3. Choose **Custom Storage Configuration** (do not let it automatically partition).
+4. In the manual partitioning screen, target the **unallocated space** (~60GB we left free in Phase 2).
+5. Create the following layout carefully:
+   - **`/boot/efi`**: Standard Partition, ~600MB. (Restrict this to just *one* of the NVMe drives using the 'Modify storage devices' gear icon so it doesn't try to span or use the Proxmox ESP).
+   - **`/boot`**: Device Type: **RAID**, RAID Level: **RAID1**, ~1GB.
+   - **`/`**: Device Type: **RAID**, RAID Level: **RAID1**, taking the remainder of the free space.
+6. Complete the installation and verify the system boots directly into Rocky Linux.
+
+---
+
+## Phase 5: Post-Install Configuration
+
+Rely on the motherboard's built-in UEFI boot manager instead of trying to chainload bootloaders. This ensures Proxmox kernel updates never accidentally break the Rocky Linux bootloader, and vice versa.
+
+1. **Re-verify Boot Order:** Reboot and enter the MSI X570 BIOS.
+2. **Default Boot Priority:** Ensure the Proxmox UEFI boot entry is set as the default #1 boot device. This ensures the server always boots into the homelab normally after a power loss or unattended reboot.
+3. **OS Selection:** When you need to test ultra-low latency workloads, reboot the server, press **F11** to access the MSI boot menu, and select the Rocky Linux EFI bootloader.
+
+## Verification
+
+When booted into Rocky Linux, verify native hardware access:
+
+```bash
+# Verify both RTX 3090s are fully available without virtualization overhead
+nvidia-smi
+
+# Verify all 16 cores (32 threads) of the 5950X are exposed natively
+lscpu
+```

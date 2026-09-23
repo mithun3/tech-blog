@@ -28,12 +28,15 @@ Use this section when the question is not "what is Proxmox?" but "how do I stand
 
 - [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the destructive preflight for second-hand disks before they earn a place in Proxmox, TrueNAS, or any other pool you would rather not rebuild.
 - [Homelab Installation](/pages/proxmox/setup/homelab-installation) — BIOS choices, installer path, storage layout, and the early host decisions that are easier to get right before the lab depends on them.
+- [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot) — Creating an ultra-low latency baremetal proving ground on NVMe drives while preserving Proxmox ZFS RAID1 redundancy.
 
 ## How To Read It
 
 Start here when you are building or rebuilding the Proxmox host itself.
 
 If used disks are part of the storage plan, read [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you let those drives near a production pool. Then move into [Homelab Installation](/pages/proxmox/setup/homelab-installation) for the host bring-up itself.
+
+If your hardware must serve dual duty for low-latency baremetal testing, follow up the installation with [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot).
 
 If remote recovery matters, pair that bring-up with [Wake-on-LAN For Proxmox](/pages/hardware/jetkvm/wake-on-lan-for-proxmox) before you lock down the final firmware and power settings.
 
