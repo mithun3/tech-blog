@@ -1,106 +1,76 @@
 ---
-title: "Enterprise Network Segmentation & Migration"
-description: "Migrating a legacy flat homelab network to a production-ready, zero-trust segmented architecture utilizing a Collapsed Core topology."
+title: "Network Segmentation Migration"
+description: "Moving from a legacy flat homelab network to a segmented architecture, isolating management layers from production workloads."
 publishedAt: "2026-09-23"
 order: 1
 status: published
 ---
 
-# Enterprise Homelab Networking & Migration Guide
+# Network Segmentation Migration
 
-Status: ready for publication  
-Step reference: Phase 21 - Network Architecture & Migration  
-Sequence reference: docs/HERMES-WORKFORCE-IMPLEMENTATION-SEQUENCE.md  
-Source of truth: docs/HERMES-WORKFORCE-TODO.md  
-Validation date: 2026-09-23
+A single, flat network is easy to build but hard to defend.
 
-## 1) Title And Objective
+When every device shares the same broadcast domain, a compromised application container has direct access to the hypervisor management interface, the storage backend, and the network switches. That is why this lab migrated from a flat `192.168.50.0/24` subnet to a segmented architecture.
 
-**Title:** Step 21 - Transition to Enterprise-Grade Network Segmentation  
-**Objective:** Migrate the legacy flat homelab network (`192.168.50.0/24`) to a production-ready, zero-trust segmented architecture utilizing a Collapsed Core topology and Infrastructure as Code (IaC) via Ansible.
+The goal is not to add complexity for its own sake. The goal is to define strict trust boundaries so that production workloads can run safely without exposing the control plane.
 
-## 2) Why This Step Matters
+## The Problem With Flat Networks
 
-Running an enterprise homelab with advanced orchestration (like Proxmox clusters, AI workloads, and open-source infrastructure) on a single "flat" broadcast domain presents two massive risks: security and performance. A compromise in an exposed service (e.g., SearxNG, OpenWebUI) gives an attacker unrestricted lateral movement to critical management layers like Proxmox web UIs, JetKVM interfaces, and raw storage pools.
+In the old flat architecture, a single subnet handled everything from management interfaces (Proxmox, TrueNAS) and core services (DNS, DHCP), to compute workloads (Docker, VMs) and client devices (laptops, phones).
 
-By migrating to a **Collapsed Core** architecture with explicit VLAN segmentation and strict firewall boundaries, we isolate trust zones. We mandate that high-bandwidth internal traffic (Compute to Storage) stays entirely on hardware-accelerated switch chips (ASICs), bypassing the router's CPU to guarantee line-rate 10G/25G performance. This is the foundational prerequisite for securely exposing any services to the internet or deploying autonomous agent workforces.
+If a public-facing service was compromised, the attacker had unrestricted lateral movement. The entire lab was a single trust zone.
 
+## The Segmented Architecture
 
+The new design removes the flat subnet and introduces a segmented `10.0.x.x` structure managed by a MikroTik gateway. It uses explicit VLANs to isolate traffic.
 
-## 3) Target Architecture & IPAM Overlay
+### Trust Boundaries In Practice
 
-The new design removes the `192.168.50.0/24` subnet and introduces a segmented `10.0.x.x` structure managed by the MikroTik gateway.
+The real value of this segmentation is controlling the flow of traffic between zones:
 
-### Logical Segmentation (VLANs)
+```mermaid
+flowchart LR
+  Client["Client Device\n(VLAN 40)"] -.->|"DNS Query"| DNS["Pi-hole\n(VLAN 20)"]
+  Client -.->|"Web Traffic"| Proxy["NGINX Proxy\n(VLAN 20)"]
+  Proxy -.->|"App Traffic"| App["App Container\n(VLAN 30)"]
+  
+  Admin["Admin via Tailscale"] -.->|"Management"| PVE["Proxmox UI\n(VLAN 10)"]
+  
+  App -.->|"Blocked"| PVE
+  Client -.->|"Blocked"| PVE
+```
 
-| VLAN ID | Subnet | Name | Designated Nodes | Security Posture |
+### Logical Segmentation
+
+| VLAN | Subnet | Role | Devices | Security Posture |
 | :--- | :--- | :--- | :--- | :--- |
-| **VLAN 10** | `10.0.10.0/24` | **Management** | Proxmox GUIs, PBS, JetKVM, Switch IPs | **Isolated Vault.** No outbound WAN. Default-deny inbound. Accessible *only* via Tailscale Bastion. |
-| **VLAN 20** | `10.0.20.0/24` | **Core Services** | Pi-holes, Prometheus, NGINX Proxy, Tailscale | **Middleman.** Allows cross-VLAN routing for DNS. Bridges authenticated external VPN traffic. |
-| **VLAN 30** | `10.0.30.0/24` | **Compute** | Docker, Llama-cpp, OpenClaw, SearxNG | **Production.** Standard outbound WAN. Application ingress flows through the NGINX proxy. |
-| **VLAN 40** | `10.0.40.0/24` | **Clients** | Laptops, Phones, Asus AP, edge switches | **Trusted LAN.** Uses VLAN 20 Pi-holes for DNS. Standard web access. Blocked from VLAN 10 directly. |
+| **10** | `10.0.10.0/24` | **Management** | Proxmox UIs, TrueNAS UI, Switches | **Isolated.** No outbound WAN. Default-deny inbound. Accessible only via Tailscale. |
+| **20** | `10.0.20.0/24` | **Core Services** | Pi-holes, NGINX Proxy, Tailscale | **Middleman.** Allows cross-VLAN routing for DNS. Bridges authenticated external VPN traffic. |
+| **30** | `10.0.30.0/24` | **Compute** | Docker, VMs, App containers | **Production.** Standard outbound WAN. Application ingress flows through the proxy. |
+| **40** | `10.0.40.0/24` | **Clients** | Laptops, Phones, Access Points | **Trusted LAN.** Uses VLAN 20 Pi-holes for DNS. Blocked from VLAN 10 directly. |
 
-### Physical Backbone
+### Hardware Topology
 
-*   **Gateway/Firewall:** `MikroTik RB5009UG+S+IN` (WAN Gateway, Inter-VLAN Routing).
-*   **Spine (Core):** `MikroTik CRS510-8XS-2XQ-IN` (Handles 10G/25G server traffic via DAC/SFP28).
-*   **Leaf (Access):** `MikroTik CRS310-8G+2S+IN` (2.5GbE distribution for SBCs and APs).
+The physical backbone relies on MikroTik hardware to handle routing and switching. A MikroTik RB5009 gateway handles the WAN connection, firewall rules, and inter-VLAN routing. A MikroTik CRS510 core switch handles 10G/25G server traffic, while a MikroTik CRS310 access switch distributes 2.5GbE to edge devices and access points.
 
-## 4) Implementation Highlights & Best Practices
+High-bandwidth internal traffic, such as compute nodes talking to storage, is configured to stay entirely on the switch ASICs. This hardware offloading bypasses the router's CPU to maintain line-rate performance.
 
-1.  **Infrastructure as Code (IaC):** Manual GUI configurations are prohibited. All network states (Bridges, VLANs, Firewalls) are defined declaratively via Ansible. If the router dies, you can provision a new one in seconds.
-2.  **Idempotency & Safety:** The Ansible scripts automatically take backups of your router *before* applying changes. You can run the scripts repeatedly; they will only make changes if the configuration drifts from the code.
-3.  **Secrets Management (Ansible Vault):** API credentials and Auth Keys are stored securely using native `ansible-vault`, meaning passwords aren't exposed in plain text in your repository.
-4.  **Hardware Offloading:** The `vlan-filtering` is enabled natively on the MikroTik bridge, pushing L2 VLAN tagging down to the switch chip (ASIC) rather than consuming CPU cycles.
-5.  **Zero-Trust Ingress (Tailscale):** No inbound WAN ports are opened. Remote access is handled via a Tailscale Subnet Router residing in VLAN 20. 
+## Infrastructure As Code
 
-## 5) Execution Guide: How To Deploy This Network
+Manual GUI configurations are brittle. They rely on memory and are hard to reproduce. 
 
-If you are following along and need to execute these scripts on your own router, here is exactly how you do it safely.
+This network state is defined declaratively using Ansible. The bridges, VLANs, and firewall rules are stored as code. 
 
-### Step A: Prerequisites
-Make sure your control machine (your laptop or management VM) has Ansible and the required router modules installed:
-```bash
-# Install the required RouterOS collection
-ansible-galaxy collection install community.routeros
-```
+That ensures idempotency, meaning the playbook only changes things that drift from the defined state. It provides safety by automatically taking a backup on the router before applying changes. It allows for fast recovery, so if a switch dies, the configuration can be restored to a replacement unit in minutes. Finally, passwords and API keys are stored securely using Ansible Vault, never in plain text.
 
-### Step B: The Dry Run (Check Mode)
-Industry best practice is to always perform a "dry run" first. This asks the router, "If I ran this script, what would change?" without actually modifying anything.
-```bash
-ansible-playbook playbooks/01_network.yml --check --diff
-```
-*(Ansible will automatically read your inventory and your vault password from `~/.ansible_vault_pass.txt` thanks to the `ansible.cfg` file).*
+## Mitigating Risk
 
-### Step C: Execute The Configuration
-If the dry run looks good, apply the configuration to the router. The script will automatically create a backup on the router first.
-```bash
-ansible-playbook playbooks/01_network.yml
-```
+Segmenting a network introduces the risk of locking yourself out. 
 
-### Step D: Verification
-Once the script completes with `failed=0`, verify the configuration:
-```bash
-# On Proxmox host, verify bridge is VLAN-aware
-cat /etc/network/interfaces | grep vlan-aware
+The primary mitigation is keeping one port on the router off the bridge. This untagged emergency port gets a dedicated static IP. If a VLAN change breaks routing, a laptop plugged directly into this port restores access without needing a full factory reset.
 
-# Test your boundaries:
-# Ping from VLAN 40 to VLAN 10 should FAIL (Timeout). 
-# Ping from Tailscale VPN to VLAN 10 should SUCCEED.
-```
+The second mitigation is hardware offloading. By ensuring high-bandwidth nodes (like Proxmox and TrueNAS) share a VLAN on the core switch, that heavy traffic never reaches the router, preventing CPU exhaustion on the gateway.
 
-## 6) Risks, Rollback, And Mitigations
+## The Baseline Is Set
 
-1.  **Risk:** Locking oneself out of the router during VLAN configuration.
-    *   **Mitigation:** Always keep one router port off the bridge (e.g., `ether1`) as an untagged emergency management port with a dedicated static IP.
-    *   **Rollback point:** Plug a laptop directly into the emergency port and revert the configuration via WinBox MAC-Telnet, or restore the `pre_ansible_deploy.backup` file generated by Ansible.
-2.  **Risk:** CPU exhaustion on the RB5009 due to excessive inter-VLAN routing.
-    *   **Mitigation:** Ensure high-bandwidth nodes (Proxmox, TrueNAS) are physically connected to the CRS510 and reside on the *same* VLAN so traffic is switched at L2 (Hardware Offloaded).
-
-## 7) Human Reflection From The Field
-
-VLAN filtering on MikroTik hardware can be incredibly nuanced, especially differentiating between RouterOS and SwOS features. By forcing this entire configuration into Ansible, we not only document *what* the configuration is, but we remove the anxiety of forgetting *how* to set up a bridge port correctly six months from now. The initial time investment in writing declarative YAML pays off the very first time you need to reset a switch.
-
-## 8) Next Step Preview
-
-With the secure, segmented network foundation deployed and managed by GitOps, the next phase focuses on deploying the Compute layer: configuring the Proxmox nodes, setting up the TrueNAS storage pool, and validating the high-speed 25G backbone throughput.
+With the network segmented and managed by code, the foundation is stable. The next phase moves up the stack to the compute layer: configuring the Proxmox nodes and validating the storage backend.

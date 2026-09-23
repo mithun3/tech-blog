@@ -6,9 +6,13 @@ order: 2
 status: published
 ---
 
-# Cloudflare Tunnel On Proxmox
+# Cloudflare Tunnel On Proxmox (Legacy)
 
-This is the path for the lab that wants secure sharing without opening the firewall and without turning the Proxmox host into an internet-facing snowflake.
+> [!WARNING]  
+> **Deprecated for Administrative Access.** 
+> While Cloudflare Tunnels hide your public IP and provide a secure reverse proxy, they still fundamentally expose an endpoint to the public internet. This architecture has shifted to a strict **Zero Trust Network Access (ZTNA) overlay**. For all remote access to management interfaces, you must use the [Tailscale ZTNA & Subnet Routing](/pages/networking/homelab-architecture/tailscale-ztna) model. Cloudflare Tunnels should only be used when explicitly required to share a service with the general public.
+
+This is the legacy path for the lab that wants secure public sharing without opening the firewall and without turning the Proxmox host into an internet-facing snowflake.
 
 The shape is simple: `cloudflared` lives in its own unprivileged container, makes an outbound connection to Cloudflare, and routes named hostnames back to internal services. That keeps the hypervisor cleaner, keeps the edge certificates off your plate, and makes remote sharing much less dramatic than traditional port-forwarded exposure.[^1]
 

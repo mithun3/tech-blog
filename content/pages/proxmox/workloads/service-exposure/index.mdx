@@ -12,9 +12,12 @@ This subsection starts at the moment a private service stops feeling private eno
 
 Your Open WebUI stack works. Pi-hole is doing its job. Grafana is useful enough that you want it from outside the house. That is usually when a homelab drifts into the dangerous half-solution: raw HTTP, random port forwards, and a promise that it is "only temporary".
 
-This section exists to keep that part boring.
+This section exists to keep that part boring and secure.
 
-If the goal is secure exposure while the service itself stays on plain HTTP inside your network, Cloudflare Tunnel is the default answer in this subsection. Cloudflare handles the public HTTPS edge, the internal service can stay HTTP-only, and you do not need to turn every app into its own certificate project just to make remote access sane.
+**A Note on Zero Trust vs. Public Exposure:** 
+If your goal is to access management interfaces (Proxmox, TrueNAS, IPMI) or private tools remotely, you should **not** use reverse proxies or Cloudflare Tunnels. Those methods still expose endpoints to the public internet. Instead, implement a strict [Zero Trust Network Access (ZTNA) overlay](/pages/networking/homelab-architecture/tailscale-ztna) using Tailscale. 
+
+The paths below are for when you explicitly need to share a service publicly or with users who cannot install a ZTNA client.
 
 If the question is purely about DNS theory, routing, or network design, stay in [Networking](/pages/networking). If the question is specifically "how do I expose this Proxmox-hosted thing cleanly?" this is the right layer.
 
@@ -28,15 +31,15 @@ If the question is purely about DNS theory, routing, or network design, stay in 
 
 ## The Three Practical Paths
 
-There are three real choices here.
+There are three real choices here for *public* or non-ZTNA exposure.
 
 | Path | Best When | What You Trade |
 |------|-----------|----------------|
-| [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) | you want outbound-only exposure, no port forwarding, and Cloudflare Access in front of sensitive services | Cloudflare becomes part of the trust boundary[^2] |
 | [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) | you want a self-hosted reverse proxy, wildcard certificates, and one place to front multiple services | more moving parts, plus certificate renewal discipline[^3] |
 | [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) | you already live in a container-native world and want service discovery, label-driven routing, and built-in certificate issuance | a steeper operational model than most small Proxmox labs actually need[^4] |
+| [Cloudflare Tunnel On Proxmox (Legacy)](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) | you want outbound-only public exposure without opening ports | Cloudflare becomes part of the trust boundary, and endpoints are still public[^2] |
 
-If you want the shortest secure answer, start with Cloudflare Tunnel. Public HTTPS terminates at Cloudflare, the origin can stay on HTTP inside the LAN, and certificate management stops being part of every workload discussion.
+For most small homelabs wanting to host public services, a self-hosted reverse proxy with wildcard certificates is the most flexible standard. For private administration, always use [Tailscale ZTNA](/pages/networking/homelab-architecture/tailscale-ztna).
 
 The important thing is not which tool wins a theoretical comparison. The important thing is that one exposure pattern becomes the standard shape of the lab.
 
@@ -62,9 +65,11 @@ The goal is simple: if the service-exposure layer breaks, you want to repair a g
 
 ## Recommended Starting Points
 
-Start with [Cloudflare Tunnel On Proxmox](/pages/proxmox/workloads/service-exposure/cloudflare-tunnel) if you want the shortest secure path and would rather avoid opening inbound firewall ports.
+Start with [Tailscale ZTNA](/pages/networking/homelab-architecture/tailscale-ztna) for remote administration, SSH, and private infrastructure dashboards. Do not expose these via reverse proxy or Cloudflare Tunnels.
 
-Start with [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) if you want to keep the reverse proxy on your own infrastructure and you are comfortable managing DNS, certificates, and port forwarding.
+Start with [Nginx Reverse Proxy LXC On Proxmox](/pages/proxmox/workloads/service-exposure/nginx-reverse-proxy-lxc) if you want to keep the reverse proxy on your own infrastructure and you are comfortable managing DNS, certificates, and port forwarding for public-facing services.
+
+
 
 Choose [Traefik On Proxmox](/pages/proxmox/workloads/service-exposure/traefik) if your services already live in a container-native stack and you want the reverse proxy to issue certificates and discover routes from labels instead of static site files.
 

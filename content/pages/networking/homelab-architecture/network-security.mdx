@@ -10,15 +10,29 @@ status: published
 
 Good homelab security is layered. The router, the hypervisor, and the individual service all contribute different controls.
 
+## The Shift to Zero Trust
+
+This lab originally relied on a traditional edge model: an ASUS router handling NAT, a stateful firewall, and explicit port forwards or Cloudflare Tunnels for remote access. We are explicitly deviating from that original design.
+
+While Cloudflare Tunnels hide your public IP and provide a secure reverse proxy, they still fundamentally expose an endpoint to the public internet.
+
+Instead, this architecture adopts an industry-standard **Zero Trust Network Access (ZTNA) overlay**.
+- **No Inbound WAN Ports:** The MikroTik gateway maintains a strict default-deny policy for all inbound internet traffic. There are no port forwards.
+- **Authentication Before Routing:** A user must mathematically prove their identity (via MFA tied to an IdP) *before* any network packets are allowed to route to internal services.
+
+For a deep dive into how this is implemented, see [Tailscale ZTNA & Subnet Routing](/pages/networking/homelab-architecture/tailscale-ztna).
+
 ## Layered Defense
+
+Even with a ZTNA perimeter, internal security remains layered.
 
 ```mermaid
 flowchart TD
-  subgraph L1 [Layer 1 - ASUS Router perimeter]
+  subgraph L1 [Layer 1 - MikroTik perimeter]
     direction TB
     NAT["NAT: hides private network"]
-    SPI["SPI firewall: drops unsolicited inbound"]
-    PF["Port forwarding: explicitly opened ports"]
+    SPI["SPI firewall: default-deny inbound WAN"]
+    ZTNA["ZTNA Overlay: brokers all remote access"]
   end
   subgraph L2 [Layer 2 - Proxmox host]
     direction TB
