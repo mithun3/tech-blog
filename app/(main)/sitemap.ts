@@ -9,9 +9,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   const postEntries: MetadataRoute.Sitemap = posts.map((post) => ({
     url: `${BASE_URL}/blog/${post.slug}`,
-    lastModified: post.updatedAt ?? post.publishedAt,
+    lastModified: post.updatedAt ? new Date(post.updatedAt) : new Date(post.publishedAt),
     changeFrequency: "monthly",
-    priority: 0.7,
+    priority: 0.8,
   }));
 
   return [
@@ -19,7 +19,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: BASE_URL,
       lastModified: new Date(),
       changeFrequency: "weekly",
-      priority: 1,
+      priority: 1.0,
     },
     {
       url: `${BASE_URL}/blog`,
@@ -32,16 +32,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${BASE_URL}/pages`,
       lastModified: new Date(),
       changeFrequency: "weekly",
-      priority: 0.8,
+      priority: 0.9,
     },
-    ...getAllPageSlugs().map((slugSegments) => {
-      const meta = getPageMeta(slugSegments);
-      return {
-        url: `${BASE_URL}/pages/${slugSegments.join("/")}`,
-        lastModified: meta?.updatedAt ?? meta?.publishedAt ?? new Date(),
-        changeFrequency: "monthly" as const,
-        priority: 0.6,
-      };
-    }),
+    ...getAllPageSlugs()
+      .filter((slugSegments) => slugSegments.length > 0)
+      .map((slugSegments) => {
+        const meta = getPageMeta(slugSegments);
+        return {
+          url: `${BASE_URL}/pages/${slugSegments.join("/")}`,
+          lastModified: meta?.updatedAt
+            ? new Date(meta.updatedAt)
+            : meta?.publishedAt
+              ? new Date(meta.publishedAt)
+              : new Date(),
+          changeFrequency: "monthly" as const,
+          priority: 0.7,
+        };
+      }),
   ];
 }

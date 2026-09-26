@@ -14,11 +14,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = await getPostBySlug(slug);
   if (!post) return {};
 
-  const url = `${process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'}/blog/${slug}`;
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
+  const url = `${siteUrl}/blog/${slug}`;
+  const ogImageUrl = post.image
+    ? post.image
+    : `${siteUrl}/og?title=${encodeURIComponent(post.title)}&description=${encodeURIComponent(post.summary || "")}&category=Blog`;
 
   return {
     title: post.title,
     description: post.summary,
+    keywords: post.tags,
     alternates: { canonical: url },
     openGraph: {
       title: post.title,
@@ -27,12 +32,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       url,
       publishedTime: post.publishedAt,
       ...(post.updatedAt && { modifiedTime: post.updatedAt }),
-      ...(post.image && { images: [{ url: post.image }] }),
+      images: [
+        {
+          url: ogImageUrl,
+          width: 1200,
+          height: 630,
+          alt: post.title,
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
       title: post.title,
       description: post.summary ?? undefined,
+      images: [ogImageUrl],
     },
   };
 }
@@ -52,15 +65,20 @@ export default async function PostPage({ params }: Props) {
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
   const postUrl = `${siteUrl}/blog/${slug}`;
+  const ogImageUrl = post.image
+    ? post.image
+    : `${siteUrl}/og?title=${encodeURIComponent(post.title)}&description=${encodeURIComponent(post.summary || "")}&category=Blog`;
 
-  const jsonLd = {
+  const articleJsonLd = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
     headline: post.title,
     description: post.summary,
     url: postUrl,
+    image: ogImageUrl,
     datePublished: post.publishedAt,
     ...(post.updatedAt && { dateModified: post.updatedAt }),
+    ...(post.tags && post.tags.length > 0 && { keywords: post.tags.join(", ") }),
     author: {
       "@type": "Person",
       name: "poc to prod",
@@ -77,12 +95,43 @@ export default async function PostPage({ params }: Props) {
     },
   };
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: siteUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Blog",
+        item: `${siteUrl}/blog`,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: post.title,
+        item: postUrl,
+      },
+    ],
+  };
+
   return (
     <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+          __html: JSON.stringify(articleJsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c"),
         }}
       />
       <div className="max-w-[78ch] space-y-12">

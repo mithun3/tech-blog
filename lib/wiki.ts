@@ -14,6 +14,8 @@ export type PageFrontmatter = {
   /** Numeric hint for sidebar ordering within a section */
   order?: number
   status?: 'published' | 'draft' | 'archived'
+  keywords?: string[] | string
+  author?: string
 }
 
 export type PageMeta = PageFrontmatter & {
@@ -208,7 +210,7 @@ function stripExtension(filename: string): string {
   return filename.replace(/\.(md|mdx)$/, '')
 }
 
-function titleFromSegment(segment: string): string {
+export function titleFromSegment(segment: string): string {
   return segment
     .split('-')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
