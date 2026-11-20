@@ -1,14 +1,13 @@
 import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
-
-export const runtime = "edge";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const title = searchParams.get("title") || "poc to prod";
-    const description = searchParams.get("description") || "Notes, guides, and deep-dives on software engineering & infrastructure.";
+    const title = searchParams.get("title") || SITE_NAME;
+    const description = searchParams.get("description") || SITE_DESCRIPTION;
     const category = searchParams.get("category") || "Wiki & Engineering";
 
     return new ImageResponse(
@@ -67,7 +66,7 @@ export async function GET(request: NextRequest) {
                   color: "#f4f4f5",
                 }}
               >
-                poc to prod
+                {SITE_NAME}
               </span>
             </div>
 
@@ -154,7 +153,7 @@ export async function GET(request: NextRequest) {
                 fontWeight: "500",
               }}
             >
-              poctoprod.com
+              {new URL(SITE_URL).host}
             </span>
           </div>
         </div>

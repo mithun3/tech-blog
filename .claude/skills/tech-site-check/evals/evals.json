@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-site-check",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm about to push the new apt-cacher page. Make sure nothing is broken.",
+      "expected_output": "Runs the content check script, then npx tsc --noEmit, npm run lint and npm run build, and reports each with its key output lines. Separates errors caused by the new page from pre-existing ones and does not fix the pre-existing ones unasked. Does not push.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Are there any broken internal links on the wiki?",
+      "expected_output": "Runs node .claude/skills/tech-site-check/scripts/check-content.mjs and lists every broken /pages or /blog link with file and line from its output, plus any links that go through a redirect. Suggests the tech-move-wiki-page skill for fixing moved-page links. Does not guess links from memory.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "The preview deploy on my branch worked but main failed CI on lint. How?",
+      "expected_output": "Explains from the workflows that preview.yml and production.yml run the same tsc --noEmit and npm run lint steps before building, so the workflows do not explain it and the commits must differ (for example a merge into main). Runs npm run lint locally on main to show the failing rule and line.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "What does the Callout component's danger type look like?",
+      "expected_output": "Near-miss: a question about a component, not a verification request. Answers from components/mdx/callout.tsx (red container, alarm icon) without running the build or lint.",
+      "files": []
+    }
+  ]
+}

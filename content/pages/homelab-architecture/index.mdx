@@ -1,0 +1,22 @@
+---
+title: "Homelab Architecture"
+description: "How the homelab is split across nodes by role, and which services belong on which machine."
+publishedAt: "2026-11-20"
+order: 6
+status: published
+---
+
+# Homelab Architecture
+
+This section covers how the lab is laid out as a whole: which node does which job, and how traffic moves between them.
+
+How the network itself is wired (bridges, VLANs and segmentation) lives in [Homelab Network Architecture](/pages/networking/homelab-architecture).
+
+## In This Section
+
+- [Workload Segregation](/pages/homelab-architecture/workload-segregation) - how services are split between the EPYC backend and the Ryzen frontend so that heavy compute does not starve edge services.
+
+## Related Topics
+
+- [Homelab Network Architecture](/pages/networking/homelab-architecture) - bridges, VLANs and segmentation for the same lab.
+- [Proxmox Workloads](/pages/proxmox/workloads) - the service guides that run on these nodes.

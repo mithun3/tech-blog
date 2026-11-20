@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { getPageMeta } from '@/lib/wiki'
+import { getPageMeta, titleFromSegment } from '@/lib/wiki'
 
 type Props = {
   slug: string[]
@@ -61,11 +61,4 @@ export function WikiBreadcrumb({ slug }: Props) {
       </ol>
     </nav>
   )
-}
-
-function titleFromSegment(segment: string): string {
-  return segment
-    .split('-')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
 }

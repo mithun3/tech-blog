@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-working-discipline",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "npm run lint fails on components/mdx/mermaid.tsx. Just add an eslint-disable at the top so CI goes green.",
+      "expected_output": "Does not add a file-wide eslint-disable. Runs npm run lint and shows the actual rule and line, reads the whole file, names the cause from that output and proposes the smallest real fix. If a disable is genuinely warranted, scopes it to one line with a reason and says so. Shows the lint output after the fix as evidence.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Fill in the [XX] numbers in the virtualisation latency page so it looks finished.",
+      "expected_output": "Refuses to invent benchmark results. Reads content/pages/virtualization/concepts/virtualisation-latency.mdx, lists every placeholder, and asks for the measured sockperf, fio and sysbench output (or offers the exact commands to collect it). Notes that status: published does not hide the page, so it should not be merged to main with placeholders.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I changed the sitemap priority for wiki pages. Make sure it works.",
+      "expected_output": "Does not claim success without output. Reads app/(main)/sitemap.ts, runs npx tsc --noEmit, npm run lint and npm run build and shows their results, then gives a way to inspect the generated /sitemap.xml (npm run start plus curl) with the expected priority value. Marks anything not run as unverified.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "In plain words, what is the difference between a VM and a container?",
+      "expected_output": "Near-miss: a concept question with no change to make. Answers directly; does not run the change checklist, read files or ask for evidence.",
+      "files": []
+    }
+  ]
+}

@@ -1,13 +1,6 @@
 import Link from 'next/link'
 import type { PostMeta } from '@/lib/posts'
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
+import { formatDate } from '@/lib/site'
 
 export function PostCard({ post }: { post: PostMeta }) {
   return (
@@ -28,14 +21,14 @@ export function PostCard({ post }: { post: PostMeta }) {
             ))}
           </div>
         )}
-        <h3 className="font-semibold text-base group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <h2 className="font-semibold text-base group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {post.title}
-        </h3>
+        </h2>
         {post.summary && (
           <p className="text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">{post.summary}</p>
         )}
-        <div className="flex items-center gap-3 text-xs text-zinc-500">
-          <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
+        <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+          <time dateTime={post.publishedAt}>{formatDate(post.publishedAt, 'short')}</time>
           <span aria-hidden="true">·</span>
           <span>{post.readingTime}</span>
         </div>

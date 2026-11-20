@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-content-authoring",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a wiki page about running Uptime Kuma in an LXC on Proxmox, with a mermaid diagram of how it monitors the other containers.",
+      "expected_output": "Places it under content/pages/proxmox/workloads/ (how to run it on Proxmox), with quoted-date frontmatter (title, description, publishedAt today, order chosen after reading the siblings, status published), a body starting with # title, a mermaid fence, placeholders like CTID in backticks, and ## Related Topics. Adds a line to proxmox/workloads/index.mdx under In This Section. Does not invent version numbers or commands without a source. Runs the content check script and shows its output.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Write a blog post about my PBS restore drill and put a warning Callout and the architecture mermaid diagram in it.",
+      "expected_output": "Explains that blog posts go through remark/rehype, not MDX, so Callout and mermaid will not render in content/posts. Proposes a plain-Markdown post with title, publishedAt and summary, linking to the wiki page that holds the diagram or procedure (for example proxmox/operations/proxmox-backup-server). Asks for the drill's actual results instead of inventing them.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I created content/pages/storage/zfs-tuning.mdx in a new storage folder. The page builds, but it is not in the sidebar and /pages/storage 404s. Why?",
+      "expected_output": "Explains that buildTreeFromDir in lib/wiki.ts skips a directory with no index.mdx, so the section and its pages are dropped from the nav and /pages/storage 404s, and that the content check reports the missing index. Proposes adding content/pages/storage/index.mdx with frontmatter and an In This Section list, or moving the page into an existing section, and asks which one.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Why does next-themes need suppressHydrationWarning on the html element?",
+      "expected_output": "Near-miss: a code question about theming, not content authoring. Answers it (tech-site-code territory) without applying content frontmatter or citation rules.",
+      "files": []
+    }
+  ]
+}

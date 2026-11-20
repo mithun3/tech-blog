@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-site-code",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a Tabs MDX component so wiki pages can show apt vs dnf commands side by side.",
+      "expected_output": "Creates components/mdx/tabs.tsx (client component only if it needs state), registers it in mdxComponents in app/pages/[[...slug]]/page.tsx, adds Tabs to MDX_COMPONENTS in the check-content script, documents it in WIKI.md Custom Components and the tech-content-authoring skill, notes blog posts cannot use it, and runs tsc, lint and build with output.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The sidebar should show a 'new' badge on pages updated in the last 30 days.",
+      "expected_output": "Edits the live sidebar (components/app-sidebar.tsx and app-sidebar-nav.tsx, fed by buildNavTree in lib/wiki.ts). Adds updatedAt or publishedAt to NavNode in lib/wiki.ts, computes the date at build time on the server, and runs the CI checks. Asks whether to use updatedAt or publishedAt if unclear.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Wiki pages show up in Google with localhost URLs. Fix it.",
+      "expected_output": "Traces canonical, OG and sitemap URLs to NEXT_PUBLIC_SITE_URL with the localhost fallback used in each route and metadataBase in app/layout.tsx. Concludes that the production build lacked the env var (Vercel project env, pulled by vercel pull in CI) and does not hard-code the domain. Gives the verification: build with the var set and check the canonical tag and the sitemap.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Write a wiki page explaining ZFS ARC sizing.",
+      "expected_output": "Near-miss: a content task, not a code change. Follows tech-content-authoring (frontmatter, section placement, citations) and does not touch app, components or lib.",
+      "files": []
+    }
+  ]
+}

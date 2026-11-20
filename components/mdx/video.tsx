@@ -34,7 +34,7 @@ export function Video({ src, title, poster }: VideoProps) {
           />
         </div>
         {title && (
-          <figcaption className="mt-2 text-center text-sm text-zinc-500">{title}</figcaption>
+          <figcaption className="mt-2 text-center text-sm text-zinc-500 dark:text-zinc-400">{title}</figcaption>
         )}
       </figure>
     )
@@ -52,7 +52,7 @@ export function Video({ src, title, poster }: VideoProps) {
         Your browser does not support the video element.
       </video>
       {title && (
-        <figcaption className="mt-2 text-center text-sm text-zinc-500">{title}</figcaption>
+        <figcaption className="mt-2 text-center text-sm text-zinc-500 dark:text-zinc-400">{title}</figcaption>
       )}
     </figure>
   )

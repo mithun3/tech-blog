@@ -123,9 +123,9 @@ function collectSlugs(dir: string, parentSegments: string[]): string[][] {
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      // The directory itself is represented by its index file slug
+      // The directory itself is represented by its index file slug; without one its URL 404s
       const dirSlug = [...parentSegments, entry.name]
-      slugs.push(dirSlug)
+      if (resolvePageFilePath(dirSlug)) slugs.push(dirSlug)
       // Recurse into subdirectory to find non-index children
       const nested = collectSlugs(path.join(dir, entry.name), dirSlug)
       slugs.push(...nested)
