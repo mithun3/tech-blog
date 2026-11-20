@@ -1,0 +1,147 @@
+---
+title: "Linux Bridges in Proxmox"
+description: "Physical layout, network zones, traffic flow, Linux bridges, and where VLANs fit in a Proxmox homelab."
+publishedAt: "2024-08-04"
+order: 1
+status: published
+---
+
+# Linux Bridges in Proxmox
+
+This page covers how a Proxmox host connects the physical LAN to containers and VMs through Linux bridges.
+
+## Physical Layout
+
+```mermaid
+flowchart TD
+  Internet --> Router["ASUS RT-AX88U Router (192.168.1.1)"]
+  Router ---|LAN1| PVE["Proxmox Host (192.168.1.20)"]
+  Router ---|LAN2| NAS["NAS / Backup Storage (192.168.1.30)"]
+  Router -.->|WiFi| WiFi["Computers, phones, guests"]
+```
+
+That `.30` storage role can be a dedicated NAS box, but it can also be the Proxmox-backed NAS tier described in [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale). The network model stays the same even when the implementation moves from a host-side export to a dedicated NAS VM.
+
+## Network Zones
+
+```mermaid
+flowchart TD
+  subgraph Z1 [Zone 1 - WAN]
+    Internet --- Router
+  end
+  subgraph Z2 [Zone 2 - LAN 192.168.1.x]
+    PVE["Proxmox host: .20"]
+    NAS["Backup storage: .30"]
+  end
+  subgraph Z3 [Zone 3 - Guest WiFi 192.168.2.x]
+    Guest["Guest devices (Internet only)"]
+  end
+  subgraph Z4 [Zone 4 - Container Network]
+    UI["OpenWebUI: .25"]
+    Ollama["Ollama: .26"]
+  end
+```
+
+## Traffic Flow Examples
+
+### Access OpenWebUI from your PC
+
+```mermaid
+flowchart TD
+  PC["Your PC (192.168.1.100)"] -->|"< 1 ms (WiFi/Eth)"| Router["ASUS Router (192.168.1.1)"]
+  Router -->|"< 1 ms (Eth)"| PVE["Proxmox Host (192.168.1.20)"]
+  PVE -->|"< 1 ms (Linux bridge)"| Container["OpenWebUI Container (192.168.1.25)"]
+```
+
+### Container Accesses an External Service
+
+```mermaid
+flowchart TD
+  Container["OpenWebUI Container"] --> PVE["Proxmox Host"]
+  PVE --> Router["ASUS Router (NAT translates to public IP)"]
+  Router --> Internet
+  Internet -.->|"Response"| RouterResp["Router translates back to 192.168.1.25"]
+  RouterResp -.-> Container
+```
+
+The container's private IP is never visible on the internet.
+
+## Physical To Virtual
+
+```mermaid
+flowchart LR
+  subgraph Physical [Physical hardware]
+    direction TB
+    Eth["Ethernet card: enp5s0 (1 Gbps)"] --- R["ASUS Router (LAN port)"]
+  end
+  subgraph Virtual [Proxmox creates]
+    direction TB
+    Bridge["Linux bridge: vmbr0<br/>IP: 192.168.1.20"] --- Eth
+    Bridge --- C["Containers"]
+    Bridge --- VMs
+  end
+```
+
+## Linux Bridges Explained
+
+Think of a bridge as a virtual network switch inside the Proxmox host.
+
+```mermaid
+flowchart LR
+  Internet --- Router["ASUS Router"]
+  Router --- Eth["eth: enp5s0"]
+  Eth --- Bridge["vmbr0"]
+  Bridge --- PVE["Proxmox host"]
+  Bridge --- C1["OpenWebUI container"]
+  Bridge --- C2["Ollama container"]
+  Bridge --- VMs
+```
+
+All devices connected to the same bridge can reach each other and the outside world through the physical card.
+
+## Multiple Bridges
+
+You can create extra bridges if you want separate traffic domains.
+
+```mermaid
+flowchart LR
+  subgraph vmbr0 [Main - 192.168.1.x]
+    direction TB
+    P["Proxmox host: .20"]
+    U["OpenWebUI: .25"]
+    S["Storage: .30"]
+  end
+  subgraph vmbr1 [Guest - 192.168.2.x]
+    direction TB
+    G["Guest VMs (isolated by firewall)"]
+  end
+```
+
+## Bridges vs VLANs
+
+### Bridge
+
+All devices on the same bridge share one flat Layer 2 network.
+
+```text
+vmbr0 - everyone on 192.168.1.x can talk to everyone else
+```
+
+### VLANs
+
+VLANs split a physical switching fabric into logical networks.
+
+```mermaid
+flowchart LR
+  subgraph V10 [VLAN 10 - Internal 192.168.10.x]
+    direction TB
+    P10["Proxmox, containers, storage"]
+  end
+  subgraph V20 [VLAN 20 - Guest 192.168.20.x]
+    direction TB
+    P20["Guest machines"]
+  end
+  V10 -.-x|"Cannot cross"| V20
+```
+
+VLANs require hardware that supports 802.1q tagging. For a single-host homelab, one flat bridge is usually enough at the start.

@@ -1,0 +1,76 @@
+---
+title: "One Certificate, One Front Door"
+description: "Why every lab name goes through one proxy with one wildcard certificate that renews itself, and what that replaced."
+publishedAt: "2026-11-20"
+order: 3
+status: published
+---
+
+# One Certificate, One Front Door
+
+DRAFT
+
+Decided in September 2026.
+
+Certificates are the kind of chore that works fine until the week you forget one.
+
+Every web page in the lab now goes through one small proxy, Caddy. It holds one wildcard certificate and renews it by itself. I do not handle certificate files any more.
+
+<LabSheet sheet="services" focus="detail-a" caption="Detail A on sheet 3: every lab name, one certificate." />
+
+## What I Did Before
+
+The older pages cover three ways to do this: an [Nginx reverse proxy](/pages/networking/service-exposure/nginx-reverse-proxy-lxc) with a wildcard certificate from Certbot, [grouped SAN certificates](/pages/networking/service-exposure/san-certificates-certbot), and [one certificate per service](/pages/networking/service-exposure/individual-certificates-acme) with acme.sh. [Traefik](/pages/networking/service-exposure/traefik) is there as the container-native alternative, and [Secure Service Exposure On Proxmox](/pages/networking/service-exposure) compares them all.
+
+All of them work.
+
+Every one of them also left me with certificates to place and renewals to watch.
+
+## Why I Changed It
+
+Certificate lifetimes are getting shorter. Let's Encrypt issues 90-day certificates today, moves its default to 64 days on 10 February 2027, and to 45 days on 16 February 2028.[^1]
+
+So anything I renew by hand comes round twice as often.
+
+And a missed renewal is not a quiet failure. It is an outage and a browser warning, on whichever service I forgot.
+
+## What I Chose
+
+1. **One proxy holds one token.** Caddy has a single API token for my DNS provider, limited to editing records in one zone.
+2. **The certificate is proved through DNS.** Caddy places a TXT record, and the certificate authority checks that record instead of connecting to my server.[^2]
+3. **So nothing has to be open.** This is the challenge that works for servers that are not exposed to the internet, and the only one that issues wildcard certificates.[^3]
+4. **One wildcard covers every name.** Let's Encrypt submits every certificate it issues to public logs.[^4] With a wildcard, those logs show one name, not a list of what I run.
+5. **Renewal is Caddy's job.** By default it starts renewing when a third of the lifetime is left.[^5] Shorter lifetimes change nothing here.
+
+Every lab name resolves to Caddy, and Caddy passes each name to exactly one backend. Admin pages answer admin sources only. A few household pages also answer the home Wi-Fi. Everything else is refused.
+
+## What I Turned Down
+
+**Proving the certificate over HTTP.** That challenge needs port 80 reachable from the internet, and it cannot issue a wildcard.[^3] I was not going to open a port to the internet for the sake of a certificate.
+
+**A certificate per service.** More objects to track, and every service name would appear in the public logs.
+
+## What It Costs Me
+
+- One key covers everything. If the proxy is broken into, every name is affected.
+- There is one front door. Caddy runs on one node, and while that node is down, the lab's names do not answer.
+- My DNS provider is in the renewal path. If its API is away for long enough, renewal waits.
+
+## What This Is Not For
+
+Nothing here is published to the internet.
+
+If I ever publish a service, it gets a path of its own: a tunnel into a separate network segment. Not a hole in this one.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [Tailscale, And No Open Ports](/pages/homelab-architecture/decisions/remote-access) - how I reach the front door from away.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the front door on the services sheet.
+- [Secure Service Exposure On Proxmox](/pages/networking/service-exposure) - the earlier options compared.
+
+[^1]: [Let's Encrypt, "Decreasing Certificate Lifetimes to 45 Days"](https://letsencrypt.org/2025/12/02/from-90-to-45), 2 December 2025, "Timeline of Changes".
+[^2]: [RFC 8555, section 8.4](https://www.rfc-editor.org/rfc/rfc8555#section-8.4) defines the DNS-01 challenge: the certificate authority checks a TXT record under `_acme-challenge` instead of connecting to the server.
+[^3]: [Let's Encrypt, "Challenge Types"](https://letsencrypt.org/docs/challenge-types/): DNS-01 can validate names whose web servers are not exposed to the public internet and can issue wildcard certificates; HTTP-01 can only be done on port 80 and cannot issue wildcards.
+[^4]: [Let's Encrypt, "Certificate Transparency (CT) Logs"](https://letsencrypt.org/docs/ct-logs/).
+[^5]: [Caddy, the `tls` directive](https://caddyserver.com/docs/caddyfile/directives/tls): `renewal_window_ratio` defaults to 0.3333, so a 90-day certificate is renewed when 30 days or less remain.

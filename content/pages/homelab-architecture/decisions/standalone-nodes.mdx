@@ -1,0 +1,76 @@
+---
+title: "Two Nodes, No Cluster"
+description: "Why my two Proxmox nodes run standalone instead of as a cluster with a tie-breaker, and what I gave up for it."
+publishedAt: "2026-11-20"
+order: 1
+status: published
+---
+
+# Two Nodes, No Cluster
+
+DRAFT
+
+Decided in September 2026.
+
+When the second Proxmox node arrived, the obvious move was to join the two into a cluster. One web page, a migrate button, the whole datacenter feeling.
+
+I did not do it.
+
+My two nodes do not know about each other. Each has its own web page, its own guests and its own storage. Either one keeps working, and stays fully manageable, while the other is off.
+
+<LabSheet sheet="physical" focus="pve-epyc pve-ryzen" caption="Two nodes, each with its own uplink. Neither depends on the other." />
+
+## What I Wrote Before
+
+Two older pages lean the other way.
+
+[Cluster Architecture: Standalone vs Clustered](/pages/proxmox/basics/cluster-architecture) lays out both options and recommends a cluster whenever a third device can break ties. The [Raspberry Pi 4B](/pages/networking/pihole/raspberry-pi-4b) page hands that tie-breaking job to a Pi.
+
+Both pages still describe the choice fairly. I just ended up on the other side of it.
+
+## The Problem With Exactly Two
+
+A Proxmox cluster only accepts changes while a majority of its nodes are online, and each node gets one vote.[^1]
+
+Two nodes, two votes. Lose either one and the survivor holds one vote of two. That is not a majority, so Proxmox switches the cluster to read-only mode.[^1]
+
+The guests that are already running carry on. But I could not start, stop or change anything on the healthy node until the dead one came back.
+
+That is the part I could not live with. The machine that is still fine becomes the one I am locked out of, at exactly the moment I need it.
+
+## What I Turned Down
+
+**Overriding the vote count by hand.** The survivor can be told to accept a single vote. It works. It is also a manual step taken while already locked out, which is not when I do my best work.
+
+**A third vote on a small board.** Proxmox supports an external voter and recommends it for two-node clusters that need higher availability.[^2] It fixes the arithmetic. But the pair then survives a failure only while that third machine is up, and I would be adding a device, a service and a cluster layer to get back something standalone nodes give me for nothing: a node I can always manage on its own.
+
+**A third node.** Proxmox asks for at least three nodes for reliable quorum when high availability is the goal.[^3] That is a real answer. It is also another server, and this lab does not need one.
+
+## What I Chose
+
+Standalone nodes.
+
+A failure on one has no effect on the other. There is no vote to lose and no shared configuration that both must agree on.
+
+The split between them is by job. Node 1 is the heavy one: the GPUs and the family's storage. Node 2 runs the services that are always on.
+
+## What It Costs Me
+
+It is not free.
+
+- There is no migrate button. Moving a guest means backing it up and restoring it on the other node.
+- There are two web pages instead of one.
+- Nothing restarts a guest somewhere else. When a node is down, its guests are down until it is back or I restore them on the other one.
+
+I can live with all three. I could not live with the lockout.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - both nodes on the physical sheet.
+- [Cluster Architecture: Standalone vs Clustered](/pages/proxmox/basics/cluster-architecture) - the two options side by side.
+- [Proxmox Backup Server](/pages/proxmox/proxmox-backup-server) - the backups a move between nodes relies on.
+
+[^1]: [Proxmox VE Administration Guide, Cluster Manager, "Quorum"](https://pve.proxmox.com/pve-docs/chapter-pvecm.html#_quorum): state changes need a majority of nodes online, each node has one vote by default, and the cluster switches to read-only mode if it loses quorum.
+[^2]: [Proxmox VE Administration Guide, Cluster Manager, "Supported Setups"](https://pve.proxmox.com/pve-docs/chapter-pvecm.html#_supported_setups): QDevices are supported for clusters with an even number of nodes and recommended for two-node clusters that should provide higher availability.
+[^3]: [Proxmox VE Administration Guide, Cluster Manager, "Requirements"](https://pve.proxmox.com/pve-docs/chapter-pvecm.html#pvecm_cluster_requirements): at least three nodes for reliable quorum when High Availability is wanted.

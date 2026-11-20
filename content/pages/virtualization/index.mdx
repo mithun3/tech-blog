@@ -2,7 +2,7 @@
 title: "Virtualization"
 description: "How virtual machines, Linux containers, and hypervisor choices fit together in a practical homelab."
 publishedAt: "2024-02-15"
-order: 2
+order: 4
 status: published
 ---
 
@@ -12,17 +12,31 @@ If networking is the plumbing, virtualization is the floor plan. It is the part 
 
 This section stays focused on compute, isolation, storage behavior, and day-2 operations in a platform-agnostic way. When a topic becomes primarily about one product, it should live in that product's own section instead of stretching this overview into a mixed bag.
 
-## Concepts
+## Start Here
 
-- [Virtualization Concepts](/pages/virtualization/concepts) - the overview for core theory and container types.
-- [Virtualization Fundamentals](/pages/virtualization/concepts/fundamentals)
-- [VM Architecture](/pages/virtualization/concepts/vm-architecture)
-- [LXC and OCI Containers](/pages/virtualization/concepts/lxc-and-oci)
-- [Docker](/pages/virtualization/concepts/docker)
-- [Podman](/pages/virtualization/concepts/podman)
-- [VirtualBox](/pages/virtualization/concepts/virtualbox)
-- [systemd-nspawn](/pages/virtualization/concepts/systemd-nspawn)
-- [VMware ESXi](/pages/virtualization/concepts/vmware-esxi)
+- [Virtualization Fundamentals](/pages/virtualization/fundamentals)
+
+## Virtual Machines
+
+- [Virtual Machines](/pages/virtualization/virtual-machines) - the overview for how VMs work and the hypervisors around them.
+- [VM Architecture](/pages/virtualization/virtual-machines/vm-architecture)
+- [The Virtualisation Tax in Microseconds](/pages/virtualization/virtual-machines/virtualisation-latency)
+- [VirtualBox](/pages/virtualization/virtual-machines/virtualbox)
+- [VMware ESXi](/pages/virtualization/virtual-machines/vmware-esxi)
+- [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng)
+- [Vagrant](/pages/virtualization/virtual-machines/vagrant)
+
+## Containers
+
+- [Containers](/pages/virtualization/containers) - the overview for container types and runtimes.
+- [LXC and OCI Containers](/pages/virtualization/containers/lxc-and-oci)
+- [Docker](/pages/virtualization/containers/docker)
+- [Podman](/pages/virtualization/containers/podman)
+- [systemd-nspawn](/pages/virtualization/containers/systemd-nspawn)
+
+## Suggested Reading Order
+
+Start with Fundamentals for the mental model, then VM Architecture for QEMU/KVM mechanics, then LXC and OCI for the container standards picture. Read Docker and Podman back to back — they make more sense as a pair. VirtualBox, systemd-nspawn, and ESXi can be read in any order as standalone reference pages.
 
 ## Platform Deep Dives
 
@@ -30,18 +44,17 @@ This section stays focused on compute, isolation, storage behavior, and day-2 op
 
 ## Day-2 Operations
 
-- [Day-2 Operations](/pages/virtualization/operations) - the overview for lifecycle, habits, and troubleshooting.
-- [VM Lifecycle](/pages/virtualization/operations/vm-lifecycle)
-- [Best Practices](/pages/virtualization/operations/best-practices)
-- [Troubleshooting and Performance](/pages/virtualization/operations/troubleshooting)
-- [Vagrant](/pages/virtualization/operations/vagrant)
+- [Proxmox Operations](/pages/proxmox/operations) - the overview for lifecycle, habits, and troubleshooting.
+- [VM Lifecycle](/pages/proxmox/operations/vm-lifecycle)
+- [Best Practices](/pages/proxmox/operations/best-practices)
+- [Troubleshooting and Performance](/pages/proxmox/operations/troubleshooting)
 
 ## Read This Alongside Networking
 
 These pages pair well with the existing networking material:
 
-- [Linux Bridges in Proxmox](/pages/networking/homelab-architecture/linux-bridges-proxmox)
-- [Container vs VM Networking](/pages/networking/homelab-architecture/container-vm-networking)
+- [Linux Bridges in Proxmox](/pages/networking/homelab-network/linux-bridges-proxmox)
+- [Container vs VM Networking](/pages/networking/homelab-network/container-vm-networking)
 - [Router Essentials](/pages/networking/basics/router-essentials)
 
 Those pages explain how packets move. This section explains what kind of machine is sending them, how isolated it really is, and how much trouble it will cause when you need to change it later.

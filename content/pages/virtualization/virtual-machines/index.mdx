@@ -1,0 +1,28 @@
+---
+title: "Virtual Machines"
+description: "How a virtual machine actually works, what the hypervisor costs you, and the platforms and tools people reach for along the way."
+publishedAt: "2024-02-19"
+order: 2
+status: published
+---
+
+# Virtual Machines
+
+A virtual machine is a whole computer that happens to be a process inside another one. That trick is useful, and it is not free.
+
+These pages cover how it works underneath, what it costs in practice, and the hypervisors and tools you are likely to meet on the way.
+
+## In This Section
+
+- [VM Architecture](/pages/virtualization/virtual-machines/vm-architecture) — how QEMU and KVM divide the work, what a guest really sees, and which defaults are worth keeping.
+- [The Virtualisation Tax in Microseconds](/pages/virtualization/virtual-machines/virtualisation-latency) — how much latency does a hypervisor actually add? We put bare metal Rocky Linux up against a tuned and untuned Proxmox VM to find out.
+- [VirtualBox](/pages/virtualization/virtual-machines/virtualbox) — Oracle's desktop hypervisor, where most homelab journeys start, and why most people eventually move on.
+- [VMware ESXi](/pages/virtualization/virtual-machines/vmware-esxi) — the enterprise hypervisor that dominated data centres, what Broadcom did to it in 2024, and why many people moved to Proxmox.
+- [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng) — why XCP-ng is the closest direct Proxmox alternative for homelabs, where it feels stronger, and where Proxmox still wins.
+- [Vagrant](/pages/virtualization/virtual-machines/vagrant) — repeatable, ephemeral VMs from a single file: the `vagrant up` and `vagrant destroy` workflow for development and experimentation.
+
+## Related Topics
+
+- [Virtualization Fundamentals](/pages/virtualization/fundamentals) — the mental model to read first.
+- [Containers](/pages/virtualization/containers) — the lighter option, and when it is the better one.
+- [Proxmox](/pages/proxmox) — the platform these ideas run on in this lab.

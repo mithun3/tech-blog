@@ -11,13 +11,13 @@ status: published
 
 If you are choosing for a homelab, you do not need a giant enterprise market map. You need a shortlist.
 
-My short version is simple: if you want the closest direct alternative to Proxmox, start with [XCP-ng](/pages/proxmox/basics/xcp-ng). Everything else is either more specialized, more DIY, or more Windows-shaped than most homelabs actually want.
+My short version is simple: if you want the closest direct alternative to Proxmox, start with [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng). Everything else is either more specialized, more DIY, or more Windows-shaped than most homelabs actually want.
 
 ## The Shortlist That Actually Matters
 
 For a homelab in late 2024, I would spend real time on only these options:
 
-- [XCP-ng](/pages/proxmox/basics/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.[^1]
+- [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng) with Xen Orchestra if you want another turnkey bare-metal virtualization platform.[^1]
 - Incus if you are Linux-first, API-first, and happy closer to the CLI than a polished appliance UI.[^2]
 - Hyper-V if Windows is the center of gravity rather than an occasional guest.[^3]
 - Standalone KVM and libvirt if you want full control and do not mind assembling your own platform.
@@ -35,7 +35,7 @@ In mid-2024, XCP-ng was already the strongest open-source VM-first alternative. 
 
 The project now presents a very coherent story around XCP-ng 8.3 LTS, Xen Orchestra, live migration, centralized management, backup, and scale. If you want a real appliance-like hypervisor platform rather than a DIY Linux virtualization stack, XCP-ng is the first thing to test.[^1]
 
-That is why it gets its own page here: [XCP-ng](/pages/proxmox/basics/xcp-ng).
+That is why it gets its own page here: [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng).
 
 ### Incus Became Much More Credible
 
@@ -69,7 +69,7 @@ So VMware still belongs in the history of why this comparison exists. It just no
 
 ## My Opinionated Homelab Ranking
 
-1. [XCP-ng](/pages/proxmox/basics/xcp-ng) if you want the closest direct substitute for Proxmox.
+1. [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng) if you want the closest direct substitute for Proxmox.
 2. Incus if you are Linux-native and comfortable living closer to APIs, CLI tooling, and automation.
 3. Standalone KVM and libvirt if you want maximum control and are willing to build your own management story.
 4. Hyper-V if your world is already Windows-first.
@@ -93,7 +93,7 @@ If your homelab includes a mix of real machine workloads and small utility servi
 
 ## Continue Through The Series
 
-- [XCP-ng](/pages/proxmox/basics/xcp-ng) — the closest direct Proxmox alternative, and the one I would test first for a VM-heavy homelab.
+- [XCP-ng](/pages/virtualization/virtual-machines/xcp-ng) — the closest direct Proxmox alternative, and the one I would test first for a VM-heavy homelab.
 - [Proxmox Fundamentals](/pages/proxmox/basics/proxmox-fundamentals) — the reference overview of what Proxmox is, how it is layered, and where it fits.
 - [Proxmox Stack](/pages/proxmox/basics/proxmox-stack) — the architectural view of the layers and boundaries underneath the platform.
 - [Why I Use Proxmox](/pages/proxmox/basics/why-i-use-proxmox) — the opinionated case for why that tradeoff is worth it in the first place.

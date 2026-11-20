@@ -3,7 +3,7 @@ title: "Proxmox"
 description: "A connected Proxmox guide covering platform fundamentals, host setup, day-two operations, and workload-specific runbooks."
 publishedAt: "2024-10-30"
 updatedAt: "2026-06-08"
-order: 3
+order: 5
 status: published
 ---
 
@@ -11,14 +11,16 @@ status: published
 
 These pages cover the Proxmox platform itself.
 
-The structure is split on purpose. Basics explains the platform. Setup covers bring-up. Operations covers the habits that keep the host recoverable. Workloads covers the guides that depend on Proxmox-specific LXC, VM, storage, networking, or passthrough behavior.
+The structure is split on purpose. Basics explains the platform. Setup covers bring-up. Operations covers the habits that keep the host recoverable. Backups to PBS, major upgrades, and monitoring each get a section of their own. The guides for what runs on top of the host have moved out to [Self-Hosted Services](/pages/services), [GPU & AI](/pages/gpu-ai), and [Networking](/pages/networking), where the subject actually lives.
 
 ## In This Section
 
 - [Proxmox Basics](/pages/proxmox/basics) — the foundational sequence covering why Proxmox is useful, how the platform is layered, and the practical defaults for storage, networking, and sizing.
 - [Proxmox Setup](/pages/proxmox/setup) — hardware preflight, drive validation, BIOS choices, installation flow, and the early decisions that shape everything after.
 - [Proxmox Operations](/pages/proxmox/operations) — storage, PBS backups, notifications, updates, major upgrade runbooks, and the routines that keep the host stable.
-- [Proxmox Workloads](/pages/proxmox/workloads) — service deployments, passthrough, and Proxmox-specific runbooks for actual workloads, including Pi-hole, GPU passthrough, Open WebUI + Ollama, and the llama.cpp serving stack.
+- [Proxmox Backup Server](/pages/proxmox/proxmox-backup-server) — the dedicated PBS path for CT 301, `pbspool`, deduplicated daily backups, restore tests, and PBS troubleshooting.
+- [Proxmox Upgrades](/pages/proxmox/upgrades) — major upgrade runbooks and RCA notes, starting with PVE 9.2 and the kernel 7.0 boot hang it exposed.
+- [Monitoring And Alerts](/pages/proxmox/monitoring-and-alerts) — the overview for manual health checks, the Prometheus and Grafana stack, and the alerting layer for a host that already matters.
 
 ## Related Sections
 
@@ -30,4 +32,4 @@ The structure is split on purpose. Basics explains the platform. Setup covers br
 
 Start with [Proxmox Basics](/pages/proxmox/basics) if you want the shape of the platform first.
 
-Move to [Proxmox Setup](/pages/proxmox/setup) when you are building the host, [Proxmox Operations](/pages/proxmox/operations) when the host is already running and needs backup, maintenance, or upgrade discipline, and [Proxmox Workloads](/pages/proxmox/workloads) when the question becomes how to run a specific service or hardware workflow on top of it.
+Move to [Proxmox Setup](/pages/proxmox/setup) when you are building the host, [Proxmox Operations](/pages/proxmox/operations) when the host is already running and needs backup, maintenance, or upgrade discipline, and [Self-Hosted Services](/pages/services) when the question becomes how to run a specific service or hardware workflow on top of it.

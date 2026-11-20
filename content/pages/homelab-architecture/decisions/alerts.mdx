@@ -1,0 +1,79 @@
+---
+title: "Alerts That Still Arrive When The Lab Is Down"
+description: "Why monitoring runs on its own board, how an alert reaches my phone from a network with no internet, and the outside check that notices when everything goes quiet."
+publishedAt: "2026-11-20"
+order: 6
+status: published
+---
+
+# Alerts That Still Arrive When The Lab Is Down
+
+DRAFT
+
+Decided on 20 October 2026, and extended on 5 and 8 November 2026.
+
+Monitoring has one awkward job: it has to keep working when the things it watches do not.
+
+Mine did not always manage that.
+
+<LabSheet sheet="services" focus="chain-monitor" caption="The monitoring chain on sheet 3." />
+
+## What I Did Before
+
+The older pages build the monitoring stack inside the lab it monitors. [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) puts it in a container on the host, [Dashboards And Alerting On Proxmox](/pages/proxmox/monitoring-and-alerts/dashboards-and-alerting) adds the alerts, and [Email Notifications](/pages/proxmox/operations/email-notifications) gets backup failures out of the host and into an inbox.
+
+That is a fine place to start. It has one flaw. When the host goes down, the thing that would have told me goes down with it.
+
+## What Pushed Me
+
+On 5 November 2026 I went through the alerts properly, and found two things.
+
+A ZFS pool had been degraded with no alert at all.
+
+And five alerts were always firing: four for boards I had not built yet, one for a guest I had already removed. Nobody reads an alert list that is always red. I certainly did not.
+
+## What I Chose
+
+**Monitoring lives on its own board.** Prometheus, Grafana and Alertmanager run on a [single board computer](/pages/hardware/sbc/rock-5b) that shares nothing with either Proxmox node. If a hypervisor dies, the monitor is still there to say so.
+
+**Alerts leave through the proxy.** The monitoring network has no internet by design. Its one way out is the same allowlisted proxy the other isolated networks use, so an alert goes through that to ntfy.sh and lands on my phone. Nothing extra to run or patch.
+
+**Silence is an alert too.** Nothing inside the lab can report the death of the monitor itself, or of the proxy, or a power cut. All of those end the same way: quiet. So Prometheus fires one alert that is always on, and Alertmanager forwards it every few minutes to Healthchecks.io, which raises its own alert as soon as a ping does not arrive on time.[^1] That one goes by email, not to the phone, so it shares nothing with the path it is watching.
+
+**One page says whether everything is up.** Grafana's home page has a tile per system and a row per layer. Every tile's word comes from the same alert rules that push to my phone, so the page and the pushes cannot disagree. The dashboards are files in the repository, like everything else.
+
+**Fewer, louder alerts.** Boards that are not built yet stay out of the inventory until they exist. Alerts carry a priority by severity. One rule holds back the pile of HTTPS alerts when the front door itself is down, because a wall of alerts saying the same thing is one alert and a lot of noise.
+
+Three rules were added the same day: a certificate close to expiry, a host that rebooted, and a degraded ZFS pool. The last one is the alert I had been missing.
+
+## What I Turned Down
+
+**A second watcher on another small board.** That was the plan for about a day. Then I noticed both watchers would still send their alerts through the same proxy, so a dead proxy stayed silent either way.
+
+**Hosting the notification service myself.** One more thing to run and patch.
+
+**The household hub as the status page.** It shares a node with the front door and has no path to the metrics. Lab administration stays off the family's dashboard.
+
+**A second alerting system.** Uptime dashboards and Grafana's own alerts would each have been another stack, or a second alert path that could disagree with the first.
+
+## What It Costs Me
+
+- The phone path and the silence check both depend on outside services, on their free tiers.
+- On that free tier, a private topic is only a name nobody can guess. ntfy's own page says topic names are public and should be hard to guess.[^2]
+- The status page sits behind the front door. If that node is down while I am away, I get the pushes but not the page.
+
+## When I Would Change My Mind
+
+- When one incident needs logs from more than two hosts, a log store joins the stack.
+- When I want the status page with Node 2 down, it gets a second route that does not pass the front door.
+- If the free tier of the outside check changes, or a second watcher on separate hardware becomes worth having.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [Radxa Rock 5B](/pages/hardware/sbc/rock-5b) - the board the monitoring stack runs on.
+- [Monitoring And Alerts](/pages/proxmox/monitoring-and-alerts) - the earlier, host-side monitoring guides.
+- [One Certificate, One Front Door](/pages/homelab-architecture/decisions/one-certificate) - the front door the status page sits behind.
+
+[^1]: [Healthchecks.io Documentation](https://healthchecks.io/docs/): it listens for pings and raises an alert as soon as a ping does not arrive on time.
+[^2]: [ntfy, "Getting started"](https://docs.ntfy.sh/): topic names are public, so it is wise to choose something that cannot be guessed easily.

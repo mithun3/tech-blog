@@ -1,0 +1,71 @@
+---
+title: "An Assistant That Plans But Does Not Apply"
+description: "How an AI coding assistant works in the lab's repository: what it knows, what it may read, and the scripts that stop it from touching secrets or applying a change."
+publishedAt: "2026-11-20"
+order: 5
+status: published
+---
+
+# An Assistant That Plans But Does Not Apply
+
+DRAFT
+
+I use an AI coding assistant, Claude Code, in the repository that describes the lab.
+
+It reads the design. It answers questions about it. It plans changes and reviews them.
+
+It does not apply them. I do, from one machine.
+
+<LabSheet sheet="physical" focus="admin-mac rb5009" caption="The admin Mac on the router's own port: the one place a network change is applied from." />
+
+## Why It Needs Rules
+
+A wrong firewall rule can cut off the only way back in from outside. The vault holds every secret in the lab.
+
+I do not want either of those left to a tool's judgement.
+
+So the assistant gets the same rules I work to, and the ones that matter most are enforced by scripts, not by asking nicely.
+
+## How It Is Set Up
+
+**A short list of invariants.** It is loaded in every session: the rules a change must not break, however convenient. Ansible is the only tool. Every VLAN drops by default. Secrets live only in the vault.
+
+**Skills.** The lab's knowledge is split by topic: the network, remote access, DNS, monitoring, the nodes, backups and so on. A skill is loaded only when a question needs it. Each one records which design documents it was written from and the date it was last checked against them.
+
+**Runbooks I start by hand.** Changing the network, upgrading firmware, adding a device and rotating a secret each have one. The assistant never starts them on its own.
+
+**Six agents, all read-only.** An architect, a change planner, a change reviewer, a troubleshooter, a recovery guide and an onboarding guide. Each runs in its own context with only the tools it is given.[^1] The ones that have a shell can run a short list of read-only commands and nothing else.
+
+## The Guard Scripts
+
+Claude Code can run a script before a tool call, and that script can block the call.[^2] Four of them guard the lab:
+
+- one refuses to read or edit the vault, its password, the backups and the key files
+- one denies a network apply from any machine but the admin one, and makes the assistant ask me before anything else that could change the lab
+- one blocks two kinds of edit outright: a task that ignores errors in the router roles, and any Terraform file
+- one warns after an edit that would advertise too wide a route, or put a firewall rule after the final drop
+
+Two of those come straight from [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code). The decisions made there are now things the assistant cannot quietly undo.
+
+## Keeping It Honest
+
+Rules that nobody checks go stale. So these get checked.
+
+- A validator runs over every skill and agent. It warns when a design document has changed since the skill written from it was last checked.
+- Each skill has three test prompts, and one of them is a near miss that should not load the skill.
+- A fact marked interim or still to be decided is not settled, and the assistant has to ask me.
+- A statement about the live lab comes with the command and its output.
+
+## What It Costs Me
+
+- More files to keep true. Every skill is one more document that can go stale, which is why the validator exists.
+- The guards are best effort. They catch the mistakes I listed. They are not a promise that nothing else can go wrong, so I still read every plan before I apply it.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) - the repository these rules protect.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the admin Mac and the router on the physical sheet.
+
+[^1]: [Claude Code, "Create custom subagents"](https://code.claude.com/docs/en/sub-agents): each subagent runs in its own context window with specific tool access.
+[^2]: [Claude Code, "Hooks reference"](https://code.claude.com/docs/en/hooks): a `PreToolUse` hook runs before a tool call executes and can block it.

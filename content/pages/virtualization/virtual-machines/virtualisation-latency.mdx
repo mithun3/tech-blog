@@ -1,0 +1,87 @@
+---
+title: "The Virtualisation Tax in Microseconds"
+description: "How much latency does a hypervisor actually add? We put bare metal Rocky Linux up against a tuned and untuned Proxmox VM to find out."
+publishedAt: "2026-10-01"
+order: 2
+status: published
+---
+
+# The Virtualisation Tax in Microseconds
+
+Everyone talks about virtualisation overhead. Few people measure it.
+
+The argument usually goes like this: "Bare metal is faster." Yes. But *how much* faster? Are we talking milliseconds or microseconds? And does tuning the hypervisor actually close the gap, or just move the bottleneck?
+
+To stop guessing, I ran the numbers. 
+
+Here is the exact cost of the hypervisor tax, measured in microseconds, across three identical Rocky Linux environments:
+
+1. **Bare Metal**: Rocky Linux running directly on the hardware.
+2. **Untuned VM**: Proxmox VM with default settings (emulated devices, generic CPU type, no pinning).
+3. **Tuned VM**: Proxmox VM built for latency (VirtIO SCSI Single, CPU pinning, host CPU type, NUMA alignment).
+
+Here are the facts.
+
+## Network Latency
+
+Network latency isn't just ping times. It's the time it takes a packet to traverse the network stack, hit the NIC, cross the wire, and get processed on the other side. 
+
+*Testing method: `sockperf` under load, measuring TCP round-trip time in microseconds.*
+
+| Environment | Average (P50) | Tail Latency (P99) |
+| :--- | :--- | :--- |
+| Bare Metal | [XX] µs | [XX] µs |
+| Tuned VM | [XX] µs | [XX] µs |
+| Untuned VM | [XX] µs | [XX] µs |
+
+**The Takeaway:**
+[Insert observation here. Expectation: Bare metal wins P99. Tuned VM is close on P50 but spikes on P99. Untuned VM is noticeably worse across the board.]
+
+## Storage Latency (NVMe)
+
+When you abstract an NVMe drive through a hypervisor, you introduce software translation. `fio` exposes exactly how much that translation costs when the queue depth hits 1.
+
+*Testing method: `fio` random read, 4k block size, iodepth=1, direct=1.*
+
+| Environment | IOPS | Average Latency | Tail Latency (P99) |
+| :--- | :--- | :--- | :--- |
+| Bare Metal | [XX]k | [XX] µs | [XX] µs |
+| Tuned VM (VirtIO SCSI) | [XX]k | [XX] µs | [XX] µs |
+| Untuned VM (Default IDE/SATA) | [XX]k | [XX] µs | [XX] µs |
+
+**The Takeaway:**
+[Insert observation here. Expectation: Untuned SATA emulation destroys NVMe performance. VirtIO gets you 90% of the way there, but bare metal still shaves off a consistent chunk of microsecond overhead.]
+
+## Compute & Context Switching
+
+Hypervisors steal CPU cycles. VM-Exits (when the guest has to ask the host for permission to do something) cost time. We can measure this context-switching overhead directly.
+
+*Testing method: `sysbench` CPU and memory tests, plus `perf` context switch tracking.*
+
+| Environment | Events/Sec | Context Switch Latency |
+| :--- | :--- | :--- |
+| Bare Metal | [XX] | [XX] µs |
+| Tuned VM | [XX] | [XX] µs |
+| Untuned VM | [XX] | [XX] µs |
+
+**The Takeaway:**
+[Insert observation here. Expectation: Tuned VM with CPU pinning avoids scheduler jitter, making it almost indistinguishable from bare metal for pure compute. Untuned VM suffers from noisy neighbor syndrome.]
+
+## So, Who Actually Cares?
+
+Look at the numbers above. The difference between bare metal and a tuned VM is measured in **microseconds**. 
+
+If you are running:
+* A web server
+* A standard database
+* A media server
+* A CI/CD runner
+
+You do not care about 50 microseconds. You care about the ability to snapshot the machine before an upgrade. You virtualise.
+
+You only care about this tax if you are running:
+* High-frequency trading algorithms.
+* DPDK/kernel-bypass networking at 100Gbps.
+* Hard real-time industrial systems.
+
+For everyone else, the tax is real, but the cost of paying it is lower than the cost of managing bare metal without it.

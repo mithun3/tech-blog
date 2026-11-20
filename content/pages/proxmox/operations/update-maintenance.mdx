@@ -55,7 +55,7 @@ Routine updates belong here. Major upgrades deserve a dedicated runbook.
 
 The PVE 9.2 upgrade is the example that made the boundary obvious: PBS backups came first, container package updates came second, the host moved to kernel 7.0 third, and the reboot exposed a `nova_core` boot hang that needed its own RCA.
 
-Use [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) for that full sequence, then read [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) for the side effect and fix.
+Use [PVE 9.2 Upgrade Runbook](/pages/proxmox/upgrades/pve-9-2-upgrade) for that full sequence, then read [Kernel 7.0 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca) for the side effect and fix.
 
 ## Pre-Update Checklist
 
@@ -282,7 +282,7 @@ curl -s http://192.168.50.45:8012/health
 
 Use the same `uv tool install --force` shape as the Community-Scripts installer. The shorter upgrade shortcut skips the install constraint used by the helper script, so keep it out of routine maintenance.
 
-For backup, rollback, and database-migration notes, use [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc#update-open-webui).
+For backup, rollback, and database-migration notes, use [Open WebUI Standalone Frontend On Proxmox](/pages/gpu-ai/openwebui-standalone-lxc#update-open-webui).
 
 ```bash
 # Check current version
@@ -531,7 +531,7 @@ pct start <CTID>
 ## Related Topics
 
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — make maintenance visible instead of silent.
-- [PVE 9.2 Upgrade Runbook](/pages/proxmox/operations/upgrades/pve-9-2-upgrade) — the major upgrade path that extends this regular maintenance rhythm.
-- [Kernel 7.0 Boot Hang RCA](/pages/proxmox/operations/upgrades/kernel-7-boot-hang-rca) — the post-upgrade side effect that required physical console recovery.
-- [Proxmox Workloads](/pages/proxmox/workloads) — the service and platform guides that sit behind many of these update routines.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/upgrades/pve-9-2-upgrade) — the major upgrade path that extends this regular maintenance rhythm.
+- [Kernel 7.0 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca) — the post-upgrade side effect that required physical console recovery.
+- [Self-Hosted Services](/pages/services) — the service and platform guides that sit behind many of these update routines.
 - [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — a useful temporary control when a single LXC is pulling large artifacts during a maintenance window.

@@ -75,7 +75,7 @@ Once layers start crossing PCIe per token, throughput drops significantly.
 Each token requires data movement across the PCIe bus for every CPU-side layer.
 ```
 
-The [Limited VRAM Playbook](/pages/proxmox/workloads/llamacpp/limited-vram-playbook) covers the exact llama.cpp configuration for this rig — which flags help, which ones do not, and the Docker command pattern that makes it stable over long sessions.
+The [Limited VRAM Playbook](/pages/gpu-ai/llamacpp/limited-vram-playbook) covers the exact llama.cpp configuration for this rig — which flags help, which ones do not, and the Docker command pattern that makes it stable over long sessions.
 
 ## What This Rig Taught
 
@@ -94,6 +94,6 @@ It is also what produced most of the data points in the limited-VRAM pages. If s
 
 ## Related Pages
 
-- [Limited VRAM Playbook](/pages/proxmox/workloads/llamacpp/limited-vram-playbook) — exact configuration for running large models on this hardware
-- [PCIe Fundamentals](/pages/hardware/pcie-fundamentals) — why the lane topology on this CPU is simpler than it looks
+- [Limited VRAM Playbook](/pages/gpu-ai/llamacpp/limited-vram-playbook) — exact configuration for running large models on this hardware
+- [PCIe Fundamentals](/pages/hardware/pcie/fundamentals) — why the lane topology on this CPU is simpler than it looks
 - [X570 · 5950X · Dual RTX 3090](/pages/hardware/builds/x570-5950x-rtx3090) — the same inference workloads on the high-end rig

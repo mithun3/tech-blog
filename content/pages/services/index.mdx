@@ -1,0 +1,73 @@
+---
+title: "Self-Hosted Services"
+description: "Service guides that live on top of the Proxmox host: NAS, Kubernetes, search, and the small infrastructure containers around them."
+publishedAt: "2024-12-05"
+updatedAt: "2026-06-08"
+order: 6
+status: published
+---
+
+# Self-Hosted Services
+
+This section is where the platform stops being abstract and starts doing jobs.
+
+Some services belong to [Networking](/pages/networking), and live there now. Some belong to [GPU & AI](/pages/gpu-ai), and live there now. What is left are the application stacks with their own logic: storage, orchestration, search, and the small infrastructure containers that keep the rest tidy.
+
+If the workload is common and the immediate question is just "what is the fastest sane way to get this online?" start with [Proxmox Helper Scripts](/pages/services/proxmox-helper-scripts) before dropping into the more opinionated runbooks below.
+
+## What Belongs Here
+
+- LXC or VM deployment guides that are specific to Proxmox
+- application stacks whose instructions depend on Proxmox storage, networking, or guest management
+
+## In This Section
+
+- [Proxmox Helper Scripts](/pages/services/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
+- [Apt-Cacher-NG LXC On Proxmox](/pages/services/apt-cacher-ng-lxc) - the small infrastructure container that caches repeated Debian package downloads across LXC maintenance windows.
+- [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) - the path for moving a host-side `naspool` into a managed NAS VM with SMB, NFS, alerting, and a mirror-plus-spare layout.
+- [Kubernetes On Proxmox With k3s](/pages/services/kubernetes) - the path when a single Docker-style guest stops being enough and the lab actually wants a small Kubernetes cluster with storage, ingress, and LAN-facing service IPs.
+- [SearXNG LXC On Proxmox](/pages/services/searxng-lxc) - the local metasearch backend for OpenClaw research and other retrieval-heavy workflows that should stop depending on public instances.
+
+## NAS And Shared Storage
+
+This is the other workload shape that eventually stops feeling optional.
+
+At first it looks like a storage detail. In practice it becomes the point where Proxmox guests, backup jobs, Time Machine, media storage, and shared model directories either stay loosely coordinated or finally get a dedicated home.
+
+If the host is still using a direct `naspool`, start with [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs). If the plan is to move that role into a managed NAS VM without buying separate hardware first, use this cluster:
+
+- [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) - the overview for when the host-side pool should become a managed NAS tier.
+- [TrueNAS VM Build And Pool Design](/pages/services/truenas-scale/vm-build-and-pool-design) - resource reallocation, VM creation, passthrough, and the mirror-plus-spare pool layout.
+- [TrueNAS Shares And Proxmox Integration](/pages/services/truenas-scale/shares-and-proxmox-integration) - NFS, SMB, Proxmox storage integration, shared model mounts, and boot ordering.
+- [TrueNAS Protection, Verification, And Failure Handling](/pages/services/truenas-scale/protection-verification-and-failure-handling) - snapshots, SMART checks, UPS integration, hot-spare behavior, and recovery drills.
+
+## Kubernetes And Container Orchestration
+
+Sometimes the workload really does want Kubernetes semantics, but that still does not mean the Proxmox host should become the cluster.
+
+If the plan is to keep Proxmox as the infrastructure layer and run orchestration inside dedicated VMs, start with the k3s cluster below. If the job is still one application guest and a simpler container stack, stay with the lighter VM or LXC paths instead.
+
+- [Kubernetes On Proxmox With k3s](/pages/services/kubernetes) - the overview for when the lab wants a real cluster boundary instead of one more handcrafted guest.
+- [Kubernetes VM Build And k3s Bootstrap](/pages/services/kubernetes/vm-build-and-k3s-bootstrap) - VM creation, Debian preparation, control-plane install, worker joins, and workstation access.
+- [Kubernetes Storage, Ingress, And Exposure](/pages/services/kubernetes/storage-ingress-and-exposure) - Longhorn, Traefik, MetalLB, and cert-manager.
+- [Kubernetes Verification, Upgrades, And HA](/pages/services/kubernetes/verification-upgrades-and-ha) - end-to-end testing, upgrade discipline, troubleshooting, and the optional HA control-plane path.
+
+## Secure Service Exposure
+
+Several workload pages eventually hit the same question: how should this service actually leave the house?
+
+That decision is now grouped under [Networking](/pages/networking) so Open WebUI, Pi-hole, Grafana, Prometheus, and the rest do not each grow their own slightly different HTTPS explanation.
+
+- [Secure Service Exposure On Proxmox](/pages/networking/service-exposure) - the decision hub for tunnels, reverse proxies, and certificate strategy.
+- [Cloudflare Tunnel On Proxmox](/pages/networking/service-exposure/cloudflare-tunnel) - the outbound-only path when you want remote access without opening inbound ports.
+- [Nginx Reverse Proxy LXC On Proxmox](/pages/networking/service-exposure/nginx-reverse-proxy-lxc) - the self-hosted reverse-proxy path with a dedicated guest and wildcard certificates.
+- [SAN Certificates On Proxmox With Certbot](/pages/networking/service-exposure/san-certificates-certbot) - the grouped-certificate middle ground when wildcard feels too broad but one certificate per service still feels excessive.
+- [Individual Certificates On Proxmox With acme.sh](/pages/networking/service-exposure/individual-certificates-acme) - the tighter certificate-isolation path once wildcard no longer feels like the right blast radius.
+
+## What Does Not
+
+Pure concepts still belong in their own sections.
+
+DNS theory belongs in [Networking](/pages/networking). GPU compute concepts belong in [GPU & AI](/pages/gpu-ai). General virtualization theory belongs in [Virtualization](/pages/virtualization).
+
+This section exists for the Proxmox-specific execution layer on top of those ideas.

@@ -1,0 +1,59 @@
+---
+title: "Why The Lab Is Built This Way"
+description: "The decisions behind my homelab: what I ran before, what pushed me to change, what I chose and what it costs me."
+publishedAt: "2026-11-20"
+order: 2
+status: published
+---
+
+# Why The Lab Is Built This Way
+
+DRAFT
+
+Most of this wiki was written while I was building the lab by hand. One guide, one service, one late evening at a time.
+
+Those guides still work. I have left them exactly as they were.
+
+But the lab did not stay still. Somewhere along the way it stopped being a pile of things I had installed and became something I had to design.
+
+This section is the record of that: what I ran before, what pushed me off it, what I chose instead, and what the choice costs me. The [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) shows the lab as it is today. These pages explain why it looks like that.
+
+## What Changed
+
+| Topic | Then | Now | Why |
+|---|---|---|---|
+| Two Proxmox nodes | [A cluster with a tie-breaker](/pages/proxmox/basics/cluster-architecture) | Two standalone nodes | [Two Nodes, No Cluster](/pages/homelab-architecture/decisions/standalone-nodes) |
+| Reaching the lab from away | [A tunnel or a reverse proxy](/pages/networking/service-exposure) | Tailscale, with no port open | [Tailscale, And No Open Ports](/pages/homelab-architecture/decisions/remote-access) |
+| HTTPS inside the lab | [Nginx and Certbot](/pages/networking/service-exposure/nginx-reverse-proxy-lxc) | Caddy with one wildcard certificate | [One Certificate, One Front Door](/pages/homelab-architecture/decisions/one-certificate) |
+| Changing the router and the guests | By hand, guide by guide | Files in git, with a plan before every change | [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) |
+| Help from an AI assistant | None | Skills, read-only agents and guard scripts | [An Assistant That Plans But Does Not Apply](/pages/homelab-architecture/decisions/ai-guardrails) |
+| Alerts | [A monitoring container on the host](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) | A separate board, a push to the phone, and an outside check that notices silence | [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts) |
+| Family data | [One NAS VM](/pages/services/truenas-scale) | One NAS that owns the data, a second that pulls a copy, and drives that leave the house | [Family Data Gets Three Copies](/pages/homelab-architecture/decisions/family-data) |
+| Wi-Fi and the edge | [The ASUS as the router](/pages/networking/router-firmware) | The ASUS as an access point behind the MikroTik | [The Old Router Became An Access Point](/pages/homelab-architecture/decisions/wifi-access-point) |
+| Small infrastructure guests | [A package cache](/pages/services/apt-cacher-ng-lxc) and a [Pi-hole](/pages/networking/pihole/proxmox-lxc) on the hypervisor | Small boards that each do one job | [Three Guests I Removed](/pages/homelab-architecture/decisions/removed-guests) |
+
+## In This Section
+
+- [Two Nodes, No Cluster](/pages/homelab-architecture/decisions/standalone-nodes) - why the two Proxmox nodes do not know about each other.
+- [Tailscale, And No Open Ports](/pages/homelab-architecture/decisions/remote-access) - how I get in from away, and what I removed to keep it simple.
+- [One Certificate, One Front Door](/pages/homelab-architecture/decisions/one-certificate) - why every lab name goes through one proxy that renews its own certificate.
+- [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) - why the router, the switch and new guests are files in git.
+- [An Assistant That Plans But Does Not Apply](/pages/homelab-architecture/decisions/ai-guardrails) - the rules an AI assistant works under in the lab's repo.
+- [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts) - why monitoring left the hypervisor, and the check that notices when everything goes quiet.
+- [Family Data Gets Three Copies](/pages/homelab-architecture/decisions/family-data) - one NAS that owns the data, one that pulls, and one copy that leaves the house.
+- [The Old Router Became An Access Point](/pages/homelab-architecture/decisions/wifi-access-point) - why the ASUS stayed, and why it no longer routes.
+- [Three Guests I Removed](/pages/homelab-architecture/decisions/removed-guests) - the package cache, the third Pi-hole and the jump host, and why taking them away made the lab better.
+
+## How To Read These
+
+Each page is one decision, with its date.
+
+None of them is advice for your lab. They are what fitted mine, with the hardware I already had and the amount of maintenance I was willing to sign up for.
+
+None of them is final either. Where I know what would change my mind, the page says so.
+
+## Related Topics
+
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the lab as it is built.
+- [Workload Segregation](/pages/homelab-architecture/workload-segregation) - an earlier design of the same lab.
+- [Homelab Network Architecture](/pages/networking/homelab-network) - bridges, VLANs and segmentation in general.
