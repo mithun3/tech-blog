@@ -1,8 +1,6 @@
 {
-  "version": 2,
   "framework": "nextjs",
-  "github": {
-    "enabled": true,
-    "autoAlias": true
+  "git": {
+    "deploymentEnabled": false
   }
 }

@@ -10,11 +10,11 @@ No trackers. No ads. No fluff.
 
 | | |
 |---|---|
-| **Framework** | Next.js 16.2.4 (App Router, Turbopack) |
+| **Framework** | Next.js 16.4.6 (App Router, Turbopack) |
 | **Language** | TypeScript 5 |
 | **Styling** | Tailwind CSS v4 + `@tailwindcss/typography` |
 | **MDX (wiki)** | `next-mdx-remote` v6 with `remark-gfm`, `rehype-pretty-code` (Shiki) |
-| **MDX (blog)** | `@next/mdx` via unified pipeline |
+| **Markdown (blog)** | unified (`remark-gfm`, `rehype-pretty-code`) rendered to HTML; no MDX components |
 | **Themes** | `next-themes` — light/dark with system default |
 | **Frontmatter** | `gray-matter` |
 | **Package manager** | npm |
@@ -25,17 +25,17 @@ No trackers. No ads. No fluff.
 
 ```
 app/
-├── layout.tsx                  # Root layout — global metadata, sidebar
+├── layout.tsx                  # Root layout — global metadata, skip link, sidebar
+├── robots.ts                   # robots.txt (must sit at the app root)
+├── og/route.tsx                # Generated 1200×630 OG image (?title&description&category)
 ├── (main)/
 │   ├── layout.tsx              # Main content layout
 │   ├── page.tsx                # Home / landing page
 │   ├── blog/
-│   │   └── [slug]/
-│   │       ├── page.tsx        # Blog post page
-│   │       └── opengraph-image.tsx  # Dynamic OG image
-│   ├── robots.ts               # robots.txt
+│   │   ├── page.tsx            # Blog index
+│   │   └── [slug]/page.tsx     # Blog post page
 │   ├── sitemap.ts              # sitemap.xml
-│   └── rss.xml/route.ts        # RSS feed
+│   └── rss.xml/route.ts        # RSS feed (static)
 └── pages/
     └── [[...slug]]/page.tsx    # Wiki — all /pages/* routes
 
@@ -43,28 +43,30 @@ components/
 ├── app-sidebar.tsx             # Sidebar (server component — builds nav tree)
 ├── app-sidebar-nav.tsx         # Sidebar (client — interactive expand/collapse)
 ├── theme-toggle.tsx
+├── comments.tsx                # Giscus comments
+├── post-card.tsx
+├── wiki/breadcrumb.tsx
 └── mdx/
     ├── callout.tsx
     ├── video.tsx
-    └── audio.tsx
+    ├── audio.tsx
+    └── mermaid.tsx             # Client-side, loads mermaid on demand
 
 content/
 ├── pages/                      # Wiki content (.md / .mdx)
 │   ├── index.mdx               →  /pages
 │   ├── about.mdx               →  /pages/about
-│   ├── contact.mdx             →  /pages/contact
-│   ├── faq.mdx                 →  /pages/faq
-│   ├── privacy.mdx             →  /pages/privacy
-│   ├── terms.mdx               →  /pages/terms
 │   └── networking/
 │       ├── index.mdx           →  /pages/networking
-│       ├── basics.mdx          →  /pages/networking/basics
-│       ├── homelab-architecture.mdx
-│       └── router-firmware.mdx
+│       └── …                   →  /pages/networking/…
+├── posts/                      # Blog posts (Markdown + GFM)
+└── site/home-intro.mdx         # Home page intro
 
 lib/
 ├── wiki.ts                     # Wiki data — file resolution, nav tree, metadata
-└── posts.ts                    # Blog data — unified MDX pipeline
+├── posts.ts                    # Blog data — unified Markdown pipeline
+├── site.ts                     # Site URL, name, description, OG image URL, dates
+└── site-content.ts             # Reads content/site snippets
 ```
 
 ---
@@ -74,12 +76,14 @@ lib/
 | Route | Description |
 |---|---|
 | `/` | Home — hero + topics grid |
+| `/blog` | Blog index |
 | `/blog/[slug]` | Individual blog post |
 | `/pages` | Wiki index |
 | `/pages/[...path]` | Any wiki page (unlimited nesting) |
 | `/sitemap.xml` | Auto-generated sitemap |
 | `/robots.txt` | Robots directives |
 | `/rss.xml` | RSS feed (blog posts) |
+| `/og` | Generated OG image |
 
 ---
 
@@ -105,14 +109,15 @@ npm run lint    # ESLint
 | Variable | Purpose | Default |
 |---|---|---|
 | `NEXT_PUBLIC_SITE_URL` | Canonical URLs, OG tags, sitemap | `http://localhost:3000` |
+| `NEXT_PUBLIC_GISCUS_REPO_ID`, `NEXT_PUBLIC_GISCUS_CATEGORY_ID` | Giscus comments (`components/comments.tsx`) | empty |
 
-Set this in Vercel project settings (or `.env.local` locally) before deploying:
+Set these in Vercel project settings (or `.env.local` locally) before deploying:
 
 ```
 NEXT_PUBLIC_SITE_URL=https://yourdomain.com
 ```
 
-Without it, all canonical URLs, OG metadata, and sitemap entries will point to `localhost`.
+Without `NEXT_PUBLIC_SITE_URL`, all canonical URLs, OG metadata, and sitemap entries will point to `localhost`.
 
 ---
 
@@ -128,6 +133,7 @@ title: "My Page"
 description: "What this page covers."
 order: 2
 publishedAt: "2026-05-03"
+status: published
 ---
 
 # My Page
@@ -149,9 +155,7 @@ publishedAt: "2026-05-03"
 tags: ["nextjs", "typescript"]
 ---
 
-# Post Title
-
-Content here.
+Content here. The post page renders `title` as the H1, so don't repeat it in the body.
 ```
 
 ---
@@ -159,16 +163,18 @@ Content here.
 ## SEO
 
 - **Metadata cascade**: global `openGraph`, `twitter`, `robots` in root `layout.tsx`; per-page `title`, `description`, and `alternates.canonical` in each `generateMetadata`
-- **JSON-LD**: `BlogPosting` schema on every blog post; `WebSite` schema on the home page
-- **Dynamic OG images**: `opengraph-image.tsx` co-located with the blog `[slug]` route — generates a 1200×630 dark card per post via `next/og`
-- **Sitemap**: `/sitemap.xml` covers home, all blog posts (priority 0.7), and all wiki pages (priority 0.6)
+- **JSON-LD**: `TechArticle` on wiki pages, `BlogPosting` on blog posts, `BreadcrumbList` on both; `WebSite` on the home page
+- **OG images**: `app/og/route.tsx` generates a 1200×630 card from `?title&description&category`; wiki pages, posts and `/blog` set `openGraph.images` to it (a post's `image` frontmatter overrides it)
+- **Sitemap**: `/sitemap.xml` covers home, `/blog`, `/pages`, all blog posts (priority 0.8), and all wiki pages (priority 0.7)
 - **RSS**: `/rss.xml` — valid RSS 2.0 feed for blog posts
 
 ---
 
 ## Deployment
 
-Deployed on [Vercel](https://vercel.com). Push to `main` triggers a production deployment.
+Deployed on [Vercel](https://vercel.com) from GitHub Actions; `vercel.json` turns off Vercel's own Git deployments. Both workflows run `tsc --noEmit` and `npm run lint`, then `vercel build` and `vercel deploy`. Push to `main` deploys production; any other branch deploys a preview. Dependabot branches build without deploying.
+
+Security headers are set in `next.config.ts`: an enforced `frame-ancestors 'none'`, `X-Content-Type-Options`, `Referrer-Policy`, and a Content Security Policy in Report-Only mode.
 
 1. Set `NEXT_PUBLIC_SITE_URL` in Vercel environment variables
 2. `npm run build` — verify no build errors locally before pushing

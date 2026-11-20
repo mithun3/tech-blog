@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-move-wiki-page",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Move content/pages/proxmox/workloads/searxng-lxc.mdx into a new proxmox/workloads/search/ section.",
+      "expected_output": "Greps inbound links to /pages/proxmox/workloads/searxng-lxc, creates search/index.mdx (otherwise the section is hidden), git mv's the page, adds a permanent redirect in next.config.ts, updates every inbound link and both sections' In This Section lists, keeps publishedAt, mentions the Giscus thread rename, runs the content check (0 broken links) and gives the curl check for a 308.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Eight pages still link to /pages/proxmox/workloads/llamacpp-router-mode and llamacpp-inference-lxc. Fix them.",
+      "expected_output": "Runs the content check to list every broken link, maps each old slug to its current page under proxmox/workloads/llamacpp/ by reading the files there (asks when the mapping is not clear, such as llamacpp-inference-lxc), updates the links, and adds permanent redirects for the old slugs so external links also work. Shows the content check passing afterwards.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Split the gpu-passthrough page into a host setup page and a guest setup page.",
+      "expected_output": "Plans the split first: new slugs, which one the old URL redirects to (or whether the old page stays as a short overview), the inbound links, and the index updates. Keeps the original publishedAt on both new pages and preserves command blocks verbatim. Adds the redirect only if the old URL stops existing.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Fix the typo 'recieve' in the pihole-lxc page.",
+      "expected_output": "Near-miss: an in-place edit that does not change any URL. Fixes the typo without adding redirects or touching publishedAt/updatedAt.",
+      "files": []
+    }
+  ]
+}

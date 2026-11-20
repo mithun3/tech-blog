@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm'
 import rehypeSlug from 'rehype-slug'
 import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import rehypePrettyCode from 'rehype-pretty-code'
-import Image, { type ImageProps } from 'next/image'
 import Link from 'next/link'
 import { getAllPageSlugs, getPageContent, getPageMeta, titleFromSegment } from '@/lib/wiki'
+import { SITE_NAME, SITE_URL, formatDate, ogImageUrl } from '@/lib/site'
 import { WikiBreadcrumb } from '@/components/wiki/breadcrumb'
 import Comments from '@/components/comments'
 import { Video } from '@/components/mdx/video'
@@ -23,6 +23,8 @@ type Props = {
 
 // ─── Static generation ────────────────────────────────────────────────────────
 
+export const dynamicParams = false
+
 export async function generateStaticParams() {
   const slugs = getAllPageSlugs()
   // [[...slug]] with no segments = root /pages — include an empty-slug entry
@@ -36,11 +38,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const meta = getPageMeta(slug)
   if (!meta) return {}
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'
-  const href = slug.length === 0 ? '/pages' : `/pages/${slug.join('/')}`
-  const url = `${siteUrl}${href}`
+  const url = `${SITE_URL}${meta.href}`
   const category = slug.length > 0 ? titleFromSegment(slug[0]) : 'Wiki'
-  const ogImageUrl = `${siteUrl}/og?title=${encodeURIComponent(meta.title)}&description=${encodeURIComponent(meta.description || '')}&category=${encodeURIComponent(category)}`
+  const ogImage = ogImageUrl(meta.title, meta.description, category)
 
   const keywords = Array.isArray(meta.keywords)
     ? meta.keywords
@@ -52,7 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: meta.title,
     description: meta.description,
     keywords,
-    authors: [{ name: meta.author || 'poc to prod', url: siteUrl }],
+    authors: [{ name: meta.author || SITE_NAME, url: SITE_URL }],
     alternates: { canonical: url },
     openGraph: {
       title: meta.title,
@@ -63,7 +63,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ...(meta.updatedAt && { modifiedTime: meta.updatedAt }),
       images: [
         {
-          url: ogImageUrl,
+          url: ogImage,
           width: 1200,
           height: 630,
           alt: meta.title,
@@ -74,39 +74,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       card: 'summary_large_image',
       title: meta.title,
       description: meta.description ?? undefined,
-      images: [ogImageUrl],
+      images: [ogImage],
     },
   }
 }
 
 // ─── MDX component overrides ──────────────────────────────────────────────────
 
+// Plugin-generated anchors (heading links, footnotes) also pass through `a`, so keep their props.
 const mdxComponents = {
-  img: (props: React.ComponentPropsWithoutRef<'img'>) => (
-    <Image
-      sizes="(max-width: 768px) 100vw, 80vw"
-      style={{ width: '100%', height: 'auto' }}
-      {...(props as ImageProps)}
-      alt={props.alt ?? ''}
-    />
-  ),
-  a: ({
-    href = '#',
-    children,
-    className,
-  }: React.ComponentPropsWithoutRef<'a'>) => {
-    if (href.startsWith('/')) {
-      return (
-        <Link href={href} className={className}>
-          {children}
-        </Link>
-      )
+  a: ({ href, ...props }: React.ComponentPropsWithoutRef<'a'>) => {
+    if (href?.startsWith('/') && !href.startsWith('//')) {
+      return <Link href={href} {...props} />
     }
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
-        {children}
-      </a>
-    )
+    if (href && /^https?:\/\//.test(href)) {
+      return <a href={href} target="_blank" rel="noopener noreferrer" {...props} />
+    }
+    return <a href={href} {...props} />
   },
   Video,
   Audio,
@@ -139,11 +123,19 @@ function remarkMermaid() {
   }
 }
 
+// The page header renders the frontmatter title as the H1, so drop the body's leading `# Title`.
+function remarkDropTitleHeading() {
+  return (tree: { children: { type: string; depth?: number }[] }) => {
+    const first = tree.children[0]
+    if (first?.type === 'heading' && first.depth === 1) tree.children.shift()
+  }
+}
+
 // ─── MDX processing options ───────────────────────────────────────────────────
 
 const mdxOptions = {
   mdxOptions: {
-    remarkPlugins: [remarkMermaid, remarkGfm],
+    remarkPlugins: [remarkDropTitleHeading, remarkMermaid, remarkGfm],
     rehypePlugins: [
       rehypeSlug,
       [
@@ -169,11 +161,8 @@ export default async function WikiPage({ params }: Props) {
 
   if (!page) notFound()
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'
-  const href = slug.length === 0 ? '/pages' : `/pages/${slug.join('/')}`
-  const pageUrl = `${siteUrl}${href}`
+  const pageUrl = `${SITE_URL}${page.href}`
   const category = slug.length > 0 ? titleFromSegment(slug[0]) : 'Wiki'
-  const ogImageUrl = `${siteUrl}/og?title=${encodeURIComponent(page.title)}&description=${encodeURIComponent(page.description || '')}&category=${encodeURIComponent(category)}`
 
   const articleJsonLd = {
     '@context': 'https://schema.org',
@@ -181,18 +170,18 @@ export default async function WikiPage({ params }: Props) {
     headline: page.title,
     description: page.description,
     url: pageUrl,
-    image: ogImageUrl,
+    image: ogImageUrl(page.title, page.description, category),
     ...(page.publishedAt && { datePublished: page.publishedAt }),
     ...(page.updatedAt && { dateModified: page.updatedAt }),
     author: {
       '@type': 'Person',
-      name: page.author || 'poc to prod',
-      url: siteUrl,
+      name: page.author || SITE_NAME,
+      url: SITE_URL,
     },
     publisher: {
       '@type': 'Person',
-      name: 'poc to prod',
-      url: siteUrl,
+      name: SITE_NAME,
+      url: SITE_URL,
     },
     mainEntityOfPage: {
       '@type': 'WebPage',
@@ -208,13 +197,13 @@ export default async function WikiPage({ params }: Props) {
       '@type': 'ListItem',
       position: 1,
       name: 'Home',
-      item: siteUrl,
+      item: SITE_URL,
     },
     {
       '@type': 'ListItem',
       position: 2,
       name: 'Wiki',
-      item: `${siteUrl}/pages`,
+      item: `${SITE_URL}/pages`,
     },
     ...slug.map((_, index) => {
       const crumbSlug = slug.slice(0, index + 1)
@@ -223,7 +212,7 @@ export default async function WikiPage({ params }: Props) {
         '@type': 'ListItem',
         position: index + 3,
         name: meta?.title ?? titleFromSegment(slug[index]),
-        item: `${siteUrl}/pages/${crumbSlug.join('/')}`,
+        item: `${SITE_URL}/pages/${crumbSlug.join('/')}`,
       }
     }),
   ]
@@ -262,7 +251,7 @@ export default async function WikiPage({ params }: Props) {
             </p>
           )}
           {page.publishedAt && (
-            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
               Published {formatDate(page.publishedAt)}
               {page.updatedAt && page.updatedAt !== page.publishedAt && (
                 <> · Updated {formatDate(page.updatedAt)}</>
@@ -293,12 +282,4 @@ export default async function WikiPage({ params }: Props) {
     </div>
     </>
   )
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
 }

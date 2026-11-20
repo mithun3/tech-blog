@@ -2,8 +2,11 @@ import { notFound } from "next/navigation";
 import { getAllPostsMeta, getPostBySlug } from "@/lib/posts";
 import type { Metadata } from "next";
 import Comments from "@/components/comments";
+import { SITE_NAME, SITE_URL, formatDate, ogImageUrl } from "@/lib/site";
 
 type Props = { params: Promise<{ slug: string }> };
+
+export const dynamicParams = false;
 
 export async function generateStaticParams() {
   return getAllPostsMeta().map((post) => ({ slug: post.slug }));
@@ -14,11 +17,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = await getPostBySlug(slug);
   if (!post) return {};
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
-  const url = `${siteUrl}/blog/${slug}`;
-  const ogImageUrl = post.image
-    ? post.image
-    : `${siteUrl}/og?title=${encodeURIComponent(post.title)}&description=${encodeURIComponent(post.summary || "")}&category=Blog`;
+  const url = `${SITE_URL}/blog/${slug}`;
+  const ogImage = post.image || ogImageUrl(post.title, post.summary, "Blog");
 
   return {
     title: post.title,
@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ...(post.updatedAt && { modifiedTime: post.updatedAt }),
       images: [
         {
-          url: ogImageUrl,
+          url: ogImage,
           width: 1200,
           height: 630,
           alt: post.title,
@@ -45,17 +45,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       card: "summary_large_image",
       title: post.title,
       description: post.summary ?? undefined,
-      images: [ogImageUrl],
+      images: [ogImage],
     },
   };
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
 }
 
 export default async function PostPage({ params }: Props) {
@@ -63,11 +55,7 @@ export default async function PostPage({ params }: Props) {
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
-  const postUrl = `${siteUrl}/blog/${slug}`;
-  const ogImageUrl = post.image
-    ? post.image
-    : `${siteUrl}/og?title=${encodeURIComponent(post.title)}&description=${encodeURIComponent(post.summary || "")}&category=Blog`;
+  const postUrl = `${SITE_URL}/blog/${slug}`;
 
   const articleJsonLd = {
     "@context": "https://schema.org",
@@ -75,19 +63,19 @@ export default async function PostPage({ params }: Props) {
     headline: post.title,
     description: post.summary,
     url: postUrl,
-    image: ogImageUrl,
+    image: post.image || ogImageUrl(post.title, post.summary, "Blog"),
     datePublished: post.publishedAt,
     ...(post.updatedAt && { dateModified: post.updatedAt }),
     ...(post.tags && post.tags.length > 0 && { keywords: post.tags.join(", ") }),
     author: {
       "@type": "Person",
-      name: "poc to prod",
-      url: siteUrl,
+      name: SITE_NAME,
+      url: SITE_URL,
     },
     publisher: {
       "@type": "Person",
-      name: "poc to prod",
-      url: siteUrl,
+      name: SITE_NAME,
+      url: SITE_URL,
     },
     mainEntityOfPage: {
       "@type": "WebPage",
@@ -103,13 +91,13 @@ export default async function PostPage({ params }: Props) {
         "@type": "ListItem",
         position: 1,
         name: "Home",
-        item: siteUrl,
+        item: SITE_URL,
       },
       {
         "@type": "ListItem",
         position: 2,
         name: "Blog",
-        item: `${siteUrl}/blog`,
+        item: `${SITE_URL}/blog`,
       },
       {
         "@type": "ListItem",
@@ -150,7 +138,7 @@ export default async function PostPage({ params }: Props) {
               </div>
             )}
             <h1 className="text-4xl font-bold tracking-tight">{post.title}</h1>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
               <time dateTime={post.publishedAt}>Published {formatDate(post.publishedAt)}</time>
               <span aria-hidden="true">·</span>
               <span>{post.readingTime}</span>

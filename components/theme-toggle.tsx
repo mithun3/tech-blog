@@ -47,7 +47,8 @@ function MoonIcon() {
 
 export function ThemeToggle() {
   const [mounted, setMounted] = useState(false)
-  const { theme, setTheme } = useTheme()
+  // resolvedTheme turns 'system' into 'light' or 'dark', so the first click always flips what is shown.
+  const { resolvedTheme, setTheme } = useTheme()
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -59,13 +60,16 @@ export function ThemeToggle() {
     return <div className="w-8 h-8" aria-hidden="true" />
   }
 
+  const isDark = resolvedTheme === 'dark'
+
   return (
     <button
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      type="button"
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
       className="rounded-md p-1.5 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
-      {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+      {isDark ? <SunIcon /> : <MoonIcon />}
     </button>
   )
 }

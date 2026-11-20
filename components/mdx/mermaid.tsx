@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
-import mermaid, { MermaidConfig } from 'mermaid'
+import React, { useEffect, useState } from 'react'
+import type { MermaidConfig } from 'mermaid'
 import { useTheme } from 'next-themes'
 
 /**
@@ -24,7 +24,6 @@ function getDarkThemeConfig(): MermaidConfig {
       secondaryColor: '#1e293b',
       tertiaryColor: '#0f172a',
     },
-    securityLevel: 'loose',
   }
 }
 
@@ -48,7 +47,6 @@ function getLightThemeConfig(): MermaidConfig {
       secondaryColor: '#f8fafc',
       tertiaryColor: '#f1f5f9',
     },
-    securityLevel: 'loose',
   }
 }
 
@@ -71,7 +69,6 @@ interface MermaidProps {
  * @returns {JSX.Element} The rendered SVG diagram within a framed container, or a loading skeleton.
  */
 export function Mermaid({ chart }: MermaidProps): React.ReactElement | null {
-  const containerRef = useRef<HTMLDivElement>(null)
   const [svg, setSvg] = useState<string>('')
   
   // Extract the active theme from the next-themes provider.
@@ -82,15 +79,9 @@ export function Mermaid({ chart }: MermaidProps): React.ReactElement | null {
   const [diagramId] = useState(() => `mermaid-${Math.random().toString(36).substring(2, 11)}`)
 
   useEffect(() => {
-    // 1. Resolve the active theme configuration
+    let cancelled = false
     const isDark = resolvedTheme === 'dark'
     const config = isDark ? getDarkThemeConfig() : getLightThemeConfig()
-    
-    // 2. Safely initialize the mermaid engine with the new theme
-    mermaid.initialize({
-      startOnLoad: false,
-      ...config
-    })
 
     /**
      * Asynchronously generates the SVG string from the raw chart text.
@@ -100,17 +91,24 @@ export function Mermaid({ chart }: MermaidProps): React.ReactElement | null {
     const renderDiagram = async () => {
       try {
         if (!chart) return
-        
-        // Mermaid render API returns an object containing the generated raw SVG string
+
+        // Loaded on demand so pages without a diagram do not ship Mermaid.
+        const { default: mermaid } = await import('mermaid')
+        // 'strict' keeps Mermaid's DOMPurify pass on the SVG that is injected below.
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', ...config })
+
         const result = await mermaid.render(diagramId, chart)
-        setSvg(result.svg)
+        if (!cancelled) setSvg(result.svg)
       } catch (error) {
         console.error('Failed to parse or render Mermaid chart:', error)
-        setSvg(`<div class="text-red-500 p-4 border border-red-500 rounded bg-red-50 dark:bg-red-950/20 text-sm">Failed to parse diagram syntax.</div>`)
+        if (!cancelled) setSvg(`<div class="text-red-500 p-4 border border-red-500 rounded bg-red-50 dark:bg-red-950/20 text-sm">Failed to parse diagram syntax.</div>`)
       }
     }
 
     renderDiagram()
+    return () => {
+      cancelled = true
+    }
   }, [chart, diagramId, resolvedTheme])
 
   // Return an elegant skeleton pulse while generating the SVG to prevent UI layout shift.
@@ -122,11 +120,9 @@ export function Mermaid({ chart }: MermaidProps): React.ReactElement | null {
     )
   }
 
-  // Inject the raw, trusted SVG into the DOM. 
-  // Wrapped in a polished card container for a premium UI presentation.
+  // Inject the SVG that Mermaid sanitized under securityLevel 'strict'.
   return (
     <div
-      ref={containerRef}
       className="mermaid-wrapper my-8 flex justify-center w-full overflow-x-auto p-6 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm transition-colors duration-300"
       dangerouslySetInnerHTML={{ __html: svg }}
     />

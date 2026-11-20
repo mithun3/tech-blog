@@ -1,14 +1,37 @@
-import createMDX from '@next/mdx'
 import type { NextConfig } from 'next'
+
+const isDev = process.env.NODE_ENV === 'development'
+
+// Report-Only until it has run clean in production. A nonce-based policy would force dynamic rendering.
+const cspReportOnly = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline' https://giscus.app${isDev ? " 'unsafe-eval'" : ''}`,
+  "style-src 'self' 'unsafe-inline' https://giscus.app",
+  "img-src 'self' blob: data:",
+  "font-src 'self'",
+  'frame-src https://giscus.app https://www.youtube-nocookie.com https://player.vimeo.com',
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ')
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ['192.168.20.20'],
   turbopack: {
     root: __dirname,
   },
-  pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
-  images: {
-    remotePatterns: [{ protocol: 'https', hostname: '**' }],
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'Content-Security-Policy-Report-Only', value: cspReportOnly },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ]
   },
   async redirects() {
     return [
@@ -52,11 +75,23 @@ const nextConfig: NextConfig = {
         destination: '/pages/proxmox/:path*',
         permanent: true,
       },
+      {
+        source: '/pages/proxmox/workloads/llamacpp-inference-lxc',
+        destination: '/pages/proxmox/workloads/llamacpp',
+        permanent: true,
+      },
+      {
+        source: '/pages/proxmox/workloads/llamacpp-router-mode',
+        destination: '/pages/proxmox/workloads/llamacpp/router-mode',
+        permanent: true,
+      },
+      {
+        source: '/pages/proxmox/workloads/llamacpp-router-mode-deployment',
+        destination: '/pages/proxmox/workloads/llamacpp/router-mode-deployment',
+        permanent: true,
+      },
     ]
   },
 }
 
-const withMDX = createMDX({})
-
-export default withMDX(nextConfig)
-
+export default nextConfig

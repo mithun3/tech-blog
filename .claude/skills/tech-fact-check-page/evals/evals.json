@@ -1,0 +1,29 @@
+{
+  "skill_name": "tech-fact-check-page",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Fact-check content/pages/proxmox/operations/upgrades/pve-9-2-upgrade.mdx.",
+      "expected_output": "Reads the whole page, tables its checkable claims with line numbers (versions, kernel, commands, compatibility), verifies each against Proxmox and upstream docs with the quoted supporting sentence, adds footnotes at the end of the file, flags rather than edits any command block that disagrees with the docs, sets updatedAt only if the content changed materially, runs the content check, and returns the claim-by-claim verdict table.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The router-firmware section index has a Resources list at the bottom. Turn it into proper citations.",
+      "expected_output": "Maps each Resources link to the body claim it supports and turns it into a numbered footnote at that claim. Keeps genuinely optional links under Further Reading. Removes links that support nothing. Checks that each cited page actually contains the claim, and does not add new unsourced numbers.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Is what the tailscale-ztna page says about port forwarding and Cloudflare Tunnels accurate? Cite it.",
+      "expected_output": "Finds the relevant claims and their lines, verifies each against Tailscale's and Cloudflare's official docs, quotes the supporting or contradicting sentence, rewrites overstated wording rather than citing it, adds footnotes, and reports a verdict per claim.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Rename the tailscale-ztna page to tailscale.",
+      "expected_output": "Near-miss: a URL-changing move, not a fact-check. Uses the tech-move-wiki-page procedure (redirect, link updates) and does not run a citation pass.",
+      "files": []
+    }
+  ]
+}

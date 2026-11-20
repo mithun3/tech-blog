@@ -1,10 +1,29 @@
 import { getAllPostsMeta } from "@/lib/posts";
 import { PostCard } from "@/components/post-card";
+import { SITE_NAME, SITE_URL, ogImageUrl } from "@/lib/site";
 import type { Metadata } from "next";
+
+const description = "All blog posts.";
+const ogImage = ogImageUrl("Blog", description, "Blog");
 
 export const metadata: Metadata = {
   title: "Blog",
-  description: "All blog posts.",
+  description,
+  alternates: { canonical: `${SITE_URL}/blog` },
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    url: `${SITE_URL}/blog`,
+    title: "Blog",
+    description,
+    images: [{ url: ogImage, width: 1200, height: 630, alt: "Blog" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Blog",
+    description,
+    images: [ogImage],
+  },
 };
 
 export default function BlogPage() {
@@ -23,7 +42,7 @@ export default function BlogPage() {
           <PostCard key={post.slug} post={post} />
         ))}
         {posts.length === 0 && (
-          <p className="col-span-full text-zinc-500">No posts yet. Check back soon!</p>
+          <p className="col-span-full text-zinc-500 dark:text-zinc-400">No posts yet. Check back soon!</p>
         )}
       </div>
     </div>

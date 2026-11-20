@@ -1,21 +1,19 @@
-import HomePageIntro from "@/content/site/home-intro.mdx";
 import Link from "next/link";
+import { MDXRemote } from "next-mdx-remote/rsc";
 import { buildNavTree } from "@/lib/wiki";
-
-const META_HREFS = new Set(['/pages/about', '/pages/contact', '/pages/privacy', '/pages/terms', '/pages/faq'])
+import { getSiteSnippet } from "@/lib/site-content";
+import { MORE_HREFS, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 export default function HomePage() {
-  const sections = buildNavTree().filter((s) => !META_HREFS.has(s.href));
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000';
+  const sections = buildNavTree().filter((s) => !MORE_HREFS.has(s.href));
   const totalTopicPages = sections.reduce((count, section) => count + section.children.length, 0);
 
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'poc to prod',
-    url: siteUrl,
-    description:
-      'Notes, guides, and deep-dives on software engineering, infrastructure, and building things.',
+    name: SITE_NAME,
+    url: SITE_URL,
+    description: SITE_DESCRIPTION,
   };
 
   return (
@@ -29,9 +27,9 @@ export default function HomePage() {
       <div className="grid gap-10 pt-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(18rem,22rem)] xl:gap-x-12 xl:gap-y-16">
         {/* Hero */}
         <section className="space-y-3 xl:col-start-1 xl:row-start-1">
-          <h1 className="text-4xl font-bold tracking-tight">poc to prod</h1>
+          <h1 className="text-4xl font-bold tracking-tight">{SITE_NAME}</h1>
           <div className="max-w-[72ch] space-y-4 text-lg leading-relaxed text-zinc-600 dark:text-zinc-400 [&_p]:m-0">
-            <HomePageIntro />
+            <MDXRemote source={getSiteSnippet("home-intro")} />
           </div>
         </section>
 
@@ -72,7 +70,7 @@ export default function HomePage() {
                     </p>
                   )}
                 </div>
-                <span className="shrink-0 pt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+                <span className="shrink-0 pt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                   {section.children.length} {section.children.length === 1 ? 'page' : 'pages'}
                 </span>
               </Link>
@@ -93,7 +91,7 @@ export default function HomePage() {
             <h2 className="text-xl font-semibold">Topics</h2>
             <Link
               href="/pages"
-              className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+              className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
               Browse all →
             </Link>
@@ -114,14 +112,14 @@ export default function HomePage() {
                   </p>
                 )}
                 {section.children.length > 0 && (
-                  <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+                  <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                     {section.children.length} {section.children.length === 1 ? 'page' : 'pages'}
                   </p>
                 )}
               </Link>
             ))}
             {sections.length === 0 && (
-              <p className="col-span-full text-zinc-500">No pages yet. Check back soon!</p>
+              <p className="col-span-full text-zinc-500 dark:text-zinc-400">No pages yet. Check back soon!</p>
             )}
           </div>
         </section>

@@ -93,6 +93,8 @@ Full MDX content here — tables, code blocks, custom components.
 
 Page is live at `/pages/my-section/my-page` with no other changes required.
 
+The page header renders `title` as the page's H1, so the renderer drops the body's leading `# Heading`. Keep that line in the file for readability, and change `title` to change the visible heading.
+
 ---
 
 ## Frontmatter Reference
@@ -105,6 +107,8 @@ Page is live at `/pages/my-section/my-page` with no other changes required.
 | `publishedAt` | ISO date string | Recommended | Original publication date, e.g. `"2023-01-09"` — shown in page header and preserved across later edits |
 | `updatedAt` | ISO date string | No | Latest substantive revision date. Leave `publishedAt` unchanged and set this only when the content meaningfully changes; displayed as "Updated …" when different |
 | `status` | `published` / `draft` / `archived` | No | Informational only — all files are rendered regardless |
+| `keywords` | list or comma-separated string | No | Keywords in the page metadata and JSON-LD |
+| `author` | string | No | Author name in the page metadata and JSON-LD; defaults to the site name |
 
 Sidebar sort order: sorted by `order` ascending first, then alphabetically by `title` as a tiebreaker.
 
@@ -114,10 +118,7 @@ Preserve `publishedAt` as the original date even if you reorganize files, rename
 
 ## Both `.md` and `.mdx` Work
 
-- **`.mdx`** — full MDX: use React components inline in content
-- **`.md`** — plain Markdown only
-
-Use `.mdx` by default. Both extensions are resolved automatically.
+Both extensions are resolved automatically and both go through the MDX compiler, so components work in either and the same syntax rules apply. Use `.mdx` by default.
 
 ---
 
@@ -134,6 +135,10 @@ These components are available in every `.mdx` page without importing:
 
 <Audio src="/audio/clip.mp3" />
 ```
+
+- `Callout` types: `info` (default), `warning`, `tip`, `danger`.
+- `Video` and `Audio` take an optional `title`.
+- Diagrams: write a `mermaid` code fence. It renders in the browser, so check it in `npm run dev`.
 
 ## Citations And Sources
 
@@ -237,52 +242,9 @@ When you add or update content files, the following happen **without any code ch
 - ✅ Sidebar entry in the correct section, sorted by `order`
 - ✅ Breadcrumb trail showing all ancestor segments with their titles
 - ✅ Static HTML pre-rendered at build time (`generateStaticParams` in `app/pages/[[...slug]]/page.tsx`)
-- ✅ Sitemap entry in `/sitemap.xml` (`priority: 0.6`, `changeFrequency: monthly`)
+- ✅ Sitemap entry in `/sitemap.xml` (`priority: 0.7`, `changeFrequency: monthly`)
 - ✅ Page `<title>` and OpenGraph meta tags from `title` + `description` frontmatter
 - ✅ Syntax-highlighted code blocks (Shiki, `github-dark-dimmed` / `github-light` themes)
-
----
-
-## Real Example: Networking Section
-
-The networking section was built directly from homelab documentation notes stored in `/code/proxmox/docs/`. Here is what was done:
-
-### Source files
-
-| Original file | Renamed to | Reason |
-|---------------|-----------|--------|
-| `FUNDAMENTALS-NETWORKING.md` | Split into two pages | File covered two distinct topics — fundamentals and homelab-specific setup |
-| `ASUS-MERLIN-HOMELAB-GUIDE.md` | `router-firmware.mdx` | Shorter, describes content without branding in the name |
-
-### Resulting structure
-
-```
-content/pages/networking/
-├── index.mdx                   →  /pages/networking
-├── basics.mdx                  →  /pages/networking/basics
-├── homelab-architecture.mdx    →  /pages/networking/homelab-architecture
-└── router-firmware.mdx         →  /pages/networking/router-firmware
-```
-
-### Step-by-step
-
-1. Created `content/pages/networking/` directory
-2. Added `index.mdx` as the section landing page — links to all child pages
-3. Took `FUNDAMENTALS-NETWORKING.md` and split it by topic:
-   - Pure fundamentals (OSI, TCP/IP, DNS, DHCP, how routers work) → `basics.mdx`
-   - Homelab-specific (Proxmox bridges, containers, VLANs, troubleshooting) → `homelab-architecture.mdx`
-4. Converted `ASUS-MERLIN-HOMELAB-GUIDE.md` → `router-firmware.mdx` directly
-5. Added frontmatter (`title`, `description`, `order`, `publishedAt`) to each file
-6. **No code changes needed** — sidebar updated automatically on next `npm run dev` / `npm run build`
-
-### URL mapping
-
-| URL | Content |
-|-----|---------|
-| `/pages/networking` | Section overview, links to subpages |
-| `/pages/networking/basics` | OSI model, TCP/IP, how routers work, DNS, DHCP |
-| `/pages/networking/homelab-architecture` | Proxmox networking, Linux bridges, VLANs, container networking, troubleshooting |
-| `/pages/networking/router-firmware` | ASUS Merlin firmware — scripts, Entware, VPN Director, advanced DNS |
 
 ---
 
@@ -293,8 +255,8 @@ You should not need to edit these for content work. Listed for completeness:
 | File | Purpose |
 |------|---------|
 | `lib/wiki.ts` | All data layer logic — file resolution, nav tree builder, type definitions |
-| `app/pages/layout.tsx` | Two-column layout (sticky sidebar + content area) |
-| `app/pages/[[...slug]]/page.tsx` | Catch-all page renderer using `next-mdx-remote` |
-| `components/wiki/sidebar.tsx` | Server Component — reads nav tree from filesystem at build time |
-| `components/wiki/sidebar-nav.tsx` | Client Component — handles active highlighting and expand/collapse |
+| `app/pages/layout.tsx` | Content container (max width and padding); the sidebar comes from the root layout |
+| `app/pages/[[...slug]]/page.tsx` | Catch-all page renderer using `next-mdx-remote`; drops the body's leading `# Heading` |
+| `components/app-sidebar.tsx` | Server Component — reads nav tree from filesystem at build time |
+| `components/app-sidebar-nav.tsx` | Client Component — handles active highlighting and expand/collapse |
 | `components/wiki/breadcrumb.tsx` | Server Component — resolves page titles per breadcrumb segment |

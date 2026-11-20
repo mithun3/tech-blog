@@ -1,7 +1,9 @@
 import { getAllPostsMeta } from "@/lib/posts";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import { NextResponse } from "next/server";
 
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
+// Built once at build time; the feed only changes when content does.
+export const dynamic = "force-static";
 
 export async function GET() {
   const posts = getAllPostsMeta();
@@ -11,8 +13,8 @@ export async function GET() {
       (post) => `
     <item>
       <title><![CDATA[${post.title}]]></title>
-      <link>${BASE_URL}/blog/${post.slug}</link>
-      <guid isPermaLink="true">${BASE_URL}/blog/${post.slug}</guid>
+      <link>${SITE_URL}/blog/${post.slug}</link>
+      <guid isPermaLink="true">${SITE_URL}/blog/${post.slug}</guid>
       <description><![CDATA[${post.summary}]]></description>
       <pubDate>${new Date(post.publishedAt).toUTCString()}</pubDate>
     </item>`
@@ -22,11 +24,11 @@ export async function GET() {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Tech Blog</title>
-    <link>${BASE_URL}</link>
-    <description>A technical blog on software engineering, web development, and building things.</description>
+    <title>${SITE_NAME}</title>
+    <link>${SITE_URL}</link>
+    <description>${SITE_DESCRIPTION}</description>
     <language>en-us</language>
-    <atom:link href="${BASE_URL}/rss.xml" rel="self" type="application/rss+xml"/>
+    <atom:link href="${SITE_URL}/rss.xml" rel="self" type="application/rss+xml"/>
     ${items}
   </channel>
 </rss>`;

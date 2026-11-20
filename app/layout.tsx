@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AppSidebar } from "@/components/app-sidebar";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,11 +14,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
-const SITE_NAME = "poc to prod";
-const SITE_DESCRIPTION =
-  "Notes, guides, and deep-dives on software engineering, infrastructure, and building things.";
 
 export const viewport: Viewport = {
   themeColor: [
@@ -88,9 +84,15 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)] antialiased">
+        <a
+          href="#main-content"
+          className="fixed left-4 top-3 z-[60] -translate-y-[200%] rounded-md bg-white px-3 py-2 text-sm font-medium text-zinc-900 shadow ring-1 ring-zinc-300 focus:translate-y-0 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700"
+        >
+          Skip to content
+        </a>
         <Providers>
           <AppSidebar />
-          <main className="lg:ml-64 min-w-0 pt-14 lg:pt-0">
+          <main id="main-content" className="lg:ml-64 min-w-0 pt-14 lg:pt-0">
             {children}
           </main>
         </Providers>

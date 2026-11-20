@@ -4,16 +4,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import type { NavNode } from '@/lib/wiki'
+import { MORE_HREFS, MORE_LINKS, SITE_NAME } from '@/lib/site'
 import { ThemeToggle } from './theme-toggle'
-
-/** Pages that belong to the "More" section — excluded from the dynamic Notes tree. */
-const MORE_HREFS = new Set([
-  '/pages/about',
-  '/pages/contact',
-  '/pages/privacy',
-  '/pages/terms',
-  '/pages/faq',
-])
 
 type Props = {
   tree: NavNode[]
@@ -30,13 +22,22 @@ export function AppSidebarNav({ tree }: Props) {
     setMobileOpen(false)
   }, [pathname])
 
+  useEffect(() => {
+    if (!mobileOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [mobileOpen])
+
   return (
     <>
       {/* Mobile hamburger toggle */}
       <button
         type="button"
         onClick={() => setMobileOpen((prev) => !prev)}
-        className="fixed top-3 left-4 z-50 lg:hidden p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+        className="fixed top-3 left-4 z-50 lg:hidden p-1.5 rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
         aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
         aria-expanded={mobileOpen}
         aria-controls="app-sidebar"
@@ -53,18 +54,18 @@ export function AppSidebarNav({ tree }: Props) {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar: hidden from focus and screen readers while closed on mobile */}
       <aside
         id="app-sidebar"
-        className={`fixed left-0 top-0 z-40 h-screen w-64 flex flex-col bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-transform duration-200 ease-in-out ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed left-0 top-0 z-40 h-screen w-64 flex flex-col bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-[transform,visibility] duration-200 ease-in-out ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full max-lg:invisible lg:translate-x-0'
         }`}
       >
         {/* Site header */}
         <div className="px-6 py-6 shrink-0">
           <Link href="/" className="block group">
             <span className="text-base font-bold text-zinc-900 dark:text-zinc-100 leading-tight block">
-              poc to prod
+              {SITE_NAME}
             </span>
             <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 block leading-snug">
               v12n, iot, swe &amp; building things
@@ -79,12 +80,17 @@ export function AppSidebarNav({ tree }: Props) {
         >
           <ul className="space-y-0.5">
             <NavLink href="/" label="Home" isActive={pathname === '/'} />
+            <NavLink
+              href="/blog"
+              label="Blog"
+              isActive={pathname === '/blog' || pathname.startsWith('/blog/')}
+            />
           </ul>
 
           {notes.length > 0 && (
             <>
               <div className="mt-5 mb-2 px-3">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                   Notes
                 </span>
               </div>
@@ -101,18 +107,12 @@ export function AppSidebarNav({ tree }: Props) {
           )}
 
           <div className="mt-5 mb-2 px-3">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
               More
             </span>
           </div>
           <ul className="space-y-0.5">
-            {[
-              { href: '/pages/about', label: 'About' },
-              { href: '/pages/contact', label: 'Contact' },
-              { href: '/pages/privacy', label: 'Privacy Policy' },
-              { href: '/pages/terms', label: 'Terms of Service' },
-              { href: '/pages/faq', label: 'FAQ' },
-            ].map(({ href, label }) => (
+            {MORE_LINKS.map(({ href, label }) => (
               <NavLink
                 key={href}
                 href={href}
@@ -127,10 +127,9 @@ export function AppSidebarNav({ tree }: Props) {
         <div className="shrink-0 px-4 py-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
           <a
             href="/rss.xml"
-            className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
           >
             RSS
-            {/* &mdash; git vommit -m &quot;barf&quot; */}
           </a>
           <ThemeToggle />
         </div>
@@ -152,7 +151,7 @@ function NavLink({
 }) {
   return (
     <li>
-      <Link href={href} className={linkClass(isActive)}>
+      <Link href={href} className={linkClass(isActive)} aria-current={isActive ? 'page' : undefined}>
         {label}
       </Link>
     </li>
@@ -180,7 +179,7 @@ function SidebarItem({
   if (!hasChildren) {
     return (
       <li>
-        <Link href={node.href} className={linkClass(isActive)}>
+        <Link href={node.href} className={linkClass(isActive)} aria-current={isActive ? 'page' : undefined}>
           {node.title}
         </Link>
       </li>
@@ -190,13 +189,13 @@ function SidebarItem({
   return (
     <li>
       <div className="flex items-center">
-        <Link href={node.href} className={linkClass(isActive)}>
+        <Link href={node.href} className={linkClass(isActive)} aria-current={isActive ? 'page' : undefined}>
           {node.title}
         </Link>
         <button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
-          className="shrink-0 p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+          className="shrink-0 p-1.5 rounded text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
           aria-label={isOpen ? 'Collapse section' : 'Expand section'}
           aria-expanded={isOpen}
         >
