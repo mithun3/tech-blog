@@ -8,15 +8,11 @@ status: published
 
 # Homelab Drawing Set
 
-DRAFT
-
 This is my homelab, drawn from its own repo. Two Proxmox nodes run local AI models, the household's apps and a home hub; a MikroTik router, a core switch and a few small boards hold it together. Each picture below is a detail of one of three sheets: physical (cables and ports), logical (VLANs, addresses and guests) and services (request paths, data and support). OPEN SHEET shows the whole sheet with that part lit; the legend is on sheet 1. Lab names end in `lab.home.arpa`, the name reserved for home networks[^1], in place of the lab's own domain.
 
 <LabSheet sheet="physical" focus="sheet" caption="Sheet 1 of 3: every cable, port and part." />
 
 ## One router, one switch, one trunk
-
-DRAFT
 
 Everything that crosses from one VLAN to another goes through the MikroTik RB5009: it is the gateway and the firewall of every VLAN, and serves DHCP wherever a VLAN has a pool. The CRS310 only switches. One 10G trunk (W01) carries every VLAN, tagged, between the two, so there is exactly one place where policy lives. The internet arrives on ether1, and nothing new is accepted from that side: no port is forwarded.
 
@@ -24,15 +20,11 @@ Everything that crosses from one VLAN to another goes through the MikroTik RB500
 
 ## Node 1: GPUs and storage
 
-DRAFT
-
 Node 1, pve-epyc, is the heavy node. It runs the llama.cpp container that holds both RTX 3090s, and the TrueNAS VM that owns the family data pool. One SFP28 port brings its VLANs in as a 10G trunk to a VLAN-aware bridge; the host itself sits on the untagged out-of-band VLAN, and its BMC hangs off a small unmanaged switch. Node 2, pve-ryzen, runs the always-on services. The nodes are not clustered, so either keeps working while the other is down.
 
 <LabSheet sheet="physical" focus="pve-epyc" caption="Node 1: its trunk, its guests and its out-of-band ports." />
 
 ## Small boards do small jobs
-
-DRAFT
 
 Three Raspberry Pis sit on the router's own ports: the primary Pi-hole on ether3, the Tailscale router ts-sbc on ether4 and the infra-proxy on ether5. Each does one job and nothing else. Because they hang off the router rather than the core switch, DNS, the update proxy and a Tailscale exit node keep working when the switch or its trunk fails. A router that does one job is also a smaller target.
 
@@ -40,15 +32,11 @@ Three Raspberry Pis sit on the router's own ports: the primary Pi-hole on ether3
 
 ## Ten VLANs, one way between them
 
-DRAFT
-
 Every device and guest lives in one of ten VLANs, each a /24 with the RB5009 as its .1. Out-of-band and storage hand out no addresses at all: everything there is static. Traffic inside a VLAN is switched; traffic between VLANs always crosses the router, and every VLAN drops by default, so a path exists only where a rule allows it. On sheet 2, the lines under each bus say what that VLAN may reach on the internet side.
 
 <LabSheet sheet="logical" focus="vlan-schedule" caption="The VLAN schedule on sheet 2." />
 
 ## The way out for isolated VLANs
-
-DRAFT
 
 Out-of-band, compute, SBC and storage, and the monitoring board, have no direct route to the internet. Their updates go through the infra-proxy: Squid with an allowlist of domains, and apt-cacher-ng so each package is downloaded once. The proxy itself reaches the internet on 80 and 443 only. A compromised host in those VLANs cannot reach anywhere it likes, and what the lab may fetch is one short list I can read.
 
@@ -56,15 +44,11 @@ Out-of-band, compute, SBC and storage, and the monitoring board, have no direct 
 
 ## One front door
 
-DRAFT
-
 Every lab name resolves to Caddy, a small container on Node 2. Caddy holds one wildcard certificate, issued through a DNS-01 challenge[^2] so no port has to be open for it, and passes each name to exactly one backend port: eighteen names, a dozen backends. Names marked A answer admin sources only (the tailnet, the admin Mac and the monitoring probes); names marked C also answer the home Wi-Fi.
 
 <LabSheet sheet="services" focus="caddy" caption="Caddy: each lab name to one backend port." />
 
 ## From away: no open port
-
-DRAFT
 
 Remote access is Tailscale. Two subnet routers, ts-lxc (a container on Node 2) and ts-sbc (a Raspberry Pi on the router), do the same job, so either can fail without locking me out. From the tailnet, my devices reach the lab through Caddy on 443. Nothing on the router answers the internet and no port is forwarded: every connection is started from inside, so there is nothing to find from outside.
 
@@ -72,21 +56,15 @@ Remote access is Tailscale. Two subnet routers, ts-lxc (a container on Node 2) a
 
 ## Family data
 
-DRAFT
-
 Photos, media and documents live once, on a TrueNAS VM whose pool is a three-way mirror. The apps VM keeps its databases on its own disk and mounts the files over NFS, inside the storage VLAN. A second TrueNAS on the other node, still planned, will pull snapshots every night. It pulls rather than being pushed to, so the primary holds no credential that could delete its backups.
 
 <LabSheet sheet="services" focus="detail-b" caption="Detail B on sheet 3: NFS, shares and the pull." />
 
 ## How it is drawn
 
-DRAFT
-
 I do not draw these sheets by hand. A script in the lab's repo reads the same files that configure the router, the switch and the guests, and lays the sheets out by rule: a device on a switch port lands in that switch's column, an address lands on its VLAN's bus. REV in each title block is a hash of that data, so two copies with the same REV show the same lab. When the lab changes, I rebuild and this page follows.
 
 ## Related Topics
-
-DRAFT
 
 - [Homelab Network Architecture](/pages/networking/homelab-network) - bridges, VLANs and segmentation in general.
 - [Tailscale ZTNA & Subnet Routing](/pages/networking/homelab-network/tailscale-ztna) - remote access without port forwarding.
