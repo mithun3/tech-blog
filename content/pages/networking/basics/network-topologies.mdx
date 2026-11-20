@@ -23,10 +23,25 @@ In a homelab with storage and compute on separate machines, east-west is where t
 In a router-on-a-stick design, a single cable (a trunk) connects the switch to the router, and all routing between VLANs happens in the router.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
     Router["Router (MikroTik RB5009)<br/>gateway .1 of every VLAN, firewall, NAT"] ---|"10G DAC trunk: all ten VLANs, tagged"| Switch["Switch (MikroTik CRS310)<br/>switching only"]
     Switch ---|"10G node trunk"| Node1["pve-epyc"]
     Switch ---|"2.5G node trunk"| Node2["pve-ryzen"]
+    style Router fill:#ef444426,stroke:#dc2626
+    style Switch fill:#3b82f626,stroke:#3b82f6
 ```
 
 That is my lab. The RB5009 is the only router and holds the gateway of every VLAN. The CRS310 is only a switch. Two hosts in the same VLAN talk through the switch without touching the router; anything that changes VLAN goes up the trunk and comes back down.
@@ -40,21 +55,37 @@ Traffic between two VLANs on the switch goes up the trunk to the router and back
 The extreme case is a **hairpin**: traffic that leaves a machine and comes back to it through the router. In my design the backup server runs as a container on one of the Proxmox nodes, in VLAN 20, while the node's own address is in VLAN 10. So a backup of that node leaves the machine and comes straight back:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
-    participant H as pve-ryzen host<br/>10.0.10.21 (vmbr0, untagged)
+    participant H as pve-ryzen host<br/>10.0.10.21<br/>(vmbr0, untagged)
     participant CR as Switch ether5<br/>(node trunk)
     participant RB as Router
-    participant PBS as Backup server container<br/>VLAN 20 (vmbr0, tag 20)
+    participant PBS as Backup server<br/>container, VLAN 20<br/>(vmbr0, tag 20)
     rect rgba(59, 130, 246, 0.14)
-    Note over H: [L3] the backup server is not<br/>in 10.0.10.0/24: send to<br/>the gateway 10.0.10.1
-    H->>CR: [L2] out the 2.5G NIC<br/>UNTAGGED (VLAN 10 by PVID)
-    CR->>RB: [L2] up the trunk, tag 10
+    Note over H: [L3] the backup server<br/>is not in 10.0.10.0/24:<br/>send to the gateway<br/>10.0.10.1
+    H->>CR: [L2] out the 2.5G NIC<br/>UNTAGGED<br/>(VLAN 10 by PVID)
+    CR->>RB: [L2] up the trunk,<br/>tag 10
     end
     rect rgba(34, 197, 94, 0.14)
-    Note over RB: [L3] route VLAN 10 to VLAN 20<br/>[L4] this node may reach the<br/>backup server's port: ACCEPT
-    RB->>CR: [L2] down the trunk, tag 20
-    CR->>PBS: [L2] out ether5 with tag 20, into the same machine,<br/>vmbr0 hands it to the container
+    Note over RB: [L3] route VLAN 10<br/>to VLAN 20<br/>[L4] this node may<br/>reach the backup<br/>server's port: ACCEPT
+    RB->>CR: [L2] down the trunk,<br/>tag 20
+    CR->>PBS: [L2] out ether5 with tag 20,<br/>into the same machine:<br/>vmbr0 hands it<br/>to the container
     end
 ```
 
@@ -104,12 +135,28 @@ What this means day to day:
 The usual answer to heavy east-west traffic is a **Collapsed Core**. It collapses the traditional "Core" and "Distribution" network layers into a single high-speed backbone switch.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
     Router[Router/Firewall] -.->|North-South Routing| CoreSwitch[Core Switch ASIC]
     CoreSwitch ====|fast east-west link| Compute[Compute Node]
     CoreSwitch ====|fast east-west link| Storage[Storage Node]
     CoreSwitch ---|slower access link| AccessSwitch[Access Switch]
     AccessSwitch --- Clients[Laptops / IoT]
+    style Router fill:#ef444426,stroke:#dc2626
+    style CoreSwitch fill:#3b82f626,stroke:#3b82f6
+    style AccessSwitch fill:#3b82f626,stroke:#3b82f6
 ```
 
 The router still handles routing between VLANs where a security boundary matters, for example keeping IoT devices away from management. Bulk transfers between compute and storage are kept *inside one VLAN*, so the core switch moves them in hardware and they never touch the router.

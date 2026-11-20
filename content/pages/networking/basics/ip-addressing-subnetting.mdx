@@ -16,12 +16,25 @@ Addressing is the part of networking that tells devices where they are and wheth
 A network is a building of flats. One VLAN is one building.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TB
     subgraph Building["One VLAN = one building"]
-        Door1["Flat door label = MAC address<br/>(L2: only meaningful inside this building)"]
+        Door1["Flat door label<br/>= MAC address<br/>(L2: only meaningful<br/>inside this building)"]
     end
-    Street["Street address = IP address<br/>(L3: meaningful worldwide, routers read it)"]
-    Person["Person in the flat = port<br/>(L4: which program, e.g. 22 = SSH, 53 = DNS, 443 = HTTPS)"]
+    Street["Street address<br/>= IP address<br/>(L3: meaningful<br/>worldwide, routers<br/>read it)"]
+    Person["Person in the flat<br/>= port<br/>(L4: which program,<br/>e.g. 22 = SSH, 53 = DNS,<br/>443 = HTTPS)"]
     Street --> Door1
     Door1 --> Person
     style Building fill:#3b82f626,stroke:#3b82f6
@@ -69,11 +82,26 @@ The number after the slash is the prefix length, the CIDR way of writing how big
 Every computer makes the same decision for every packet it sends. It compares the destination with its own address and mask:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
-    A["I want to send to IP X"] --> B{"Is X inside my own subnet?<br/>(my IP and mask, e.g. 10.0.20.100/24)"}
-    B -->|"yes, e.g. 10.0.20.13"| C["[L2] Find X's MAC with ARP,<br/>send the frame straight to X.<br/>No router involved. No router firewall."]
-    B -->|"no, e.g. 10.0.40.10 or 1.1.1.1"| D["[L2] Find the GATEWAY's MAC with ARP (10.0.20.1),<br/>send the frame to the gateway.<br/>[L3] The IP packet inside still says 'to X'."]
-    D --> E["The router routes it: picks the next hop,<br/>runs the firewall, maybe NAT"]
+    A["I want to send to IP X"] --> B{{"Is X inside<br/>my own subnet?<br/>(my IP and mask,<br/>e.g. 10.0.20.100/24)"}}
+    B -->|"yes, e.g. 10.0.20.13"| C["[L2] Find X's MAC<br/>with ARP, send the<br/>frame straight to X.<br/>No router involved.<br/>No router firewall."]
+    B -->|"no, e.g. 10.0.40.10<br/>or 1.1.1.1"| D["[L2] Find the GATEWAY's<br/>MAC with ARP<br/>(10.0.20.1), send the<br/>frame to the gateway.<br/>[L3] The packet inside<br/>still says 'to X'."]
+    D --> E["The router routes it:<br/>picks the next hop,<br/>runs the firewall,<br/>maybe NAT"]
+    style C fill:#3b82f626,stroke:#3b82f6
+    style E fill:#ef444426,stroke:#dc2626
 ```
 
 The **gateway** is the router's address inside your subnet: the building's front door, where all outgoing post leaves. In my lab it is always `.1`, and DHCP tells each device what it is.
@@ -85,6 +113,22 @@ That first branch is the reason for a rule you will see again and again: **traff
 A computer knows the IP it wants, but the L2 envelope needs a MAC. ARP asks the whole VLAN:[^3]
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant Mac as Mac 10.0.20.100

@@ -23,6 +23,11 @@ function getDarkThemeConfig(): MermaidConfig {
       edgeLabelBackground: '#0f172a',// Dark blue-gray for label cards
       secondaryColor: '#1e293b',
       tertiaryColor: '#0f172a',
+      // Mermaid's base theme hard-codes sequence note text as #333, which vanishes on a
+      // dark page once a note uses a see-through fill. Set it per theme, with a tinted note.
+      noteTextColor: '#f8fafc',
+      noteBkgColor: '#eab30833',
+      noteBorderColor: '#ca8a04',
     },
   }
 }
@@ -46,6 +51,7 @@ function getLightThemeConfig(): MermaidConfig {
       edgeLabelBackground: '#f1f5f9',// Very light gray for label cards
       secondaryColor: '#f8fafc',
       tertiaryColor: '#f1f5f9',
+      noteTextColor: '#0f172a',      // Matches primaryTextColor (see the dark config)
     },
   }
 }

@@ -15,6 +15,19 @@ Each word gets four short lines: what it is, what it is like in everyday life, w
 The everyday picture is a **building** of flats. One network is one building. The **MAC address** is the label on a flat's door, the **IP address** is the street address, and the **port** is the person inside the flat.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TB
     subgraph G7["L7: what programs say to each other"]
         DHCP["DHCP<br/>gets you an address"]
@@ -23,18 +36,25 @@ flowchart TB
         HTTP["HTTP / HTTPS<br/>the web"]
         SSH["SSH<br/>remote command line"]
         PRX["Proxy / reverse proxy<br/>middlemen"]
+        DHCP ~~~ HTTP
+        DNS ~~~ SSH
+        NTP ~~~ PRX
     end
     subgraph GT["Privacy and identity"]
         TLS["TLS<br/>sealed envelope"]
         CERT["Certificate, CA<br/>an ID card"]
         WG["WireGuard, Tailscale<br/>private tunnels"]
         DERP["DERP<br/>relay"]
+        TLS ~~~ WG
+        CERT ~~~ DERP
     end
     subgraph G4["L4: which program, and how reliably"]
         PORT["Port<br/>which program"]
         TCP["TCP<br/>a phone call"]
         UDP["UDP<br/>a postcard"]
         CT["Connection tracking<br/>the router's memory"]
+        PORT ~~~ UDP
+        TCP ~~~ CT
     end
     subgraph G3["L3: between networks"]
         IP["IP address<br/>street address"]
@@ -42,12 +62,16 @@ flowchart TB
         FW["Firewall<br/>the guard"]
         NAT["NAT, masquerade<br/>the return address"]
         ICMP["ICMP, ping<br/>a knock"]
+        IP ~~~ NAT
+        GW ~~~ ICMP
     end
     subgraph G2["L2: inside one network"]
         MAC["MAC address<br/>door label"]
         SW["Switch<br/>the porter"]
         VLAN["VLAN<br/>separate buildings"]
         ARP["ARP<br/>who lives at this address?"]
+        MAC ~~~ VLAN
+        SW ~~~ ARP
     end
     G7 --> GT --> G4 --> G3 --> G2
     style G7 fill:#eab30826,stroke:#ca8a04

@@ -42,6 +42,22 @@ TCP guarantees that data arrives in order and that lost packets are retransmitte
 Think of a phone call. You dial, they pick up, you both say hello, and you notice when the line drops. TCP opens with a three-step handshake, numbers every byte so nothing is lost, and closes politely:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant C as Client (e.g. my Mac)
@@ -83,14 +99,27 @@ Used by DNS queries, DHCP, NTP, video streaming, VoIP, and gaming - situations w
 My router's firewall is **stateful**. It remembers every connection it lets through, in the *connection tracking* table, and gives each packet a state:[^3]
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  themeVariables:
+    stateBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    compositeBackground: "#64748b0d"
+    compositeTitleBackground: "#64748b26"
+    compositeBorder: "#64748b"
+    altBackground: "#64748b1a"
+---
 stateDiagram-v2
     [*] --> new: first packet of a connection (e.g. a TCP SYN)
     new --> established: the other side answered
     established --> established: every further packet
     established --> [*]: FIN or timeout
-    [*] --> related: first packet of a helper flow tied to an existing connection (e.g. an ICMP error)
-    [*] --> invalid: does not fit any known connection (dropped)
-    [*] --> untracked: tracking turned off for it (I do not use this)
+    [*] --> related: first packet of a helper flow<br/>tied to an existing connection<br/>(e.g. an ICMP error)
+    [*] --> invalid: does not fit any<br/>known connection (dropped)
+    [*] --> untracked: tracking turned off<br/>for it (I do not use this)
 ```
 
 Think of the guard's visitor log. Replies are let in because they match an entry in today's log.
@@ -118,17 +147,33 @@ ICMP carries the network's control messages: "are you there?" and "yes" (echo re
 A reply proves the target is up and that the path lets ICMP through. It does not prove that the service you want is reachable. Knocking on a door: an answer means someone is home, not that the shop inside is open.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
-    participant Mac as My Mac (VLAN 20)
-    participant G as Pi-hole 10.0.40.10
+    participant Mac as My Mac<br/>(VLAN 20)
+    participant G as Pi-hole<br/>10.0.40.10
     participant R as Router
-    participant RP as Monitoring board 10.0.50.10
+    participant RP as Monitoring board<br/>10.0.50.10
     rect rgba(34, 197, 94, 0.14)
-    Mac->>R: [L3] ping 10.0.40.1 (the VLAN 40 gateway)
+    Mac->>R: [L3] ping 10.0.40.1<br/>(the VLAN 40 gateway)
     Note over R: the destination is the<br/>ROUTER ITSELF: input chain,<br/>rate-limited ping ACCEPT
-    R->>Mac: [L3] reply. Says nothing about any host in VLAN 40.
-    Mac->>R: [L3] ping 10.0.40.10 (the Pi-hole)
+    R->>Mac: [L3] reply. Says nothing<br/>about any host in VLAN 40.
+    Mac->>R: [L3] ping 10.0.40.10<br/>(the Pi-hole)
     Note over R: forward chain: my admin<br/>Mac may cross VLANs: ACCEPT
     G->>R: [L3] ping 10.0.50.10 (the Pi-hole<br/>to the monitoring board)
     Note over R: forward chain: no rule allows<br/>ICMP between these VLANs:<br/>DROP, and log it

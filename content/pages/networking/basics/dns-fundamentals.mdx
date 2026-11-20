@@ -14,6 +14,19 @@ DNS converts human-readable names into IP addresses. Without it, every service w
 Think of the contacts app on your phone. You tap a name and it dials the number.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
   subgraph Without_DNS [Without DNS]
     W_You["You type: http://openwebui.local:8080"] --- W_Comp["Computer: I don't know the IP for that"]
@@ -26,6 +39,7 @@ flowchart TD
     Comp ---|"request"| Server["192.168.1.25:8080"]
     Server ---|"loads"| UI[OpenWebUI]
   end
+  style DNS fill:#eab30826,stroke:#ca8a04
 ```
 
 ## DNS Resolution Chain
@@ -33,11 +47,27 @@ flowchart TD
 Your device asks one DNS server. That server asks others when it does not know the answer, and remembers answers for a while.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
   Device[Your device] --- Local["Local DNS (my Pi-holes)"]
   Local -.->|"if not cached"| Upstream["Upstream DNS (Quad9, 9.9.9.9)"]
   Upstream --- Auth[Authoritative DNS server for that domain]
   Auth -.->|"IP address returned, cached on the way back"| Local
+  style Local fill:#eab30826,stroke:#ca8a04
+  style Upstream fill:#eab30826,stroke:#ca8a04
+  style Auth fill:#eab30826,stroke:#ca8a04
 ```
 
 ## How My Lab Answers
@@ -53,40 +83,51 @@ Behind them are two Pi-holes on Raspberry Pis, `10.0.40.10` and `10.0.40.11`. Th
 Here is my Mac looking up a website, with Tailscale switched on:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
-    participant App as Browser on the Mac
-    participant TS as Tailscale DNS<br/>100.100.100.100 (inside the Mac)
-    participant Mac as Mac network stack
+    participant Mac as Mac 10.0.20.100<br/>(browser, and Tailscale<br/>DNS inside it)
     participant RB as Router
-    participant PH as Pi-hole 10.0.40.10<br/>(holds the shared address 10.0.40.254)
-    participant Q9 as Quad9 9.9.9.9
+    participant PH as Pi-hole 10.0.40.10<br/>(holds the shared<br/>address 10.0.40.254)
+    participant Q9 as Quad9<br/>9.9.9.9
     rect rgba(234, 179, 8, 0.14)
-    App->>TS: [L7] "A record<br/>for example.com?"
-    Note over TS: Tailscale is on and has<br/>no tailnet resolvers,<br/>so it forwards<br/>to the system DNS server<br/>from DHCP: 10.0.40.254
-    TS->>Mac: [L7] forward<br/>to 10.0.40.254
+    Note over Mac: [L7] the browser asks<br/>Tailscale's resolver<br/>100.100.100.100 for<br/>example.com. It has no<br/>tailnet resolvers, so it<br/>forwards to the DNS<br/>server from DHCP:<br/>10.0.40.254
     end
     rect rgba(34, 197, 94, 0.14)
-    Note over Mac: [L3] 10.0.40.254 is<br/>not in 10.0.20.0/24:<br/>send to the gateway
-    Mac->>RB: [L2] src mac:Mac dst<br/>mac:Router, VLAN 20<br/>[L3] 10.0.20.100<br/>to 10.0.40.254,<br/>TTL 64 [L4] udp 53
-    Note over RB: [L3] route: 10.0.40.0/24<br/>is connected on vlan40-sbc<br/>[L4] forward chain, state new:<br/>DNS to the Pi-holes: ACCEPT
-    RB->>PH: [L2] NEW frame src<br/>mac:Router dst<br/>mac:Pi-hole, VLAN 40,<br/>out ether3 untagged<br/>[L3] same IPs, TTL 63
+    Note over Mac: [L3] 10.0.40.254<br/>is not in<br/>10.0.20.0/24:<br/>send to the gateway
+    Mac->>RB: [L2] src mac:Mac<br/>dst mac:Router,<br/>VLAN 20<br/>[L3] 10.0.20.100<br/>to 10.0.40.254,<br/>TTL 64<br/>[L4] udp 53
+    Note over RB: [L3] route:<br/>10.0.40.0/24 is<br/>connected on<br/>vlan40-sbc<br/>[L4] forward chain,<br/>state new: DNS to<br/>the Pi-holes: ACCEPT
+    RB->>PH: [L2] NEW frame<br/>src mac:Router<br/>dst mac:Pi-hole,<br/>VLAN 40, out<br/>ether3 untagged<br/>[L3] same IPs,<br/>TTL 63
     end
     rect rgba(234, 179, 8, 0.14)
-    Note over PH: [L7] on a blocklist? answer<br/>0.0.0.0. In cache? answer<br/>now. Otherwise ask upstream.
+    Note over PH: [L7] on a blocklist?<br/>answer 0.0.0.0.<br/>In cache? answer<br/>now. Otherwise<br/>ask upstream.
     end
     rect rgba(34, 197, 94, 0.14)
-    PH->>RB: [L3] 10.0.40.10<br/>to 9.9.9.9 udp 53
-    Note over RB: [L4] forward chain: only the<br/>Pi-holes and the proxy may ask<br/>public DNS: ACCEPT<br/>[L3] srcnat: masquerade<br/>to the public address
+    PH->>RB: [L3] 10.0.40.10<br/>to 9.9.9.9<br/>udp 53
+    Note over RB: [L4] forward chain:<br/>only the Pi-holes<br/>and the proxy may<br/>ask public DNS:<br/>ACCEPT<br/>[L3] srcnat:<br/>masquerade to the<br/>public address
     RB->>Q9: [L3] out of ether1
-    Q9->>RB: [L3] answer (state established: un-NAT, FastTrack)
+    Q9->>RB: [L3] answer (state<br/>established: un-NAT,<br/>FastTrack)
     RB->>PH: [L3] answer
     end
     rect rgba(234, 179, 8, 0.14)
-    PH->>RB: [L7] "example.com is<br/>198.51.100.7"<br/>(cached for its TTL)
-    RB->>Mac: [L3] established:<br/>ACCEPT (FastTrack)
-    Mac->>TS: [L7] answer
-    TS->>App: [L7] answer
+    PH->>RB: [L7] "example.com<br/>is 198.51.100.7"<br/>(cached for<br/>its TTL)
+    RB->>Mac: [L3] established:<br/>ACCEPT<br/>(FastTrack)
+    Note over Mac: [L7] Tailscale's<br/>resolver hands the<br/>answer to the browser
     end
 ```
 
