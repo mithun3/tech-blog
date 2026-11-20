@@ -91,3 +91,15 @@ pre [data-line] {
   font-weight: 600;
 }
 
+/* Lab drawing set (components/mdx/lab-*). Colours come from public/lab/parts.json as --lab-*-l and --lab-*-d. */
+.lab {
+  --lab-paper: var(--lab-paper-l); --lab-ink: var(--lab-ink-l); --lab-ink2: var(--lab-ink2-l);
+  --lab-hl: var(--lab-hl-l); --lab-hlop: var(--lab-hlop-l); --lab-blend: multiply;
+  font-family: var(--font-routed), var(--font-geist-mono), monospace;
+}
+.dark .lab {
+  --lab-paper: var(--lab-paper-d); --lab-ink: var(--lab-ink-d); --lab-ink2: var(--lab-ink2-d);
+  --lab-hl: var(--lab-hl-d); --lab-hlop: var(--lab-hlop-d); --lab-blend: normal;
+}
+html:has(dialog.lab-viewer[open]) { overflow: hidden; }
+
