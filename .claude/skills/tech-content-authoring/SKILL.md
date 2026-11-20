@@ -60,6 +60,7 @@ Blog post: `title`, `publishedAt`, `summary` required; `updatedAt`, `tags` (list
 - `<Callout type="info">`. Types: `info` (default), `warning`, `tip`, `danger`. Leave blank lines around Markdown inside it.
 - `<Video src="..." title="..." poster="..." />`. YouTube and Vimeo URLs become privacy-friendly embeds; other URLs use `<video>`.
 - `<Audio src="..." title="..." />`.
+- `<LabSheet sheet="physical" focus="rb5009 crs310" caption="..." />`: a detail of the lab drawing set. `sheet` is `physical`, `logical` or `services`; `focus` is `sheet` or part ids from `public/lab/parts.json`, separated by spaces. Props are plain strings only: `next-mdx-remote` drops every `prop={...}` value without a message, so a missing `focus` fails the build on purpose.
 - Mermaid: write a ` ```mermaid ` fence. A syntax error does not fail the build; it renders "Failed to parse diagram syntax.", so check it in `npm run dev`.
 - Images: standard Markdown image syntax with the file under `public/` (path such as `/images/x.png`). Always write alt text.
 - Links: internal as absolute `/pages/...`; external links open in a new tab automatically.
@@ -78,7 +79,7 @@ Outside code, MDX treats `<` and `{` as JSX. Each of these fails to compile with
 | `<https://example.com>` | `[example.com](https://example.com)` |
 | `<br>` | `<br />` |
 | `{name}` in prose | `\{name\}` or backticks (it compiles, then fails when rendered) |
-| `<SomeComponent>` that is not registered | only Callout, Video, Audio, Mermaid exist |
+| `<SomeComponent>` that is not registered | only Callout, Video, Audio, Mermaid, LabSheet exist |
 
 Code fences and inline code are safe, including fences inside `>` quotes. Blog posts are not MDX: raw HTML passes through there.
 
