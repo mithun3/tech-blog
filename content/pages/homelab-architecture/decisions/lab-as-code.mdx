@@ -1,0 +1,84 @@
+---
+title: "The Lab Is Built From Code"
+description: "Why the router, the switch and every new guest are files in one git repository, what went wrong with my first attempt, and what stays manual."
+publishedAt: "2026-11-20"
+order: 4
+status: published
+---
+
+# The Lab Is Built From Code
+
+DRAFT
+
+Decided on 20 October 2026, and extended on 9 November 2026.
+
+For a long time my lab lived in two places: the machines, and my memory of what I had done to them.
+
+That works until the two disagree.
+
+Now the router, the switch and every new guest are described in files in one git repository. I change the lab by changing a file, reading the plan and applying it. Very little is clicked into place, and what is, is written down as a manual step.
+
+<LabSheet sheet="logical" focus="guest-schedule" caption="The guest schedule on sheet 2, drawn from the same files that create the guests." />
+
+## What I Did Before
+
+Most of this wiki is hand work. A guide per service, typed command by command, like [Pi-hole LXC On Proxmox](/pages/networking/pihole/proxmox-lxc), or started from [Proxmox Helper Scripts](/pages/services/proxmox-helper-scripts). The router was set up in its web page and with [scripts on the router itself](/pages/networking/router-firmware/router-scripting).
+
+[Infrastructure as Code: Network Primer](/pages/networking/homelab-network/iac-ansible-network-primer) describes my first Ansible setup for the network. It promises that a second run changes nothing.
+
+My first roles did not keep that promise.
+
+## What Went Wrong
+
+The first router roles added objects without looking at what was already there, and they ignored errors.
+
+Three things followed:
+
+- the firewall failed open on each run
+- a rule the router rejected was skipped without a word
+- a dry run could not show what would change
+
+Any one of those is bad. Together they meant I was running automation I could not trust, which is worse than no automation at all.
+
+I had also written Terraform for the guests. It had never been applied. It was written for a kind of storage my ZFS nodes do not have, its guest numbers collided with guests that already existed, and the GPU node needs settings that only root can make.
+
+It looked like infrastructure as code. It was a folder.
+
+## What I Chose
+
+- **One tool.** Ansible does all of it. Terraform is gone.
+- **The router and the switch are declared.** Each role states what should exist, and the module compares that with the device, in order where order matters.[^1]
+- **A plan before every change.** The plan is Ansible's check mode with a diff: it shows what would change and changes nothing.[^2] A second apply reports no change.
+- **No ignored errors.** A task that fails stops the run. The few steps that may fail are probes, and each is followed by an explicit check.
+- **The firewall is one ordered list.** It is applied in place, so there is never a moment without rules, and each chain ends in a logged drop.
+- **New guests only.** Ansible creates a guest and never changes one that already exists. A read-only check compares what the files declare with what is running.
+- **Everything is typed once.** The address tables in my own notes, the inventory view in NetBox and the [drawing set](/pages/homelab-architecture/drawing-set) are generated from the same files. NetBox is filled from the repository and never read back, so losing it loses nothing.
+- **Rolling back is git.** There is no undo button. I check out the last good commit and apply it.
+
+## What I Turned Down
+
+**Terraform for the guests.** For the reasons above.
+
+**NetBox as the source of truth.** That would be two truths to reconcile and a database to trust. When I decided, the lab had one operator, two network devices and about 45 fixed addresses. That is well below where it pays.
+
+**Install scripts that fetch the newest version when they run.** I used to start there. For anything I mean to keep, I now want the version pinned in a file, and the guest described in the same place as the rest of the lab.
+
+## What It Costs Me
+
+- There are two kinds of guest now. Those Ansible created, and those I built by hand, which it leaves alone. The hand-built ones come back from a backup, not from a playbook.
+- Some steps stay manual. An installer, a firmware upgrade and a few others are done by hand and written down as such.
+- Rolling back is only as good as the commit. An older commit brings back an older lab, mistakes included.
+
+## When I Would Change My Mind
+
+NetBox becomes the source of truth when one of these is true: three or more network devices are managed this way, a second person operates the lab, the address count passes about 150, or there is a second site.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [An Assistant That Plans But Does Not Apply](/pages/homelab-architecture/decisions/ai-guardrails) - the rules an AI assistant works under in the same repository.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the sheets generated from these files.
+- [Infrastructure as Code: Network Primer](/pages/networking/homelab-network/iac-ansible-network-primer) - the first Ansible setup.
+
+[^1]: [Ansible, `community.routeros.api_modify`](https://docs.ansible.com/ansible/latest/collections/community/routeros/api_modify_module.html): modifies the data at a RouterOS path through the API, supports check mode and diff mode, and has `handle_absent_entries` and `ensure_order` for removing unlisted entries and keeping the order.
+[^2]: [Ansible, "Validating tasks: check mode and diff mode"](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_checkmode.html).

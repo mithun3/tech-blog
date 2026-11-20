@@ -2,7 +2,7 @@
 title: "GPU & AI"
 description: "Foundations and practical notes for GPU computing, local AI infrastructure, and model-serving workflows."
 publishedAt: "2024-10-23"
-order: 5
+order: 7
 status: published
 ---
 
@@ -23,17 +23,36 @@ That separation matters. Some guides will absolutely be about how to run AI work
 ## In This Section
 
 - [GPUs For Local AI](/pages/gpu-ai/gpus-for-local-ai) - why dedicated GPUs change what local AI feels like, how VRAM shapes model choice, and when single- versus dual-GPU design is actually justified.
+- [GPU Passthrough On Proxmox](/pages/gpu-ai/gpu-passthrough) — the host-side NVIDIA setup and LXC device exposure layer.
+- [GPU Power Management On Proxmox](/pages/gpu-ai/gpu-power-management) - persistence mode, boot-time reapplication, and the 250 W tradeoffs that keep dual-GPU hosts inside saner thermal and PSU limits.
+- [Open WebUI And Ollama On Proxmox](/pages/gpu-ai/openwebui-ollama-lxc) — the quickest way to get a usable local chat stack online.
+- [Open WebUI Standalone Frontend On Proxmox](/pages/gpu-ai/openwebui-standalone-lxc) — the browser-first split once inference already lives in dedicated Ollama or llama.cpp guests.
+- [llama.cpp On Proxmox](/pages/gpu-ai/llamacpp) — the single-model GGUF-native path when you want tighter runtime control.
+- [llama.cpp Router Mode On Proxmox](/pages/gpu-ai/llamacpp/router-mode) — the multi-model serving path once one model no longer feels like enough.
+- [Router Mode Deployment Example](/pages/gpu-ai/llamacpp/router-mode-deployment) - the concrete deployment walkthrough for the dual-RTX-3090 Router Mode layout.
+- [OpenClaw](/pages/gpu-ai/openclaw) - project-specific notes on agents, research workflows, system behavior, and the platform around them.
+- [OpenClaw On Proxmox](/pages/gpu-ai/openclaw/proxmox-deployment) - the personal-assistant path that sits on top of Router Mode when the lab wants Telegram, Discord, scheduled workflows, and an always-on gateway.
 
 ## Running This On Proxmox
 
-When a guide is specifically about doing one of these things on Proxmox, it should live under [Proxmox](/pages/proxmox) rather than being forced into this section just because GPUs are involved.
+The Proxmox-specific guides live here as well, right next to the ideas they depend on.
 
-That means the conceptual side stays here, while the host-specific execution path can sit under [Proxmox Workloads](/pages/proxmox/workloads).
+That keeps one question in one place: what the GPU is for, how it reaches a guest, and what serves the model once it does.
 
-Useful entry points:
+## AI Workloads
 
-- [GPU Passthrough On Proxmox](/pages/proxmox/workloads/gpu-passthrough) — the host-side NVIDIA setup and LXC device exposure layer.
-- [Open WebUI And Ollama On Proxmox](/pages/proxmox/workloads/openwebui-ollama-lxc) — the quickest way to get a usable local chat stack online.
-- [Open WebUI Standalone Frontend On Proxmox](/pages/proxmox/workloads/openwebui-standalone-lxc) — the browser-first split once inference already lives in dedicated Ollama or llama.cpp guests.
-- [llama.cpp On Proxmox](/pages/proxmox/workloads/llamacpp) — the single-model GGUF-native path when you want tighter runtime control.
-- [llama.cpp Router Mode On Proxmox](/pages/proxmox/workloads/llamacpp/router-mode) — the multi-model serving path once one model no longer feels like enough.
+The AI side of this section now breaks into five practical shapes.
+
+One is for getting something working quickly. One is for peeling the browser layer away from the runtime once the split starts to matter. One is for taking direct control of the inference stack. One is for the point where a single model feels too limiting and the lab wants choice without manual restarts. One is for turning the same local model estate into an assistant.
+
+| Path | Best When | What You Trade |
+|------|-----------|----------------|
+| [Open WebUI And Ollama On Proxmox](/pages/gpu-ai/openwebui-ollama-lxc) | you want the shortest route to a usable chat stack | less control over the serving layer |
+| [Open WebUI Standalone Frontend On Proxmox](/pages/gpu-ai/openwebui-standalone-lxc) | you already trust remote Ollama or llama.cpp backends and want the browser layer to stop carrying inference baggage | more moving parts between UI and inference |
+| [llama.cpp On Proxmox](/pages/gpu-ai/llamacpp) | you want direct control over GGUF models and runtime tuning | more manual setup and maintenance |
+| [llama.cpp Router Mode On Proxmox](/pages/gpu-ai/llamacpp/router-mode) | you want multiple models behind one endpoint and one UI connection | more planning around VRAM, presets, and lifecycle |
+| [OpenClaw On Proxmox](/pages/gpu-ai/openclaw/proxmox-deployment) | you want a mobile-first assistant that uses the local model stack through Telegram, Discord, and scheduled workflows | more channel, daemon, and exposure plumbing |
+
+Once inference already lives elsewhere, the standalone Open WebUI page is the browser-first split. Once Router Mode exists and the lab wants an assistant rather than one more browser tab, OpenClaw is the follow-on path.
+
+Once the assistant starts leaning on repeatable retrieval rather than one-off manual browsing, [SearXNG LXC On Proxmox](/pages/services/searxng-lxc) becomes a supporting service worth treating as part of the stack instead of an afterthought.

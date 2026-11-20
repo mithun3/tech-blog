@@ -39,7 +39,7 @@ This guide assumes a specific homelab host shape:
 
 That exact hardware is not required, but the decisions below assume the same kind of host: one Proxmox box expected to run real services, not just throwaway experiments.
 
-Those three WD RED drives matter later. They are either the basis of a temporary host-side `naspool`, or the clean handoff point into [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale) when the NAS role needs its own VM, UI, and alerting path.
+Those three WD RED drives matter later. They are either the basis of a temporary host-side `naspool`, or the clean handoff point into [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) when the NAS role needs its own VM, UI, and alerting path.
 
 ## The Hardware Shape That Matters
 
@@ -194,7 +194,7 @@ If any of the disks are reused rather than new, run the destructive preflight in
 
 - keep them out of casual reuse during the host install
 - document their serial numbers early
-- continue later with [TrueNAS VM Build And Pool Design](/pages/proxmox/workloads/truenas-scale/vm-build-and-pool-design) once the Proxmox host itself is stable
+- continue later with [TrueNAS VM Build And Pool Design](/pages/services/truenas-scale/vm-build-and-pool-design) once the Proxmox host itself is stable
 
 If you know a mirror is coming, plan for it now even if you install on one disk first.
 
@@ -340,7 +340,7 @@ From here, the right next move depends on what kind of lab you are building.
 
 - If you need baremetal hardware access alongside Proxmox, continue into [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot).
 - If the host still needs operational discipline, continue into [Proxmox Operations](/pages/proxmox/operations).
-- If the next step is GPU or service deployment, continue into [Proxmox Workloads](/pages/proxmox/workloads).
+- If the next step is GPU or service deployment, continue into [Self-Hosted Services](/pages/services).
 
 ## Related Topics
 
@@ -348,4 +348,4 @@ From here, the right next move depends on what kind of lab you are building.
 - [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the disk preflight that should happen before reused drives become part of the storage plan.
 - [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot) — carving out baremetal access while preserving Proxmox ZFS redundancy.
 - [Proxmox Operations](/pages/proxmox/operations) — what happens after the host exists and needs maintenance.
-- [Proxmox Workloads](/pages/proxmox/workloads) — where the guest and passthrough guides will live.
+- [Self-Hosted Services](/pages/services) — where the guest and passthrough guides will live.

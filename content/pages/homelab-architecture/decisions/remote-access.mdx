@@ -1,0 +1,101 @@
+---
+title: "Tailscale, And No Open Ports"
+description: "Why I reach the lab through Tailscale with two single-purpose routers, what I compared it with, and what I removed along the way."
+publishedAt: "2026-11-20"
+order: 2
+status: published
+---
+
+# Tailscale, And No Open Ports
+
+DRAFT
+
+Decided in September 2026, and tightened on 20 October 2026.
+
+For a long time, reaching the lab from outside meant publishing something. A tunnel here, a reverse proxy there, and a login page sitting on the public internet hoping nobody interesting found it.
+
+I do not do that any more.
+
+I reach the lab through Tailscale. Nothing on the router answers the internet, and no port is forwarded.
+
+<LabSheet sheet="logical" focus="ts-lxc ts-sbc" caption="The two Tailscale routers on sheet 2: a container on Node 2 and a Raspberry Pi on the router." />
+
+## What I Did Before
+
+The older pages publish services through a [Cloudflare Tunnel](/pages/networking/service-exposure/cloudflare-tunnel) or a [reverse proxy](/pages/networking/service-exposure/nginx-reverse-proxy-lxc). Both are good at what they are for: sharing something with people who cannot install a client.
+
+For reaching my own admin pages, they were more exposure than I needed. A login page on the internet is still a page on the internet.
+
+[Tailscale ZTNA & Subnet Routing](/pages/networking/homelab-network/tailscale-ztna) describes the first version of this design. This page is about the choices inside it.
+
+## Three Ways To Do It
+
+I looked at three.
+
+| Option | For it | Against it |
+|---|---|---|
+| WireGuard on the router | Nothing outside the lab to depend on | A key and a firewall rule made by hand for every device, and the device key is the only credential |
+| Headscale, a control server I host | The list of my devices stays at home | One more service to upgrade and keep reachable, and a trap: if it is down when my session expires, I cannot sign in to fix it |
+| Tailscale, managed | Someone else runs the control server, and sign-in comes with it | A company is part of the path |
+
+I chose the third.
+
+The control server knows which devices I have. It does not carry my traffic. And if it goes down, devices that are already connected keep talking until a key expires. Only new devices have to wait.[^1]
+
+So an outage on their side is not an outage on mine. Not straight away, at least.
+
+## What I Chose
+
+**Two routers that do the same job.** A subnet router is a device that acts as a gateway into a network for everything else on the tailnet.[^2] I run two: a container on Node 2 and a Raspberry Pi on the router's own port. Both advertise the same routes, which is how Tailscale provides failover.[^3] Either one can die without locking me out.
+
+**Narrow routes.** The routers advertise the management networks and nothing else. Never the whole private range. A route that wide collides with other people's networks the first time I sit in one.
+
+**Exit nodes for travel.** Both routers are also exit nodes, so on a network I do not trust I can send everything home first.[^4]
+
+**Access for people, not for devices.** I sign in through an identity provider with passkeys. Device approval is on, so a new device cannot send or receive anything until I have approved it.[^5]
+
+## The Router That Does One Job
+
+The Raspberry Pi used to do more. It ran a small Kubernetes install as well, with no workload on it.
+
+That sounds harmless. It is not. A router into the management networks is a security boundary, and everything else running on it widens what a break-in can reach.
+
+An outage also happened on that board, and I never proved its cause.
+
+So I took everything off it that was not routing and gave it a firewall that denies by default. It is a boring little machine now. That is the point.
+
+## What I Turned Down
+
+**Tailnet Lock.** It stops unknown devices too. But Tailscale's own page warns that if the disablement secrets are lost, and none was left with their support, the tailnet cannot be recovered.[^6] Device approval stops unknown devices without that failure waiting for me.
+
+**A single sign-on server, dynamic DNS and a fallback tunnel.** All three were in the plan. All three came out. Each has a condition that brings it back, so the decision is not a mood.
+
+| Removed | It comes back when |
+|---|---|
+| A single sign-on server | A second regular user arrives, or three or more apps need a login |
+| Dynamic DNS | I build a service that accepts connections from outside |
+| A Cloudflare Tunnel kept as a fallback | I publish something to the internet |
+
+## What It Costs Me
+
+- If both routers are down at once, there is no way in from outside. Recovery is on site, at the console.
+- I depend on a company. Tailscale sees my device list and is part of how I sign in.
+
+## When I Would Change My Mind
+
+WireGuard stays reserved for a permanent tunnel between two sites, if there is ever a second site. Headscale stays on the shelf in case keeping the device list at home becomes a requirement.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [One Certificate, One Front Door](/pages/homelab-architecture/decisions/one-certificate) - what the tailnet reaches once it is inside.
+- [Three Guests I Removed](/pages/homelab-architecture/decisions/removed-guests) - the same cut, made elsewhere.
+- [Tailscale ZTNA & Subnet Routing](/pages/networking/homelab-network/tailscale-ztna) - the first version of this design.
+- [Secure Service Exposure On Proxmox](/pages/networking/service-exposure) - the paths for services that are meant to be public.
+
+[^1]: [Tailscale, "What happens if the coordination server is down?"](https://tailscale.com/kb/1091/what-happens-if-the-coordination-server-is-down): no traffic is routed through the coordination server, devices keep communicating until a key expires, and new users and devices cannot be added.
+[^2]: [Tailscale, "Subnet routers"](https://tailscale.com/kb/1019/subnets).
+[^3]: [Tailscale, "Set up high availability"](https://tailscale.com/kb/1115/high-availability): run two or more subnet routers that advertise the same routes.
+[^4]: [Tailscale, "Exit nodes"](https://tailscale.com/kb/1103/exit-nodes).
+[^5]: [Tailscale, "Device approval"](https://tailscale.com/kb/1099/device-approval): a device awaiting approval cannot send or receive traffic on the tailnet.
+[^6]: [Tailscale, "Tailnet Lock"](https://tailscale.com/kb/1226/tailnet-lock): the warning under "Enable Tailnet Lock".

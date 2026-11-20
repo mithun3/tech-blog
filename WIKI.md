@@ -187,19 +187,20 @@ If you materially revise a page while updating sources, keep `publishedAt` uncha
 
 Some subjects naturally span more than one section.
 
-Pi-hole is a networking topic, but "how do I run it in an LXC on Proxmox?" is a Proxmox topic.
+Pi-hole is a networking topic, and so is "how do I run it in an LXC on Proxmox?" The container build sits next to the design page, under Networking.
 
-GPU passthrough is tied to GPU and AI workloads, but the actual host and guest procedure is still a Proxmox guide.
+GPU passthrough is done on a Proxmox host, but it exists for the AI stack, so it lives under GPU & AI.
 
-The right answer in this wiki is not duplication. It is one canonical page plus deliberate cross-links.
+A page is filed by what it is about, not by where it runs. The right answer in this wiki is still not duplication. It is one canonical page plus deliberate cross-links.
 
 ### Use This Rule
 
 | Reader question | Canonical home | Example |
 |-----------------|----------------|---------|
-| What is this? Why does it matter? | The domain section | DNS concepts in `networking/`, GPU ideas in `gpu-ai/` |
-| How do I run this on Proxmox? | The Proxmox section | Pi-hole on LXC, GPU passthrough, service deployment runbooks |
-| How does this work in general? | The conceptual section | VM/LXC theory in `virtualization/` |
+| What is this, and how do I run it? | The section that owns the subject | Pi-hole in `networking/pihole/`, GPU passthrough and llama.cpp in `gpu-ai/`, TrueNAS and Kubernetes in `services/` |
+| How do I install, run, back up or upgrade the Proxmox host itself? | The Proxmox section | ZFS, PBS, upgrades, monitoring |
+| How does this work in general? | The conceptual section | VM and container theory in `virtualization/` |
+| Why is the lab built this way? | `homelab-architecture/decisions/` | Standalone nodes, Tailscale, one certificate |
 
 ### Practical Rules
 
@@ -214,8 +215,10 @@ Use these subsection boundaries when adding Proxmox content:
 
 - `proxmox/basics/` — conceptual platform sequence
 - `proxmox/setup/` — host bring-up and installation
-- `proxmox/operations/` — storage, backups, updates, notifications, troubleshooting
-- `proxmox/workloads/` — LXC/VM deployments, passthrough, and Proxmox-specific workload guides
+- `proxmox/operations/` — storage, backups, updates, notifications, guest lifecycle, troubleshooting
+- `proxmox/proxmox-backup-server/`, `proxmox/upgrades/`, `proxmox/monitoring-and-alerts/` — the three operations topics that grew into sections of their own
+
+Anything that runs on top of the host goes to the section that owns the subject: `services/`, `gpu-ai/` or `networking/`.
 
 ---
 

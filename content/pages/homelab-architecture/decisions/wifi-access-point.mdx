@@ -1,0 +1,74 @@
+---
+title: "The Old Router Became An Access Point"
+description: "Why the ASUS router stayed in the house but stopped routing, how three Wi-Fi names map to three networks, and why the internet cable now goes straight into the MikroTik."
+publishedAt: "2026-11-20"
+order: 8
+status: published
+---
+
+# The Old Router Became An Access Point
+
+DRAFT
+
+Decided on 15 and 16 November 2026.
+
+A whole section of this wiki is about one ASUS router and the firmware I run on it.
+
+It is still here. It just has a smaller job now.
+
+<LabSheet sheet="physical" focus="rt-ax88u rb5009" caption="The access point and the router, with two bonded cables between them." />
+
+## What I Did Before
+
+The ASUS was the router. [ASUS Merlin - Router Firmware](/pages/networking/router-firmware) and its pages cover what I did with it: [scripts](/pages/networking/router-firmware/router-scripting), [extra packages](/pages/networking/router-firmware/entware-packages), [selective VPN routing](/pages/networking/router-firmware/vpn-director) and [custom DNS](/pages/networking/router-firmware/dnsmasq-dns-config).
+
+Everything hung off it on one flat network. [Network Segmentation Migration](/pages/networking/homelab-network/enterprise-segmentation-migration) is the story of leaving that behind.
+
+## What I Chose
+
+**The MikroTik routes. The ASUS does Wi-Fi.** The ASUS runs in access point mode. Routing, addresses, DNS and the firewall all belong to the MikroTik router now.
+
+**Three Wi-Fi names, three networks.** The main Wi-Fi keeps the house's old name and password. IoT devices get their own network, where they may talk to each other. Guests get theirs, with the internet and filtered DNS and nothing else.
+
+**The untrusted ones sit behind the real firewall.** Each Wi-Fi name maps to its own VLAN, so a guest's phone or a cheap smart plug is held back by the router's default-drop rules, not by a checkbox on the access point.
+
+**The layout is rebuilt at every start.** A script on the access point moves the IoT and guest networks onto their own tagged paths each time it boots. None of it is saved in the access point's settings. That sounds fragile, and it is deliberate: a firmware update or a reset cannot leave half a layout behind, and switching the whole thing off is renaming one file.
+
+**It is managed like everything else.** The access point's scripts, its security settings, its checks and a backup all come from the same repository as the router and the guests.
+
+**The internet cable goes straight into the MikroTik.** The provider's router is out of the path. It stays in the house, configured and switched off, as the cold spare.
+
+## Why
+
+The hardware was already here, and its Wi-Fi is good enough. That is most of it.
+
+The rest is about having one place for things. In access point mode every device gets its address from the router, so there is one list of leases, one set of rules and one view of DNS. In router mode, every Wi-Fi device would have hidden behind the ASUS's own address translation, and the router would have seen one busy stranger instead of a house full of devices.
+
+Taking the provider's router out of the path is the same idea. One router and one address translation instead of two, and the firewall at the edge is the one I manage as code.
+
+## What I Turned Down
+
+**Router mode on the ASUS.** For the reason above.
+
+**Saving the layout in the access point's settings.** A firmware update or a reset would leave it half applied.
+
+**Buying an access point that understands VLANs natively.** It costs money, and nothing here needs it yet.
+
+## What It Costs Me
+
+- The layout is outside what ASUS documents. After every firmware update I check that it still holds.
+- A locked-down access point that loses its address can only be reached with a cable or the reset button.
+- The MikroTik is now the only way out. If it dies, the whole house is offline until I plug the spare back in.
+
+## When I Would Change My Mind
+
+- If a firmware update breaks the layout twice.
+- When I want WPA3, or Wi-Fi 6E or 7.
+- When the house needs a second access point. At that point one with native VLANs and a controller is the better base.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) - how the access point is managed.
+- [ASUS Merlin - Router Firmware](/pages/networking/router-firmware) - the same hardware, back when it was the router.
+- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - what a VLAN per Wi-Fi name actually separates.

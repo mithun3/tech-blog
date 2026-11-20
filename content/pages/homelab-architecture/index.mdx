@@ -2,7 +2,7 @@
 title: "Homelab Architecture"
 description: "How the homelab is split across nodes by role, and which services belong on which machine."
 publishedAt: "2026-11-20"
-order: 6
+order: 1
 status: published
 ---
 
@@ -10,14 +10,17 @@ status: published
 
 This section covers how the lab is laid out as a whole: which node does which job, and how traffic moves between them.
 
-How the network itself is wired (bridges, VLANs and segmentation) lives in [Homelab Network Architecture](/pages/networking/homelab-architecture).
+How the network itself is wired (bridges, VLANs and segmentation) lives in [Homelab Network Architecture](/pages/networking/homelab-network).
 
 ## In This Section
 
 - [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the lab as it is built, drawn from its own repo: cables, VLANs and services.
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the decisions behind the lab: what I ran before, what I chose and what it costs me.
 - [Workload Segregation](/pages/homelab-architecture/workload-segregation) - how services are split between the EPYC backend and the Ryzen frontend so that heavy compute does not starve edge services.
+- [Node 1: The EPYC Backend](/pages/homelab-architecture/epyc-backend) - the physical architecture of the backend node: massive PCIe lanes for AI workloads, ECC memory, and bare-metal ZFS storage passthrough.
+- [Node 2: The Ryzen Frontend](/pages/homelab-architecture/ryzen-frontend) - the physical architecture of the frontend node: high clock speeds, low latency, and efficient proxying for edge workloads.
 
 ## Related Topics
 
-- [Homelab Network Architecture](/pages/networking/homelab-architecture) - bridges, VLANs and segmentation for the same lab.
-- [Proxmox Workloads](/pages/proxmox/workloads) - the service guides that run on these nodes.
+- [Homelab Network Architecture](/pages/networking/homelab-network) - bridges, VLANs and segmentation for the same lab.
+- [Self-Hosted Services](/pages/services) - the service guides that run on these nodes.

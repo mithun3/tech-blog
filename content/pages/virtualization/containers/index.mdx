@@ -1,0 +1,26 @@
+---
+title: "Containers"
+description: "LXC, OCI, Docker, Podman, and systemd-nspawn: what each one is, how they differ, and when each one earns its place."
+publishedAt: "2024-02-19"
+order: 3
+status: published
+---
+
+# Containers
+
+A container does not pretend to be a whole machine. It shares the host's kernel and keeps the rest to itself, which is why it starts fast and costs so little.
+
+These pages cover the kinds you will actually meet in a homelab, and where each one fits.
+
+## In This Section
+
+- [LXC and OCI Containers](/pages/virtualization/containers/lxc-and-oci) — what LXC system containers are, how OCI containers differ, and where each fits in a Proxmox-based homelab.
+- [Docker](/pages/virtualization/containers/docker) — what Docker actually is, how images and layers work, how to run it sensibly in a homelab, and when it earns its place over LXC.
+- [Podman](/pages/virtualization/containers/podman) — Docker without the root daemon: rootless containers, systemd integration, and when the security tradeoff matters.
+- [systemd-nspawn](/pages/virtualization/containers/systemd-nspawn) — the container runtime that ships with systemd: no daemon, no image layers, tight host integration.
+
+## Related Topics
+
+- [Virtualization Fundamentals](/pages/virtualization/fundamentals) — the mental model to read first.
+- [Virtual Machines](/pages/virtualization/virtual-machines) — when a full machine is the right boundary.
+- [Proxmox](/pages/proxmox) — where LXC containers and VMs share one control plane.

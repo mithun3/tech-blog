@@ -37,7 +37,7 @@ PBS is the next step once local `vzdump` files start competing with the host the
 
 In this lab, PBS moved daily container backups from `rpool/var-lib-vz` to a dedicated `pbspool` SSD through CT 301. That change freed roughly 1.1 TB from the root pool and made daily backups deduplicated, visible, and easier to restore from.
 
-Use [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) when the question is no longer "can I make a backup?" but "can I keep backups without filling the host, test restores monthly, and survive a real upgrade window?"
+Use [Proxmox Backup Server](/pages/proxmox/proxmox-backup-server) when the question is no longer "can I make a backup?" but "can I keep backups without filling the host, test restores monthly, and survive a real upgrade window?"
 
 ## Automatic Snapshot Retention
 
@@ -91,7 +91,7 @@ This is the clean crontab block from the operations guide. It intentionally comb
 
 The `--mailnotification` flag is legacy, but these are the validated lines from the original host. If you are building fresh today, pair this page with [Email Notifications](/pages/proxmox/operations/email-notifications) and decide whether you want to keep the legacy mail flag or move fully to the notification system.[^1]
 
-If backups have already moved onto the NAS VM, swap the storage target to `truenas-vzdump` using [TrueNAS Shares And Proxmox Integration](/pages/proxmox/workloads/truenas-scale/shares-and-proxmox-integration).
+If backups have already moved onto the NAS VM, swap the storage target to `truenas-vzdump` using [TrueNAS Shares And Proxmox Integration](/pages/services/truenas-scale/shares-and-proxmox-integration).
 
 ## Manual Backup And Restore
 
@@ -160,6 +160,6 @@ For example, Pi-hole still benefits from Teleporter exports even when the contai
 ## Related Topics
 
 - [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the storage layer that these backups depend on.
-- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) — the dedicated PBS path for daily deduplicated backups and restore practice.
+- [Proxmox Backup Server](/pages/proxmox/proxmox-backup-server) — the dedicated PBS path for daily deduplicated backups and restore practice.
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — the part that makes backup failures visible.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where pre-update snapshots and validation loops fit into regular host care.

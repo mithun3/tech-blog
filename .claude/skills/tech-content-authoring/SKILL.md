@@ -97,9 +97,10 @@ The policy is WIKI.md "Citations And Sources". In short:
 
 | Reader question | Home |
 |---|---|
-| What is it, why does it matter? | domain section: `networking/`, `gpu-ai/`, `hardware/` |
-| How do I run it on Proxmox? | `proxmox/` (`basics`, `setup`, `operations`, `workloads`) |
-| How does it work in general? | `virtualization/` |
+| What is it, and how do I run it? | the section that owns the subject: `networking/`, `gpu-ai/`, `hardware/`, `services/` |
+| How do I install, operate, back up or upgrade the Proxmox host? | `proxmox/` (`basics`, `setup`, `operations`, `proxmox-backup-server`, `upgrades`, `monitoring-and-alerts`) |
+| How does it work in general? | `virtualization/` (`virtual-machines`, `containers`) |
+| Why is the lab built this way? | `homelab-architecture/decisions/` |
 
 Each guide has one canonical page; other sections link to it. When porting notes, keep validated command blocks verbatim.
 

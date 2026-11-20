@@ -1,0 +1,74 @@
+---
+title: "Family Data Gets Three Copies"
+description: "Why the family's photos and documents live on one NAS, are pulled to a second every night, and leave the house on rotated drives."
+publishedAt: "2026-11-20"
+order: 7
+status: published
+---
+
+# Family Data Gets Three Copies
+
+DRAFT
+
+Decided on 1 November 2026, and amended on 9 and 12 November 2026.
+
+Everything else in the lab can be rebuilt. The photos cannot.
+
+That is the whole reason this design is more careful than the rest of the lab.
+
+<LabSheet sheet="services" focus="detail-b" caption="Detail B on sheet 3: NFS, shares and the pull." />
+
+## What I Did Before
+
+The storage started as a pool on the Proxmox host itself, which [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) still describes. Then it moved into a NAS VM. [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) and its three pages cover the build, the shares and the failure drills.
+
+That gave the data a proper home. It was still one home.
+
+## What I Chose
+
+**The data lives once.** Photos, videos, documents, music projects and archives sit on one TrueNAS VM on Node 1, on a three-way mirror. The NAS runs no apps. It stores things.
+
+**A second NAS pulls a copy.** An independent TrueNAS on Node 2, with its own three-way mirror, pulls a replica every night. It pulls. Nothing is pushed to it, so the primary holds no credential that could reach over and delete its own backups.
+
+**A third copy leaves the house.** Two more drives, encrypted with a passphrase, rotate off site every month. No cloud, no monthly bill, and no new path to the internet from a network that is isolated on purpose.
+
+**The apps get one VM of their own.** Immich, Jellyfin and Paperless-ngx run together in one Debian VM on Node 2, with a network card in the storage VLAN. Their databases stay on the VM's own disk. The files come from the NAS over NFS.
+
+Not all of it is built yet. The first copy is live. The other two are still being built.
+
+## Why A VM And Not A Container
+
+Most small services in this lab are containers. This one is not.
+
+Immich's own requirements say Docker inside LXC is not recommended.[^1] Proxmox's container guide still calls nesting containers inside a VM a recommended practice.[^2] When both projects point the same way, I stop arguing.
+
+So the rule became: a VM for anything that owns storage or runs Docker against the NAS. A container for a single-process service.
+
+## What I Turned Down
+
+**Single-parity RAID for the backup pool.** Twice the usable space, but it survives only one drive failure, and a rebuild reads the whole pool for a day on drives that are no longer young. I took the mirror's safety margin.
+
+**Installing the apps natively from helper scripts.** That route runs them in a container without Docker, on a setup the upstream projects do not ship. I wanted to run what the projects publish.
+
+**A cloud copy instead of drives.** It stays on the list as the fallback if monthly rotation turns out to be more than I keep up with.
+
+## What It Costs Me
+
+- Each pool spends three drives to hold what one could. Mirrors are not the efficient choice.
+- The off-site copy depends on me. A drive that does not get rotated is not a backup. It is a drive.
+- There are two NAS systems to look after instead of one, and neither gets upgraded before a restore drill.
+
+## When I Would Change My Mind
+
+- When the pool gets close to full, both sides grow together: a second set of drives, or larger ones.
+- If monthly rotation proves more than I keep up with, the cloud copy comes back onto the table.
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - family data on the services sheet.
+- [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) - the earlier NAS build.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) - the host-side pool this started from.
+
+[^1]: [Immich, "Requirements"](https://docs.immich.app/install/requirements/): the use of Docker in LXC containers is not recommended.
+[^2]: [Proxmox VE Administration Guide, Proxmox Container Toolkit](https://pve.proxmox.com/pve-docs/chapter-pct.html): nesting containers inside a Proxmox QEMU VM remains a recommended practice.

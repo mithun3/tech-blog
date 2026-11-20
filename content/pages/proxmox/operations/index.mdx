@@ -23,22 +23,26 @@ It is where storage layout, backups, update habits, alerting, and troubleshootin
 - notifications, monitoring, and operational checks
 - troubleshooting that is primarily about running the Proxmox platform itself
 
+PBS backups, major upgrades, and monitoring have grown into sections of their own, right next to this one: [Proxmox Backup Server](/pages/proxmox/proxmox-backup-server), [Proxmox Upgrades](/pages/proxmox/upgrades), and [Monitoring And Alerts](/pages/proxmox/monitoring-and-alerts).
+
 ## In This Section
 
 - [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the operational storage layer: pool health, compression, scrubs, and the risky expansion tasks that only make sense once the host is already in service.
 - [Disk Space Recovery On Proxmox](/pages/proxmox/operations/disk-space-recovery) — what to do when `/var/lib/vz` or another Proxmox dataset hits 100% and the host needs space back quickly.
 - [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — snapshots, vzdump, restore paths, and the backup cadence that keeps recovery boring.
-- [Proxmox Backup Server](/pages/proxmox/operations/proxmox-backup-server) — the dedicated PBS path for CT 301, `pbspool`, deduplicated daily backups, restore tests, and PBS troubleshooting.
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — make sure backup failures and system events actually leave the host and reach your inbox.
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — a host-first maintenance rhythm for Proxmox, LXC guests, and the services already living on top of them.
-- [Proxmox Upgrades](/pages/proxmox/operations/upgrades) — major upgrade runbooks and RCA notes, starting with PVE 9.2 and the kernel 7.0 boot hang it exposed.
 - [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — use `tc` when a specific LXC should keep downloading without consuming the entire link.
-- [Monitoring And Alerts](/pages/proxmox/operations/monitoring-and-alerts) — the overview for manual health checks, the Prometheus and Grafana stack, and the alerting layer for a host that already matters.
+- [VM Lifecycle](/pages/proxmox/operations/vm-lifecycle) — create, baseline, snapshot, clone, back up, migrate, and retire guests in Proxmox.
+- [Best Practices](/pages/proxmox/operations/best-practices) — practical habits for keeping a Proxmox-based lab stable, understandable, and easy to recover.
+- [Troubleshooting and Performance](/pages/proxmox/operations/troubleshooting) — what to check when VMs or containers are slow, fail to boot, lose network access, or behave strangely under load.
 
 ## How To Read It
 
 Read this section once the host exists and you care about keeping it stable.
 
-If you are still building the machine, start with [Proxmox Setup](/pages/proxmox/setup). If you are deploying services on top of the host, use [Proxmox Workloads](/pages/proxmox/workloads) for the platform-specific runbooks and come back here when those services need backup, maintenance, upgrade, or recovery discipline.
+Read VM Lifecycle first if you are setting up new guests. Use Best Practices as a checklist once the lab is running. Return to Troubleshooting whenever something breaks.
 
-If storage is about to move from a host-managed `naspool` into a dedicated NAS VM, pair [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) with [TrueNAS SCALE On Proxmox](/pages/proxmox/workloads/truenas-scale). The first explains the host-side baseline. The second handles the actual handoff into NFS, SMB, snapshots, and hot-spare-backed storage.
+If you are still building the machine, start with [Proxmox Setup](/pages/proxmox/setup). If you are deploying services on top of the host, use [Self-Hosted Services](/pages/services) for the platform-specific runbooks and come back here when those services need backup, maintenance, upgrade, or recovery discipline.
+
+If storage is about to move from a host-managed `naspool` into a dedicated NAS VM, pair [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) with [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale). The first explains the host-side baseline. The second handles the actual handoff into NFS, SMB, snapshots, and hot-spare-backed storage.

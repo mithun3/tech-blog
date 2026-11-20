@@ -1,0 +1,59 @@
+---
+title: "Three Guests I Removed"
+description: "The package cache, the third Pi-hole and the jump host: why each one came out of the lab, and why removing things is worth the effort."
+publishedAt: "2026-11-20"
+order: 9
+status: published
+---
+
+# Three Guests I Removed
+
+DRAFT
+
+Decided on 20 October 2026.
+
+Homelabs grow by addition. Nobody writes a guide called "how I removed a container".
+
+This is that guide.
+
+<LabSheet sheet="physical" focus="pihole-primary pihole-secondary infra-proxy" caption="Two Pi-holes and the proxy: small boards doing jobs that used to be containers." />
+
+## What I Did Before
+
+Two of the three have their own pages here.
+
+[Apt-Cacher-NG LXC On Proxmox](/pages/services/apt-cacher-ng-lxc) builds a container whose only job is caching package downloads. [Pi-hole LXC On Proxmox](/pages/networking/pihole/proxmox-lxc) builds a Pi-hole inside the hypervisor. The third was a small jump host for the out-of-band network, which never got a page at all.
+
+Each one made sense on the day I built it. The guides still work if a container is what you want.
+
+I just stopped wanting it.
+
+## The Three
+
+**The package cache.** The container did its job. Then the lab got a proxy that every isolated network already has to use for updates, and that proxy caches packages too. Two caches is one cache and a duplicate. The container went.
+
+**The third Pi-hole.** DNS already runs on two Pi-holes in two different places, one on the router's own port and one on the switch, sharing an address that moves to whichever is alive. A third copy inside the hypervisor put DNS back on the hypervisor. The pair already covers two separate failures, so the third tier went too.
+
+**The jump host.** It was a second way into the out-of-band network. The Tailscale routers and the admin machine already cover that, and a second door into the most sensitive network is not a feature.
+
+## Why Removing Is Worth It
+
+Every guest is something to update, back up, monitor and remember. A guest that duplicates another one costs all of that and gives nothing back.
+
+I would rather have a short list of things that each do one job than a long list I have to keep explaining to myself.
+
+## What It Costs Me
+
+- Package updates in the isolated networks now depend on the proxy. If that board is down, they wait.
+- DNS has no copy on the hypervisors. If both small boards are down, names stop resolving.
+
+## The Same Cut Elsewhere
+
+The same thinking took a Kubernetes install off the Tailscale router, and removed a sign-on server, dynamic DNS and a fallback tunnel from the plan. Those are on [Tailscale, And No Open Ports](/pages/homelab-architecture/decisions/remote-access).
+
+## Related Topics
+
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the other decisions.
+- [Pi-hole In A Homelab](/pages/networking/pihole) - why DNS runs twice in the first place.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the small boards on the physical sheet.
+- [Apt-Cacher-NG LXC On Proxmox](/pages/services/apt-cacher-ng-lxc) - the container this replaced, still a working guide.
