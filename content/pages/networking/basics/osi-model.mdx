@@ -20,6 +20,19 @@ Sending data over a network is like sending a letter inside several envelopes. E
 This wrapping is called **encapsulation**:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart LR
     subgraph L1["L1: bits on the wire (light in a 10G fibre, voltage on copper)"]
         subgraph F["L2 Ethernet frame: destination MAC, source MAC, optional VLAN tag, type"]
@@ -84,20 +97,42 @@ The important practical point is that failures usually map to a layer. A DNS iss
 When something does not work, **climb the layers from the bottom**. Each layer depends on the ones below it, so the first layer that fails is where the problem is.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
-    S["Something does not connect"] --> L1{"L1: is the link up?<br/>ifconfig en9 | grep status"}
+    S["Something does not connect"] --> L1{{"L1: is the link up?<br/>ifconfig en9 | grep status"}}
+    L1 -->|"yes"| L2{{"L2: right VLAN<br/>and address?<br/>ipconfig getpacket en9"}}
     L1 -->|"no"| F1["cable, port, adapter,<br/>or the port is disabled"]
-    L1 -->|"yes"| L2{"L2: right VLAN and address?<br/>ipconfig getpacket en9"}
-    L2 -->|"wrong subnet"| F2["wrong port, a stale lease,<br/>or Wi-Fi is on as well"]
-    L2 -->|"ok"| L3{"L3: does the route go the right way?<br/>route -n get DEST, traceroute -n DEST"}
-    L3 -->|"wrong interface"| F3["a second interface or a stray route"]
-    L3 -->|"ok"| L4{"L4: does the port answer?<br/>nc -vz -G 2 DEST PORT"}
-    L4 -->|"timeout"| F4["a firewall drop (read the router's drop log),<br/>or the host is down"]
-    L4 -->|"refused"| F5["the host is up, nothing listens:<br/>the service is stopped"]
-    L4 -->|"open"| T{"TLS involved?<br/>openssl s_client -connect DEST:PORT"}
+    L2 -->|"ok"| L3{{"L3: does the route<br/>go the right way?<br/>route -n get DEST<br/>traceroute -n DEST"}}
+    L2 -->|"wrong subnet"| F2["wrong port,<br/>a stale lease,<br/>or Wi-Fi is on as well"]
+    L3 -->|"ok"| L4{{"L4: does the port answer?<br/>nc -vz -G 2 DEST PORT"}}
+    L3 -->|"wrong interface"| F3["a second interface<br/>or a stray route"]
+    L4 -->|"open"| T{{"TLS involved?<br/>openssl s_client<br/>-connect DEST:PORT"}}
+    L4 -->|"refused"| F5["the host is up,<br/>nothing listens:<br/>the service is stopped"]
+    L4 -->|"timeout"| F4["a firewall drop<br/>(read the router's<br/>drop log), or the<br/>host is down"]
+    T -->|"ok or no TLS"| L7{{"L7: the application"}}
     T -->|"alert / verify error"| F6["a certificate problem"]
-    T -->|"ok or no TLS"| L7{"L7: the application"}
     L7 --> F7["wrong user or key,<br/>a wrong DNS answer (dig),<br/>a proxy that says 403"]
+    F1 ~~~ F2 ~~~ F3 ~~~ F5 ~~~ F6 ~~~ F7
+    style L1 fill:#64748b26,stroke:#64748b
+    style L2 fill:#3b82f626,stroke:#3b82f6
+    style L3 fill:#22c55e26,stroke:#16a34a
+    style L4 fill:#f9731626,stroke:#ea580c
+    style T fill:#a855f726,stroke:#a855f7
+    style L7 fill:#eab30826,stroke:#ca8a04
+    classDef fault fill:#ef444426,stroke:#dc2626
+    class F1,F2,F3,F4,F5,F6,F7 fault
 ```
 
 These are the commands I run on my Mac, where `en9` is its USB network adapter. Yours will have another name; `ifconfig` lists them.

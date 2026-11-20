@@ -37,15 +37,31 @@ Think of separate buildings that share the same roads and pipes. Devices in VLAN
 VLANs are not magic. Each frame on a shared link carries a **tag** with its **VLAN ID**, a number from 1 to 4094. The tag format is the IEEE 802.1Q standard,[^1] and a VLAN-aware switch recognises a regular 802.1Q tag by its type, `0x8100`.[^2]
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+    minNodeWidth: 80
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TB
     subgraph U["Untagged frame (what a normal device sends)"]
+        direction LR
         U1["dst MAC"] --- U2["src MAC"] --- U3["type: IPv4"] --- U4["IP packet ..."]
     end
     subgraph T["Tagged frame (802.1Q, on a trunk)"]
-        T1["dst MAC"] --- T2["src MAC"] --- T3["TAG: 0x8100 + VLAN ID e.g. 50"] --- T4["type: IPv4"] --- T5["IP packet ..."]
+        direction LR
+        T1["dst MAC"] --- T2["src MAC"] --- T3["TAG: 0x8100<br/>+ VLAN ID, e.g. 50"] --- T4["type: IPv4"] --- T5["IP packet ..."]
     end
-    U -->|"switch adds the tag on the way in"| T
-    T -->|"switch removes the tag on the way out of an access port"| U
+    U -->|"switch adds the tag<br/>on the way in"| T
+    T -->|"switch removes the tag<br/>on the way out of<br/>an access port"| U
     style U fill:#3b82f626,stroke:#3b82f6
     style T fill:#3b82f626,stroke:#3b82f6
 ```
@@ -73,19 +89,34 @@ My router and switch are MikroTiks. RouterOS uses three settings for all of this
 Here is a frame from my monitoring board (a Rock Pi) reaching the router:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
-    participant Rock as Rock Pi<br/>(knows nothing about VLANs)
+    participant Rock as Rock Pi<br/>(knows nothing<br/>about VLANs)
     participant CE2 as Switch ether2<br/>access, PVID 50
-    participant CB as Switch bridge1
-    participant CS1 as Switch sfp-sfpplus1<br/>trunk
-    participant RS1 as Router sfp-sfpplus1<br/>trunk
+    participant CS1 as Switch<br/>sfp-sfpplus1<br/>trunk
+    participant RS1 as Router<br/>sfp-sfpplus1<br/>trunk
     rect rgba(59, 130, 246, 0.14)
     Rock->>CE2: [L2] untagged frame
-    CE2->>CB: [L2] "untagged<br/>arrived on PVID 50<br/>port": now VLAN 50
-    CB->>CS1: [L2] VLAN 50 is tagged<br/>on the trunk: frame<br/>leaves WITH tag 50
-    CS1->>RS1: [L1] 10 Gbit/s<br/>over the DAC, [L2]<br/>tag 50 on the wire
-    Note over RS1: The router knows from the<br/>tag that this is VLAN 50
+    Note over CE2: [L2] "untagged,<br/>arrived on a PVID 50<br/>port": now VLAN 50
+    CE2->>CS1: [L2] through bridge1:<br/>VLAN 50 is tagged<br/>on the trunk
+    CS1->>RS1: [L1] 10 Gbit/s<br/>over the DAC,<br/>[L2] tag 50<br/>on the wire
+    Note over RS1: The router knows<br/>from the tag that<br/>this is VLAN 50
     end
 ```
 
@@ -102,6 +133,19 @@ The classic attack, VLAN hopping, is a device tagging its own frames to land in 
 VLANs are separate on purpose. To go from VLAN 20 to VLAN 40 a packet must be **routed**, and in my lab the only router is the RB5009. It has one virtual interface per VLAN (`vlan20-mgmt`, `vlan40-sbc`, ...), each holding that VLAN's gateway address. So the router is the one place where every VLAN meets, and therefore the one place to put the firewall.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart LR
     subgraph V20["VLAN 20 MGMT 10.0.20.0/24"]
         Mac["Mac .100"]
@@ -124,6 +168,7 @@ flowchart LR
     Mac --- I20
     PH --- I40
     RP --- I50
+    style R fill:#ef444426,stroke:#dc2626
 ```
 
 ## Inside One VLAN, The Router Never Looks
@@ -131,21 +176,37 @@ flowchart LR
 This is the most important thing to understand about VLANs and security. Two hosts in the same VLAN talk straight through the switch, and the router's firewall never sees it:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant Mac as Mac 10.0.20.100<br/>router ether2
     participant SC as Router switch chip<br/>(bridge1, VLAN 20)
-    participant CPU as Router CPU + firewall
+    participant CPU as Router CPU<br/>+ firewall
     participant T as ts-sbc 10.0.20.13<br/>router ether4
     rect rgba(59, 130, 246, 0.14)
-    Note over Mac: [L3] 10.0.20.13 is in MY subnet:<br/>no gateway, ARP for .13 directly
+    Note over Mac: [L3] 10.0.20.13 is<br/>in MY subnet: no<br/>gateway, ARP for<br/>.13 directly
     Mac->>SC: [L2] ARP "who has<br/>10.0.20.13?"<br/>(broadcast in VLAN 20)
     SC->>T: [L2] flooded
     T->>Mac: [L2] "10.0.20.13 is at mac:ts-sbc"
     Mac->>SC: [L2] frame to mac:ts-sbc<br/>[L4] TCP SYN to port 22
-    SC->>T: [L2] switched in hardware from ether2 to ether4
-    Note over CPU: the CPU and its firewall never<br/>see this. No rule applies.
-    Note over T: [L3/L4] ts-sbc's OWN firewall<br/>decides whether SSH is allowed
+    SC->>T: [L2] switched in hardware<br/>from ether2 to ether4
+    Note over CPU: the CPU and its<br/>firewall never see<br/>this. No rule applies.
+    Note over T: [L3/L4] ts-sbc's<br/>OWN firewall decides<br/>whether SSH is allowed
     end
 ```
 
@@ -167,27 +228,67 @@ The monitoring board in VLAN 50 is plugged into the switch. Two of its flows sho
 2. **A metrics scrape of a Proxmox node** (VLAN 10, plugged into the **switch**): it crosses the trunk **twice**, because only the router can move a packet from VLAN 50 to VLAN 10.
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
-    participant RP as Rock Pi 10.0.50.10<br/>switch ether2 (PVID 50)
-    participant CR as Switch bridge1
+    participant RP as Rock Pi 10.0.50.10<br/>switch ether2<br/>(PVID 50)
+    participant CR as Switch<br/>bridge1
     participant RB as Router<br/>bridge1 + CPU
-    participant PH as Pi-hole 10.0.40.10<br/>router ether3 (PVID 40)
-    participant G as pve-ryzen 10.0.10.21<br/>switch ether5 (node trunk, VLAN 10 untagged)
+    participant PH as Pi-hole 10.0.40.10<br/>router ether3<br/>(PVID 40)
     rect rgba(59, 130, 246, 0.14)
     Note over RP,PH: Flow 1: DNS to the Pi-hole
-    RP->>CR: [L2] untagged frame<br/>to mac:Router (its<br/>gateway 10.0.50.1)
-    CR->>RB: [L2] out sfp-sfpplus1<br/>with TAG 50
-    Note over RB: [L2] tag 50: deliver<br/>to vlan50-monitor<br/>[L3] route to vlan40-sbc<br/>[L4] DNS to the Pi-holes<br/>is allowed from every VLAN<br/>[L2] new frame mac:Router<br/>to mac:Pi-hole, tag 40<br/>inside the switch chip
-    RB->>PH: [L2] out ether3<br/>UNTAGGED (PVID 40)
+    RP->>CR: [L2] untagged<br/>frame to<br/>mac:Router (its<br/>gateway 10.0.50.1)
+    CR->>RB: [L2] out<br/>sfp-sfpplus1<br/>with TAG 50
+    Note over RB: [L2] tag 50: deliver<br/>to vlan50-monitor<br/>[L3] route to<br/>vlan40-sbc<br/>[L4] DNS to the<br/>Pi-holes is allowed<br/>from every VLAN<br/>[L2] new frame<br/>mac:Router to<br/>mac:Pi-hole, tag 40<br/>inside the switch chip
+    RB->>PH: [L2] out ether3<br/>UNTAGGED<br/>(PVID 40)
     end
+```
+
+```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
+sequenceDiagram
+    autonumber
+    participant RP as Rock Pi 10.0.50.10<br/>switch ether2<br/>(PVID 50)
+    participant CR as Switch<br/>bridge1
+    participant RB as Router<br/>bridge1 + CPU
+    participant G as pve-ryzen 10.0.10.21<br/>switch ether5, node trunk<br/>(VLAN 10 untagged)
     rect rgba(34, 197, 94, 0.14)
     Note over RP,G: Flow 2: Prometheus scrapes pve-ryzen on tcp 9100
-    RP->>CR: [L2] untagged frame<br/>to mac:Router
-    CR->>RB: [L2] UP the trunk<br/>with TAG 50
-    Note over RB: [L3] route to vlan10-oobm<br/>[L4] the monitoring board may<br/>scrape node_exporter: ACCEPT
-    RB->>CR: [L2] DOWN the<br/>trunk with TAG 10
-    CR->>G: [L2] out ether5 UNTAGGED (VLAN 10 is the node trunk's untagged VLAN) to vmbr0
+    RP->>CR: [L2] untagged<br/>frame to<br/>mac:Router
+    CR->>RB: [L2] UP the<br/>trunk with<br/>TAG 50
+    Note over RB: [L3] route to<br/>vlan10-oobm<br/>[L4] the monitoring<br/>board may scrape<br/>node_exporter:<br/>ACCEPT
+    RB->>CR: [L2] DOWN the<br/>trunk with<br/>TAG 10
+    CR->>G: [L2] out ether5<br/>UNTAGGED (VLAN 10<br/>is the node trunk's<br/>untagged VLAN)<br/>to vmbr0
     end
 ```
 
@@ -218,18 +319,35 @@ When you create a VM and type "10" into the VLAN Tag box, Proxmox creates a virt
 My nodes use one pattern, the **node trunk**. The host's own address lives on `vmbr0` **untagged**, in VLAN 10. Each guest's network card is attached to `vmbr0` **with a tag** for its own VLAN:
 
 ```mermaid
-flowchart LR
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
+flowchart TB
     subgraph RYZEN["pve-ryzen"]
         subgraph VMBR["vmbr0 (VLAN-aware Linux bridge)"]
             HOST["host IP 10.0.10.21<br/>untagged = VLAN 10"]
             CT210["ts-lxc container<br/>net0 tag=20<br/>10.0.20.10"]
             CT212["Caddy container<br/>net0 tag=20<br/>10.0.20.12"]
             CT13X["AI, home hub, NetBox containers<br/>net0 tag=30<br/>10.0.30.x"]
+            HOST ~~~ CT212
+            CT210 ~~~ CT13X
         end
         NIC["onboard 2.5G NIC"]
         VMBR --- NIC
     end
     NIC ---|"trunk: VLAN 10 untagged,<br/>20/30/50/60 tagged"| CE5["switch ether5"]
+    style VMBR fill:#3b82f626,stroke:#3b82f6
+    style CE5 fill:#3b82f626,stroke:#3b82f6
 ```
 
 The switch port must match: VLAN 10 untagged for the host, the guest VLANs tagged.

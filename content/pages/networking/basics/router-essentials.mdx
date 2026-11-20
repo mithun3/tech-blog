@@ -43,6 +43,22 @@ The **RB5009 is all four boxes in one**. My switch, a MikroTik CRS310, is **only
 A switch learns where everyone is by watching source MACs:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant A as Host A
@@ -81,6 +97,22 @@ Static assignment   -> Router always gives the same IP to a known MAC address
 It takes four messages: Discover, Offer, Request, Acknowledge, or "DORA".[^2] Here is my Mac plugging into the router's `ether2`, a port in VLAN 20:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant Mac as Mac
@@ -88,27 +120,27 @@ sequenceDiagram
     participant BR as bridge1<br/>(switch chip)
     participant CPU as Router CPU<br/>VLAN 20 + DHCP server
     rect rgba(100, 116, 139, 0.14)
-    Mac->>P2: [L1] cable in: link up at 1<br/>Gbit/s (ether2 is a 1G port,<br/>the adapter could do 10G)
+    Mac->>P2: [L1] cable in: link up<br/>at 1 Gbit/s (ether2 is<br/>a 1G port, the adapter<br/>could do 10G)
     end
     rect rgba(59, 130, 246, 0.14)
-    Mac->>P2: [L2] DHCPDISCOVER in a<br/>broadcast frame, src mac:Mac<br/>[L3] src 0.0.0.0<br/>dst 255.255.255.255<br/>[L4] udp 68 to 67
-    P2->>BR: [L2] untagged + PVID 20<br/>= this frame is VLAN 20
-    BR->>CPU: [L2] flooded to every<br/>VLAN 20 member,<br/>and the CPU
+    Mac->>P2: [L2] DHCPDISCOVER in<br/>a broadcast frame,<br/>src mac:Mac<br/>[L3] src 0.0.0.0<br/>dst 255.255.255.255<br/>[L4] udp 68 to 67
+    P2->>BR: [L2] untagged<br/>+ PVID 20 = this<br/>frame is VLAN 20
+    BR->>CPU: [L2] flooded to<br/>every VLAN 20<br/>member, and the CPU
     end
     rect rgba(34, 197, 94, 0.14)
-    Note over CPU: [L3/L4] input chain:<br/>DHCP requests on udp 67, 68: ACCEPT
+    Note over CPU: [L3/L4] input chain:<br/>DHCP requests on<br/>udp 67, 68: ACCEPT
     end
     rect rgba(234, 179, 8, 0.14)
-    Note over CPU: [L7] the VLAN 20 DHCP server<br/>looks up mac:Mac:<br/>STATIC lease = 10.0.20.100
-    CPU->>Mac: [L7] DHCPOFFER 10.0.20.100
-    Mac->>CPU: [L7] DHCPREQUEST 10.0.20.100 (broadcast again: "I take this one")
-    CPU->>Mac: [L7] DHCPACK: 10.0.20.100/24, router 10.0.20.1, DNS<br/>10.0.40.254 and 10.0.40.11, lease 30 min
+    Note over CPU: [L7] the VLAN 20<br/>DHCP server looks<br/>up mac:Mac: STATIC<br/>lease = 10.0.20.100
+    CPU->>Mac: [L7] DHCPOFFER<br/>10.0.20.100
+    Mac->>CPU: [L7] DHCPREQUEST<br/>10.0.20.100 (broadcast<br/>again: "I take this one")
+    CPU->>Mac: [L7] DHCPACK:<br/>10.0.20.100/24,<br/>router 10.0.20.1,<br/>DNS 10.0.40.254<br/>and 10.0.40.11,<br/>lease 30 min
     end
     rect rgba(59, 130, 246, 0.14)
-    Mac->>BR: [L2] ARP probe: "does anyone else already<br/>use 10.0.20.100?" (no answer = safe)
-    Mac->>BR: [L2] ARP announcement: "10.0.20.100 is at<br/>mac:Mac" (everyone updates their cache)
+    Mac->>BR: [L2] ARP probe: "does<br/>anyone else already<br/>use 10.0.20.100?"<br/>(no answer = safe)
+    Mac->>BR: [L2] ARP announcement:<br/>"10.0.20.100 is at<br/>mac:Mac" (everyone<br/>updates their cache)
     end
-    Note over Mac,CPU: [L7] after 15 min the Mac renews by unicast to 10.0.20.1, and keeps the address
+    Note over Mac,CPU: [L7] after 15 min the Mac renews by unicast<br/>to 10.0.20.1, and keeps the address
 ```
 
 What to notice:
@@ -125,16 +157,34 @@ DHCP reservations are the practical middle ground for servers and infrastructure
 RouterOS sorts every packet into one of three chains, by **who it is for**:[^3]
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: ".node rect, .cluster rect { rx: 6px; ry: 6px; }"
+  flowchart:
+    wrappingWidth: 200
+  themeVariables:
+    mainBkg: "#64748b1f"
+    nodeBorder: "#64748b"
+    clusterBkg: "#64748b14"
+    clusterBorder: "#64748b99"
+---
 flowchart TD
-    IN["Packet arrives on some interface"] --> Q{{"Is the destination IP<br/>one of the router's OWN addresses?<br/>(10.0.x.1, the public address on ether1)"}}
-    Q -->|"yes, e.g. WinBox to 10.0.20.1"| INPUT["chain INPUT<br/>(traffic TO the router)"]
-    Q -->|"no, e.g. Mac to Pi-hole"| ROUTE["[L3] routing decision:<br/>which interface leads to the destination?"]
-    ROUTE --> FWD["chain FORWARD<br/>(traffic THROUGH the router)"]
-    FWD --> NAT{"Leaving via ether1 (WAN)?"}
-    NAT -->|"yes"| SRCNAT["srcnat: masquerade<br/>(source becomes the WAN address)"]
-    NAT -->|"no"| OUT1["out of the VLAN interface"]
+    IN["Packet arrives on<br/>some interface"] --> Q{{"Is the destination IP<br/>one of the router's<br/>OWN addresses?<br/>(10.0.x.1, or the public<br/>address on ether1)"}}
+    Q -->|"yes, e.g. WinBox<br/>to 10.0.20.1"| INPUT["chain INPUT<br/>(traffic TO the router)"]
+    Q -->|"no, e.g. Mac<br/>to Pi-hole"| ROUTE["[L3] routing decision:<br/>which interface leads<br/>to the destination?"]
+    ROUTE --> FWD["chain FORWARD<br/>(traffic THROUGH<br/>the router)"]
+    FWD --> NAT{"Leaving via<br/>ether1 (WAN)?"}
+    NAT -->|"yes"| SRCNAT["srcnat: masquerade<br/>(source becomes<br/>the WAN address)"]
+    NAT -->|"no"| OUT1["out of the<br/>VLAN interface"]
     SRCNAT --> OUT2["out of ether1"]
-    ROUTER["The router's OWN traffic<br/>(its NTP client, its DHCP client, its replies)"] --> OUTPUT["chain OUTPUT<br/>(no rules here: everything allowed)"]
+    ROUTER["The router's OWN traffic<br/>(its NTP client,<br/>its DHCP client,<br/>its replies)"] --> OUTPUT["chain OUTPUT<br/>(no rules here:<br/>everything allowed)"]
+    style INPUT fill:#ef444426,stroke:#dc2626
+    style FWD fill:#ef444426,stroke:#dc2626
+    style OUTPUT fill:#ef444426,stroke:#dc2626
+    style ROUTE fill:#22c55e26,stroke:#16a34a
+    style SRCNAT fill:#22c55e26,stroke:#16a34a
 ```
 
 Rules in a chain are read **top to bottom**; the **first rule that matches decides**. In my router, the input and forward chains both end in a rule that drops everything and logs it, so anything not explicitly allowed is refused.
@@ -161,6 +211,22 @@ Router checks:     "I don't recognise this - drop"
 ### A Knock From The Internet
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant X as Random host on the internet
@@ -202,22 +268,38 @@ Side effects of NAT:
 Here is everything above working together: my Mac opens a website. DNS has already answered ([DNS Fundamentals](/pages/networking/basics/dns-fundamentals) shows that part).
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant Mac as Mac 10.0.20.100
     participant RB as Router<br/>(route, filter, the only NAT)
     participant Web as Website<br/>198.51.100.7:443
     rect rgba(249, 115, 22, 0.14)
-    Mac->>RB: [L2] to mac:Router [L3]<br/>10.0.20.100 to<br/>198.51.100.7 [L4] TCP<br/>SYN, port 51000 to 443
-    Note over RB: [L3] route: not a local<br/>subnet, use the default route<br/>via the provider (ether1)<br/>[L4] forward chain, new:<br/>VLAN 20 may reach the internet: ACCEPT<br/>[L3/L4] masquerade:<br/>source becomes PUBLIC-IP<br/>(conntrack remembers)
-    RB->>Web: [L2] new frame out of ether1,<br/>through the fibre box,<br/>to the provider's gateway [L3]<br/>PUBLIC-IP to 198.51.100.7
+    Mac->>RB: [L2] to mac:Router<br/>[L3] 10.0.20.100 to<br/>198.51.100.7<br/>[L4] TCP SYN,<br/>port 51000 to 443
+    Note over RB: [L3] route: not a<br/>local subnet, use<br/>the default route via<br/>the provider (ether1)<br/>[L4] forward chain,<br/>new: VLAN 20 may<br/>reach the internet:<br/>ACCEPT<br/>[L3/L4] masquerade:<br/>source becomes<br/>PUBLIC-IP (conntrack<br/>remembers)
+    RB->>Web: [L2] new frame out of<br/>ether1, through the<br/>fibre box, to the<br/>provider's gateway<br/>[L3] PUBLIC-IP to<br/>198.51.100.7
     Web->>RB: [L4] SYN-ACK
-    Note over RB: [L4] conntrack: this belongs<br/>to a known connection, state<br/>established<br/>[L3] un-NAT: destination<br/>becomes 10.0.20.100:51000<br/>FastTrack: the rest<br/>skips the filter
-    RB->>Mac: [L2] mac:Router to mac:Mac,<br/>VLAN 20 [L4] SYN-ACK
-    Mac->>Web: [L4] ACK (FastTracked from now on)
+    Note over RB: [L4] conntrack: this<br/>belongs to a known<br/>connection, state<br/>established<br/>[L3] un-NAT:<br/>destination becomes<br/>10.0.20.100:51000<br/>FastTrack: the rest<br/>skips the filter
+    RB->>Mac: [L2] mac:Router<br/>to mac:Mac, VLAN 20<br/>[L4] SYN-ACK
+    Mac->>Web: [L4] ACK (FastTracked<br/>from now on)
     end
     rect rgba(168, 85, 247, 0.14)
-    Mac->>Web: [TLS] handshake: the website proves its identity with a PUBLIC CA certificate
+    Mac->>Web: [TLS] handshake: the<br/>website proves its<br/>identity with a<br/>PUBLIC CA certificate
     end
     rect rgba(234, 179, 8, 0.14)
     Mac->>Web: [L7] encrypted HTTP GET /
@@ -247,15 +329,31 @@ What to notice:
 My router is also the time server for every VLAN. Each Linux host points its time client at its own VLAN's gateway, and the router syncs itself from the public NTP pool:
 
 ```mermaid
+---
+config:
+  look: classic
+  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+  themeCSS: "rect.actor, rect.note { rx: 6px; ry: 6px; }"
+  themeVariables:
+    actorBkg: "#64748b26"
+    actorBorder: "#64748b"
+    actorLineColor: "#64748b"
+    noteBkgColor: "#eab30833"
+    noteBorderColor: "#ca8a04"
+    labelBoxBkgColor: "#64748b33"
+    labelBoxBorderColor: "#64748b"
+    activationBkgColor: "#64748b40"
+    activationBorderColor: "#64748b"
+---
 sequenceDiagram
     autonumber
     participant Pi as Pi-hole (VLAN 40)
     participant R as Router 10.0.40.1<br/>NTP server
     participant P as pool.ntp.org
     rect rgba(234, 179, 8, 0.14)
-    R->>P: [L7] the router syncs itself (output chain is open, then NAT)
-    Pi->>R: [L7] NTP request to its<br/>gateway 10.0.40.1, udp 123
-    Note over R: [L3/L4] input chain: NTP from<br/>the internal VLANs (never<br/>from the WAN): ACCEPT
+    R->>P: [L7] the router syncs<br/>itself (output chain<br/>is open, then NAT)
+    Pi->>R: [L7] NTP request<br/>to its gateway<br/>10.0.40.1, udp 123
+    Note over R: [L3/L4] input chain:<br/>NTP from the internal<br/>VLANs (never from<br/>the WAN): ACCEPT
     R->>Pi: [L7] the time
     end
 ```
