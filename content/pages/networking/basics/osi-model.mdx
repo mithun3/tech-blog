@@ -1,62 +1,123 @@
 ---
 title: "OSI Model"
-description: "A practical walkthrough of the seven OSI layers and how they work together during a real request."
+description: "The one big idea in networking: layers. Envelopes inside envelopes, seven layers on paper and five in practice, and how a symptom tells you which layer broke."
 publishedAt: "2024-06-15"
-order: 1
+updatedAt: "2026-11-20"
+order: 2
 status: published
 ---
 
 # OSI Model
 
-Network communication happens in seven layers. Each layer has a specific job and only needs to care about the layers directly above and below it.
+Sending data over a network is like sending a letter inside several envelopes. Each envelope is handled by a different "post office" that only reads its own envelope:
 
-## Traffic Types (How Data Moves)
+- The **innermost** content is the actual message (a web page request, a DNS question).
+- Around it, an envelope says **which program** on the destination should get it (the **port**: L4).
+- Around that, an envelope says **which computer**, anywhere in the world (the **IP address**: L3).
+- Around that, an envelope says **which device on this wire, right now** (the **MAC address**: L2).
+- And the whole thing travels as **light or electricity** (L1).
 
-Our design heavily targets Layer 2 (L2) and Layer 3 (L3).
-
-*   **Layer 2 (Data Link - "The Same Room"):** This is traffic between devices on the *same* network segment using physical MAC addresses. It is handled by **switches**. Think of it as talking to someone in the same room. It is extremely fast because it happens entirely in hardware. 
-*   **Layer 3 (Network - "Different Cities"):** This is traffic between *different* network segments using IP addresses. It is handled by **routers**. Think of it as mailing a letter to another city; it must go through a post office (the router) to find its way. This often requires CPU cycles.
-
-**Example:** When your Proxmox EPYC Node (10.0.10.20) talks to your Proxmox Ryzen Node (10.0.10.21) on the same VLAN, that is **L2 traffic**. It never touches the router CPU. When your EPYC Node (10.0.10.20) talks to a container in the Client VLAN (10.0.40.50), that is **L3 traffic**. It must go to the router (default gateway) to be routed across VLANs.
-
-```mermaid
-flowchart TB
-  L7["Layer 7: APPLICATION<br/>Web browsers, email, databases<br/>HTTP, DNS, SSH"]
-  L6["Layer 6: PRESENTATION<br/>Encryption, compression<br/>TLS"]
-  L5["Layer 5: SESSION<br/>Conversation flow<br/>WebSockets"]
-  L4["Layer 4: TRANSPORT<br/>Ensures data arrives correctly<br/>TCP, UDP"]
-  L3["Layer 3: NETWORK<br/>Routes data across networks<br/>IP (v4, v6)"]
-  L2["Layer 2: DATA LINK<br/>Moves data on same network<br/>Ethernet, MAC address"]
-  L1["Layer 1: PHYSICAL<br/>Cables, radio waves<br/>Cat6, WiFi antenna"]
-
-  L7 --- L6 --- L5 --- L4 --- L3 --- L2 --- L1
-```
-
-## Layers Working Together
-
-Here is what the stack looks like when a browser request leaves your machine and is unpacked on the server.
+This wrapping is called **encapsulation**:
 
 ```mermaid
 flowchart LR
-  subgraph Sending [Sending Request]
-    direction TB
-    S7["Layer 7: Browser sends GET /api/chat"] --> S6["Layer 6: Data compressed"]
-    S6 --> S5["Layer 5: Session established"]
-    S5 --> S4["Layer 4: TCP stream created"]
-    S4 --> S3["Layer 3: IP header (from=.. to=..)"]
-    S3 --> S2["Layer 2: Ethernet frame built"]
-    S2 --> S1["Layer 1: Electrical signals sent"]
-  end
-
-  subgraph Receiving [Receiving Response]
-    direction TB
-    R1["Layer 1: Signals converted to bits"] --> R2["Layer 2: Frame unpacked"]
-    R2 --> R3["Layer 3: IP packet routed to Proxmox"]
-    R3 --> R4["Layer 4: TCP stream assembled"]
-    R4 --> R7["Layer 7: nginx processes the request"]
-  end
-
-  S1 ====|Physical Cable| R1
+    subgraph L1["L1: bits on the wire (light in a 10G fibre, voltage on copper)"]
+        subgraph F["L2 Ethernet frame: destination MAC, source MAC, optional VLAN tag, type"]
+            subgraph P["L3 IP packet: source IP, destination IP, TTL, protocol"]
+                subgraph S["L4 TCP or UDP segment: source port, destination port, flags"]
+                    D["L7 data: an HTTP request, a DNS question, SSH bytes"]
+                end
+            end
+        end
+    end
+    style L1 fill:#64748b26,stroke:#64748b
+    style F fill:#3b82f626,stroke:#3b82f6
+    style P fill:#22c55e26,stroke:#16a34a
+    style S fill:#f9731626,stroke:#ea580c
+    style D fill:#eab30826,stroke:#ca8a04
 ```
 
+## The Most Important Rule
+
+<Callout type="tip">
+
+The **IP addresses** (L3) stay the same from the first hop to the last, except where NAT changes them on purpose. The **MAC addresses** (L2) are rewritten at **every router hop**, because a MAC address only means something on one wire (one VLAN). A switch never rewrites anything; it only reads the L2 envelope and picks an output port.
+
+</Callout>
+
+Every other page in this section leans on that rule. [Router Essentials](/pages/networking/basics/router-essentials) follows one web request out of the house and shows the envelopes changing hop by hop.
+
+## Seven Layers On Paper, Five In Practice
+
+The textbook model has seven layers (OSI). Real networks use five of them, and layers 5 and 6 fold into "TLS".
+
+| Layer | Name | Unit | Address | Device that works at this layer | Example in my lab |
+|---|---|---|---|---|---|
+| L1 | Physical | bits | none | cable, SFP+ module, DAC | The 10G DAC between the router's `sfp-sfpplus1` and the switch's `sfp-sfpplus1` |
+| L2 | Data link | frame | MAC (48 bits) | switch, bridge | The switch forwarding a frame from `ether2` to `sfp-sfpplus1`, adding VLAN tag 50 |
+| L3 | Network | packet | IP (32 bits) | router | The router moving a packet from VLAN 20 to VLAN 40 |
+| L4 | Transport | segment (TCP) / datagram (UDP) | port (16 bits) | stateful firewall | The router allowing `tcp/22` to the Pi-hole, and remembering the connection |
+| TLS | Session / presentation | record | certificate | none in the middle: it runs end to end | Ansible checking the router's API certificate |
+| L7 | Application | message | names, URLs | servers, clients, proxies | DNS on the Pi-hole, Squid on the proxy, SSH, WinBox |
+
+The router is a MikroTik RB5009 and the switch a MikroTik CRS310. [Networking Basics](/pages/networking/basics) introduces the rest of the cast.
+
+## The Layer Tags On These Pages
+
+Every arrow in a sequence diagram in this section starts with a tag that says at which layer it happens. The coloured bands behind the arrows use the same colours.
+
+| Tag | Layer | What it is about | Colour |
+|---|---|---|---|
+| `[L1]` | Physical | Light in a fibre, voltage on copper, link up or down | grey |
+| `[L2]` | Data link | Ethernet frames, MAC addresses, switches, **VLAN tags** | blue |
+| `[L3]` | Network | IP addresses, subnets, **routing**, the **firewall's address rules** | green |
+| `[L4]` | Transport | TCP and UDP, **ports**, connection tracking (stateful firewall) | orange |
+| `[TLS]` | Between L4 and L7 | Encryption and identity (certificates) | purple |
+| `[L7]` | Application | DHCP, DNS, HTTP, SSH, NTP, the RouterOS API | yellow |
+
+The coloured bands are a visual aid. The tag in the text is the reliable part.
+
+## Which Layer Broke?
+
 The important practical point is that failures usually map to a layer. A DNS issue is not the same class of problem as a dropped TCP connection or a broken cable.
+
+When something does not work, **climb the layers from the bottom**. Each layer depends on the ones below it, so the first layer that fails is where the problem is.
+
+```mermaid
+flowchart TD
+    S["Something does not connect"] --> L1{"L1: is the link up?<br/>ifconfig en9 | grep status"}
+    L1 -->|"no"| F1["cable, port, adapter,<br/>or the port is disabled"]
+    L1 -->|"yes"| L2{"L2: right VLAN and address?<br/>ipconfig getpacket en9"}
+    L2 -->|"wrong subnet"| F2["wrong port, a stale lease,<br/>or Wi-Fi is on as well"]
+    L2 -->|"ok"| L3{"L3: does the route go the right way?<br/>route -n get DEST, traceroute -n DEST"}
+    L3 -->|"wrong interface"| F3["a second interface or a stray route"]
+    L3 -->|"ok"| L4{"L4: does the port answer?<br/>nc -vz -G 2 DEST PORT"}
+    L4 -->|"timeout"| F4["a firewall drop (read the router's drop log),<br/>or the host is down"]
+    L4 -->|"refused"| F5["the host is up, nothing listens:<br/>the service is stopped"]
+    L4 -->|"open"| T{"TLS involved?<br/>openssl s_client -connect DEST:PORT"}
+    T -->|"alert / verify error"| F6["a certificate problem"]
+    T -->|"ok or no TLS"| L7{"L7: the application"}
+    L7 --> F7["wrong user or key,<br/>a wrong DNS answer (dig),<br/>a proxy that says 403"]
+```
+
+These are the commands I run on my Mac, where `en9` is its USB network adapter. Yours will have another name; `ifconfig` lists them.
+
+The symptom alone often tells you the layer:
+
+| What you see | Layer | Meaning |
+|---|---|---|
+| Hangs, then **timeout** | L3/L4 | A firewall **dropped** the packets, or the host is down or unreachable |
+| **Connection refused** immediately | L4 | You reached the host; nothing listens on that port |
+| **Handshake failure** (for example TLS alert 40) | TLS | You reached the service; it cannot do TLS the way you need (no certificate bound, or no cipher suite in common) |
+| **Certificate verify failed** | TLS | It presented a certificate you do not trust: the wrong CA, the wrong name or IP, or expired |
+| **Permission denied**, or the login fails | L7 | Everything below works; the user, password or key is wrong |
+
+[Network Troubleshooting](/pages/networking/homelab-network/network-troubleshooting) has the practical checks for containers and VMs on Proxmox.
+
+## Related Topics
+
+- [Network Words In A Nutshell](/pages/networking/basics/network-words) - every word on this page, with an everyday comparison.
+- [IP Addressing and Subnetting](/pages/networking/basics/ip-addressing-subnetting) - the three kinds of address, one per layer.
+- [TCP/IP Protocols](/pages/networking/basics/tcp-ip-protocols) - what happens at L4.
+- [Router Essentials](/pages/networking/basics/router-essentials) - the envelopes changing hop by hop.
+- [Network Troubleshooting](/pages/networking/homelab-network/network-troubleshooting) - fixing real faults.

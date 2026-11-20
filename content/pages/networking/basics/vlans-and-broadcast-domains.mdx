@@ -1,73 +1,275 @@
 ---
 title: "VLANs & Broadcast Domains"
-description: "Isolating traffic at Layer 2 using Virtual LANs, 802.1Q tagging, and mitigating broadcast radiation."
+description: "Many networks on one cable: broadcast domains, VLAN tags, access and trunk ports, routing between VLANs, the traffic the router never sees, and how a Proxmox node carries several VLANs on one link."
 publishedAt: "2026-09-23"
-order: 5
+updatedAt: "2026-11-20"
+order: 6
 status: published
 ---
 
 # VLANs & Broadcast Domains
 
-At a physical level, a network switch connects devices together. But as a homelab scales to encompass management interfaces, guest networks, and exposed DMZ containers, placing every device on the same physical switch without logical separation becomes a massive security and performance liability. 
+At a physical level, a network switch connects devices together. Once a homelab has management interfaces, guest networks and services you might expose, putting every device on one switch with no separation becomes a security and performance problem.
 
-This is where Broadcast Domains and Virtual LANs (VLANs) come in.
+Without VLANs you need one switch and one cable per network. A **VLAN** (Virtual LAN) lets one switch and one cable carry many separate networks.
 
-## The Cost of Broadcast Domains
+## Broadcast Domains
 
-A **Broadcast Domain** is the logical boundary where all nodes can hear each other's Layer 2 background noise.
+A **broadcast** is one message for every device in the local network at once. Devices use it when they do not yet know whom to ask:
 
-When a device connects to a network, it constantly shouts into the void to discover its surroundings:
-- *“Who has the IP `192.168.1.1`? Tell `192.168.1.50`!”* (ARP Requests)
-- *“Is there a DHCP server out here? I need an IP!”* (DHCP Discover)
+- *"Who has the IP `192.168.1.1`? Tell `192.168.1.50`!"* (ARP Requests)
+- *"Is there a DHCP server out here? I need an IP!"* (DHCP Discover)
 
-In a flat network, **every single device** connected to the switch must receive, process, and discard these broadcast packets. 
+A **broadcast domain** is the set of devices that hear each other's broadcasts. Think of an announcement over a building's loudspeaker: every flat in this building hears it, the next building does not.
 
-> [!WARNING]
-> **Broadcast Radiation:** In an enterprise homelab running dozens of VMs and LXCs, this background noise adds up. Your Proxmox host's CPU has to interrupt its workload to process every single broadcast packet on the network, even if it's just a smart TV asking for an IP address.
+In a flat network, **every single device** connected to the switch must receive, process and discard these broadcast packets. The more devices, the more of this background noise each one handles.
 
-By shrinking the size of a broadcast domain, we restrict the noise.
+A broadcast never crosses a router. Shrinking the broadcast domain restricts the noise, and it also restricts who can talk to whom without a router in between.
 
-## VLANs (Virtual LANs)
+## VLANs: Separate Buildings On Shared Roads
 
-A VLAN splits a single physical switch into multiple isolated virtual switches. 
+A VLAN splits a single physical switch into multiple isolated virtual switches.
 
-Think of it as dividing a large office building into secure floors. Devices on VLAN 10 (Floor 1) physically share the same switch chassis as devices on VLAN 20 (Floor 2), but they cannot hear each other's broadcasts. More importantly, they cannot communicate with each other at all unless the traffic passes through a Layer 3 router (the security desk) mediating the connection.
+Think of separate buildings that share the same roads and pipes. Devices in VLAN 10 and VLAN 20 may plug into the same switch, but they cannot hear each other's broadcasts. More importantly, they cannot talk to each other at all unless the traffic passes through a router, and therefore through its firewall.
 
-### The 802.1Q Standard (How it works)
+### The Tag
 
-VLANs are not magic; they are explicitly defined in the Ethernet frames traversing your cables using the **IEEE 802.1Q** standard.
-
-When a switch processes traffic for a VLAN, it inserts a 4-byte header into the standard Ethernet frame. This header contains the **VLAN ID** (a number from 1 to 4094).
+VLANs are not magic. Each frame on a shared link carries a **tag** with its **VLAN ID**, a number from 1 to 4094. The tag format is the IEEE 802.1Q standard,[^1] and a VLAN-aware switch recognises a regular 802.1Q tag by its type, `0x8100`.[^2]
 
 ```mermaid
-packet-beta
-0-5: "Destination MAC"
-6-11: "Source MAC"
-12-15: "802.1Q Tag (4 Bytes)"
-16-17: "EtherType"
-18-31: "Payload (IP Packet)"
+flowchart TB
+    subgraph U["Untagged frame (what a normal device sends)"]
+        U1["dst MAC"] --- U2["src MAC"] --- U3["type: IPv4"] --- U4["IP packet ..."]
+    end
+    subgraph T["Tagged frame (802.1Q, on a trunk)"]
+        T1["dst MAC"] --- T2["src MAC"] --- T3["TAG: 0x8100 + VLAN ID e.g. 50"] --- T4["type: IPv4"] --- T5["IP packet ..."]
+    end
+    U -->|"switch adds the tag on the way in"| T
+    T -->|"switch removes the tag on the way out of an access port"| U
+    style U fill:#3b82f626,stroke:#3b82f6
+    style T fill:#3b82f626,stroke:#3b82f6
 ```
 
-## Trunk Ports vs. Access Ports
+## Access Ports And Trunk Ports
 
-Because frames now contain this 4-byte tag, devices on the network need to know how to read it.
+Because frames can carry a tag, each switch port needs to know whether to expect one.
 
 *   **Access Port:** The port is assigned to a single VLAN (e.g., VLAN 40). The device connected to it (like a PC, TV, or unmanaged switch) has no idea VLANs exist. It sends standard, untagged traffic. As the traffic enters the switch, the switch **adds** the VLAN 40 tag. As traffic leaves the port toward the PC, the switch **strips** the tag.
 *   **Trunk Port:** The port carries multiple VLANs. The traffic remains "tagged" as it leaves the switch. The device receiving the traffic (like a Proxmox host or another managed switch) must be "VLAN-aware" so it can read the 802.1Q tag and sort the traffic accordingly.
 
-### Native VLANs and PVID
+| Port type | Carries | Frames on the wire | Typical device | In my lab |
+|---|---|---|---|---|
+| **Access** | exactly one VLAN | **untagged** | a normal computer, a Pi | Switch `ether2` (the monitoring board, VLAN 50) |
+| **Trunk** | many VLANs | **tagged** (maybe one VLAN untagged) | another switch, a hypervisor, a Wi-Fi access point | Router `sfp-sfpplus1` (all VLANs), switch `ether5` (a Proxmox node) |
+
+### The Words MikroTik Uses
+
+My router and switch are MikroTiks. RouterOS uses three settings for all of this:[^3]
+
+- **PVID** (port VLAN ID): the VLAN an *untagged* frame belongs to when it enters this port. The router's `ether2` has PVID 20, so my Mac's untagged frames are VLAN 20 inside the switch.
+- **frame-types**: what the port accepts. `admit-only-untagged-and-priority-tagged` on access ports, so a device cannot pretend to be in another VLAN by tagging its own frames. `admit-only-vlan-tagged` on the 10G trunk between router and switch. `admit-all` on the mixed ports: the Proxmox node trunks and the link to the Wi-Fi access point, which carry one VLAN untagged and others tagged.
+- **vlan-filtering=yes** on the bridge: the switch actually enforces all of the above. Without it, the VLAN settings are ignored and everything is one big network.
+
+Here is a frame from my monitoring board (a Rock Pi) reaching the router:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Rock as Rock Pi<br/>(knows nothing about VLANs)
+    participant CE2 as Switch ether2<br/>access, PVID 50
+    participant CB as Switch bridge1
+    participant CS1 as Switch sfp-sfpplus1<br/>trunk
+    participant RS1 as Router sfp-sfpplus1<br/>trunk
+    rect rgba(59, 130, 246, 0.14)
+    Rock->>CE2: [L2] untagged frame
+    CE2->>CB: [L2] "untagged<br/>arrived on PVID 50<br/>port": now VLAN 50
+    CB->>CS1: [L2] VLAN 50 is tagged<br/>on the trunk: frame<br/>leaves WITH tag 50
+    CS1->>RS1: [L1] 10 Gbit/s<br/>over the DAC, [L2]<br/>tag 50 on the wire
+    Note over RS1: The router knows from the<br/>tag that this is VLAN 50
+    end
+```
+
+### Native VLAN And VLAN Hopping
 
 What happens if an untagged packet arrives on a Trunk Port?
 
-This is handled by the **Native VLAN** (or PVID - Port VLAN ID). The switch assigns any untagged traffic arriving on a trunk port to the Native VLAN. 
+This is handled by the **Native VLAN** (or PVID - Port VLAN ID). The switch assigns any untagged traffic arriving on a trunk port to the Native VLAN.
 
-> [!CAUTION]
-> **VLAN Hopping:** Misconfiguring the Native VLAN is a common security vulnerability. As a best practice, the Native VLAN on trunk ports should be set to an unused "black hole" VLAN (e.g., VLAN 999) to drop untagged, unauthorized traffic.
+The classic attack, VLAN hopping, is a device tagging its own frames to land in a VLAN it does not belong to. In my lab the frame-types do the work. An access port only admits untagged frames, so a tagged frame from a device is dropped at the door. The trunk between router and switch only admits tagged frames, so it has no native VLAN at all.
 
-## Proxmox Integration (`vmbr0`)
+## Routing Between VLANs
 
-In a homelab, your Proxmox host connects to the switch via a Trunk Port. 
+VLANs are separate on purpose. To go from VLAN 20 to VLAN 40 a packet must be **routed**, and in my lab the only router is the RB5009. It has one virtual interface per VLAN (`vlan20-mgmt`, `vlan40-sbc`, ...), each holding that VLAN's gateway address. So the router is the one place where every VLAN meets, and therefore the one place to put the firewall.
 
-Inside Proxmox, the default virtual bridge (`vmbr0`) acts as a virtual managed switch. When you check the "VLAN aware" box in Proxmox's network settings, `vmbr0` learns how to read 802.1Q tags. 
+```mermaid
+flowchart LR
+    subgraph V20["VLAN 20 MGMT 10.0.20.0/24"]
+        Mac["Mac .100"]
+    end
+    subgraph V40["VLAN 40 SBC 10.0.40.0/24"]
+        PH["Pi-hole .10"]
+    end
+    subgraph V50["VLAN 50 MONITOR 10.0.50.0/24"]
+        RP["Rock Pi .10"]
+    end
+    subgraph R["Router (L3)"]
+        I20["vlan20-mgmt 10.0.20.1"]
+        I40["vlan40-sbc 10.0.40.1"]
+        I50["vlan50-monitor 10.0.50.1"]
+        FW{{"firewall: forward chain"}}
+        I20 --- FW
+        I40 --- FW
+        I50 --- FW
+    end
+    Mac --- I20
+    PH --- I40
+    RP --- I50
+```
+
+## Inside One VLAN, The Router Never Looks
+
+This is the most important thing to understand about VLANs and security. Two hosts in the same VLAN talk straight through the switch, and the router's firewall never sees it:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Mac as Mac 10.0.20.100<br/>router ether2
+    participant SC as Router switch chip<br/>(bridge1, VLAN 20)
+    participant CPU as Router CPU + firewall
+    participant T as ts-sbc 10.0.20.13<br/>router ether4
+    rect rgba(59, 130, 246, 0.14)
+    Note over Mac: [L3] 10.0.20.13 is in MY subnet:<br/>no gateway, ARP for .13 directly
+    Mac->>SC: [L2] ARP "who has<br/>10.0.20.13?"<br/>(broadcast in VLAN 20)
+    SC->>T: [L2] flooded
+    T->>Mac: [L2] "10.0.20.13 is at mac:ts-sbc"
+    Mac->>SC: [L2] frame to mac:ts-sbc<br/>[L4] TCP SYN to port 22
+    SC->>T: [L2] switched in hardware from ether2 to ether4
+    Note over CPU: the CPU and its firewall never<br/>see this. No rule applies.
+    Note over T: [L3/L4] ts-sbc's OWN firewall<br/>decides whether SSH is allowed
+    end
+```
+
+`ts-sbc` is a Raspberry Pi that runs one of my two Tailscale routers. It sits in VLAN 20, next to my Mac.
+
+<Callout type="warning">
+
+**A VLAN is one room.** Anything in it can reach anything else in it, whatever the router's rules say. Only each host's own firewall can stop it. That is why I keep my management VLAN small, and why I do not trust it as a whole.
+
+</Callout>
+
+The same holds across the trunk. My Mac reaching Caddy (`10.0.20.12`, a container on a Proxmox node) goes Mac → router switch chip → trunk tagged 20 → switch → node trunk tagged 20 → the node's `vmbr0` → the container. All L2, no router firewall.
+
+## Across The Trunk, Twice
+
+The monitoring board in VLAN 50 is plugged into the switch. Two of its flows show what the trunk does:
+
+1. **A DNS question to the Pi-hole** (VLAN 40, plugged into the **router**): it crosses the trunk once.
+2. **A metrics scrape of a Proxmox node** (VLAN 10, plugged into the **switch**): it crosses the trunk **twice**, because only the router can move a packet from VLAN 50 to VLAN 10.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RP as Rock Pi 10.0.50.10<br/>switch ether2 (PVID 50)
+    participant CR as Switch bridge1
+    participant RB as Router<br/>bridge1 + CPU
+    participant PH as Pi-hole 10.0.40.10<br/>router ether3 (PVID 40)
+    participant G as pve-ryzen 10.0.10.21<br/>switch ether5 (node trunk, VLAN 10 untagged)
+    rect rgba(59, 130, 246, 0.14)
+    Note over RP,PH: Flow 1: DNS to the Pi-hole
+    RP->>CR: [L2] untagged frame<br/>to mac:Router (its<br/>gateway 10.0.50.1)
+    CR->>RB: [L2] out sfp-sfpplus1<br/>with TAG 50
+    Note over RB: [L2] tag 50: deliver<br/>to vlan50-monitor<br/>[L3] route to vlan40-sbc<br/>[L4] DNS to the Pi-holes<br/>is allowed from every VLAN<br/>[L2] new frame mac:Router<br/>to mac:Pi-hole, tag 40<br/>inside the switch chip
+    RB->>PH: [L2] out ether3<br/>UNTAGGED (PVID 40)
+    end
+    rect rgba(34, 197, 94, 0.14)
+    Note over RP,G: Flow 2: Prometheus scrapes pve-ryzen on tcp 9100
+    RP->>CR: [L2] untagged frame<br/>to mac:Router
+    CR->>RB: [L2] UP the trunk<br/>with TAG 50
+    Note over RB: [L3] route to vlan10-oobm<br/>[L4] the monitoring board may<br/>scrape node_exporter: ACCEPT
+    RB->>CR: [L2] DOWN the<br/>trunk with TAG 10
+    CR->>G: [L2] out ether5 UNTAGGED (VLAN 10 is the node trunk's untagged VLAN) to vmbr0
+    end
+```
+
+What the envelopes look like for flow 2:
+
+| Segment | VLAN tag on the wire | L2 source → destination | L3 source → destination | TTL |
+|---|---|---|---|---|
+| Rock Pi → switch `ether2` | none | `mac:RockPi` → `mac:Router` | `10.0.50.10` → `10.0.10.21` | 64 |
+| Switch → router (trunk, up) | **50** | `mac:RockPi` → `mac:Router` | same | 64 |
+| *Router routes: VLAN 50 → 10* | — | **rewritten** | same | **63** |
+| Router → switch (trunk, down) | **10** | `mac:Router` → `mac:pve-ryzen` | same | 63 |
+| Switch `ether5` → pve-ryzen `vmbr0` | none | `mac:Router` → `mac:pve-ryzen` | same | 63 |
+
+What to notice:
+
+- **The switch never changes the MACs or the IPs.** It only adds or removes the tag at the edge.
+- **Traffic between two VLANs on the switch always makes this round trip.** That is the price of having one router, and one firewall, for everything. The 10G trunk makes it cheap; [Network Topologies](/pages/networking/basics/network-topologies) has the measured numbers.
+- **The switch drops a tagged frame on an access port**, so a device cannot jump VLANs by tagging its own frames.
+
+## Proxmox: One Trunk Per Node
+
+In a homelab, your Proxmox host connects to the switch via a Trunk Port.
+
+Inside Proxmox, the default virtual bridge (`vmbr0`) acts as a virtual managed switch. When you check the "VLAN aware" box in Proxmox's network settings, `vmbr0` learns how to read 802.1Q tags.[^4]
 
 When you create a VM and type "10" into the VLAN Tag box, Proxmox creates a virtual Access Port for that specific VM. The VM thinks it is on a normal flat network, but Proxmox tags all its traffic as VLAN 10 before sending it down the physical Trunk Port to your core switch.
+
+My nodes use one pattern, the **node trunk**. The host's own address lives on `vmbr0` **untagged**, in VLAN 10. Each guest's network card is attached to `vmbr0` **with a tag** for its own VLAN:
+
+```mermaid
+flowchart LR
+    subgraph RYZEN["pve-ryzen"]
+        subgraph VMBR["vmbr0 (VLAN-aware Linux bridge)"]
+            HOST["host IP 10.0.10.21<br/>untagged = VLAN 10"]
+            CT210["ts-lxc container<br/>net0 tag=20<br/>10.0.20.10"]
+            CT212["Caddy container<br/>net0 tag=20<br/>10.0.20.12"]
+            CT13X["AI, home hub, NetBox containers<br/>net0 tag=30<br/>10.0.30.x"]
+        end
+        NIC["onboard 2.5G NIC"]
+        VMBR --- NIC
+    end
+    NIC ---|"trunk: VLAN 10 untagged,<br/>20/30/50/60 tagged"| CE5["switch ether5"]
+```
+
+The switch port must match: VLAN 10 untagged for the host, the guest VLANs tagged.
+
+Two mistakes this pattern makes easy:
+
+- **A guest that belongs in VLAN 10 must be untagged on `vmbr0`, never `tag=10`.** VLAN 10 is the untagged VLAN on the node trunk, so the switch sends its frames untagged.
+- **A node trunk must be a trunk.** Until 29 October 2026 my first node's `vmbr0` sat behind an unmanaged switch on an **access** port in VLAN 10. That port dropped every tagged frame, so the host worked and every guest in another VLAN had no network at all.
+
+[Linux Bridges in Proxmox](/pages/networking/homelab-network/linux-bridges-proxmox) explains the bridge itself.
+
+## My Ten VLANs
+
+| VLAN | Name | Subnet | Who lives here | Internet |
+|---|---|---|---|---|
+| 10 | OOBM | `10.0.10.0/24` | Proxmox hosts, both BMCs, the KVM, the TrueNAS UI | Only through the proxy |
+| 20 | MGMT | `10.0.20.0/24` | My admin Mac, the Tailscale routers, Caddy, the switch | Yes |
+| 30 | COMPUTE | `10.0.30.0/24` | Containers and VMs (AI, apps) | Yes |
+| 40 | SBC | `10.0.40.0/24` | The two Pi-holes, the proxy | Time only. The exceptions are the proxy itself (web) and the Pi-holes and the proxy (DNS) |
+| 50 | MONITOR | `10.0.50.0/24` | The monitoring board | Only through the proxy |
+| 60 | STORAGE | `10.0.60.0/24` | Storage network cards (NFS) | Only through the proxy |
+| 70 | CLIENT | `10.0.70.0/24` | Phones and laptops on the main Wi-Fi | Yes |
+| 75 | GUEST | `10.0.75.0/24` | Visitors on the guest Wi-Fi | Public addresses only |
+| 80 | IOT | `10.0.80.0/24` | Smart devices on the IoT Wi-Fi | Time, web, MQTT over TLS and ping, to public addresses only |
+| 90 | DMZ | `10.0.90.0/24` | Reserved for future public services (empty) | No |
+
+Why so many VLANs? **Blast radius.** If a smart plug (IoT) or a phone or laptop on Wi-Fi (CLIENT) is compromised, it is in a VLAN that can reach almost nothing. The BMCs and hypervisors (OOBM), whose compromise would be the worst, sit in a VLAN that cannot reach the internet at all.
+
+The [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) draws every VLAN and every address on its logical sheet.
+
+## Related Topics
+
+- [Network Words In A Nutshell](/pages/networking/basics/network-words) - VLAN, broadcast, trunk, access port and PVID in one page.
+- [IP Addressing and Subnetting](/pages/networking/basics/ip-addressing-subnetting) - one subnet per VLAN, and how a host decides who is local.
+- [Router Essentials](/pages/networking/basics/router-essentials) - the firewall every cross-VLAN packet passes.
+- [Network Topologies](/pages/networking/basics/network-topologies) - what the trunk round trip costs in practice.
+- [Linux Bridges in Proxmox](/pages/networking/homelab-network/linux-bridges-proxmox) - the bridge inside each Proxmox node.
+- [The Old Router Became An Access Point](/pages/homelab-architecture/decisions/wifi-access-point) - three Wi-Fi names on three VLANs.
+
+[^1]: [IEEE 802.1Q, Bridges and Bridged Networks](https://standards.ieee.org/ieee/802.1Q/10323/).
+[^2]: [MikroTik, Bridge VLAN Table](https://manual.mikrotik.com/docs/bridging-and-switching/user-guides/bridge-vlan-table/): "0x8100 - IEEE 802.1Q, Customer VLAN (regular VLAN tag)".
+[^3]: [MikroTik, Bridging and Switching](https://manual.mikrotik.com/docs/bridging-and-switching/): `pvid` (1 to 4094) assigns untagged ingress traffic to a VLAN, `frame-types` is one of `admit-all`, `admit-only-untagged-and-priority-tagged` or `admit-only-vlan-tagged`, and both only take effect when `vlan-filtering` is `yes`.
+[^4]: [Proxmox VE, Network Configuration](https://pve.proxmox.com/wiki/Network_Configuration), "VLAN 802.1Q": VLAN awareness on the Linux bridge, and a VLAN tag set per guest network card.

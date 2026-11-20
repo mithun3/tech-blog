@@ -1,62 +1,135 @@
 ---
 title: "Network Topologies"
-description: "Understanding the performance benefits of Collapsed Core versus legacy Router-on-a-Stick designs."
+description: "North-south and east-west traffic, why my lab runs one router on one 10G trunk, what the hairpin really costs when measured, and when a collapsed core or switch-chip routing earns its place."
 publishedAt: "2026-09-23"
-order: 6
+updatedAt: "2026-11-20"
+order: 8
 status: published
 ---
 
 # Network Topologies
 
-When designing an enterprise homelab, the physical layout of switches and routers dramatically impacts performance—especially when routing between VLANs.
+The physical layout of switches and routers decides which path traffic takes, especially when it crosses from one VLAN to another.
 
-## The Physics of Network Traffic
-
-Before looking at topologies, it is crucial to understand *how* data flows in a modern homelab:
+## North-South And East-West
 
 *   **North-South Traffic:** Data moving in and out of the network (e.g., your laptop accessing the internet, or an external user accessing your Plex server).
 *   **East-West Traffic:** Data moving laterally between servers within the network (e.g., your Proxmox compute node pulling a container image from your TrueNAS storage node).
 
-> [!TIP]
-> In an enterprise homelab, East-West traffic absolutely dwarfs North-South traffic. A 1Gbps internet connection handles North-South, but your storage-to-compute backplane often requires 10Gbps, 25Gbps, or even 100Gbps of East-West bandwidth to prevent bottlenecks during AI inference or massive ZFS replication.
+In a homelab with storage and compute on separate machines, east-west is where the big transfers happen: backups, replication, a model loading from the NAS. That is the traffic the layout has to be good at.
 
-## Traditional: Router-on-a-Stick (Legacy)
+## Router-On-A-Stick: What I Run
 
-In a flat network or a simple VLAN setup, the default design is often a "Router-on-a-Stick".
-
-Here, all cross-VLAN routing happens on the firewall/router CPU. A single cable (a Trunk Port) connects the central switch to the router. 
+In a router-on-a-stick design, a single cable (a trunk) connects the switch to the router, and all routing between VLANs happens in the router.
 
 ```mermaid
 flowchart TD
-    Router[Router/Firewall CPU] ---|Trunk Link| Switch[L2 Switch]
-    Switch ---|VLAN 10| Compute[Compute Node]
-    Switch ---|VLAN 20| Storage[Storage Node]
+    Router["Router (MikroTik RB5009)<br/>gateway .1 of every VLAN, firewall, NAT"] ---|"10G DAC trunk: all ten VLANs, tagged"| Switch["Switch (MikroTik CRS310)<br/>switching only"]
+    Switch ---|"10G node trunk"| Node1["pve-epyc"]
+    Switch ---|"2.5G node trunk"| Node2["pve-ryzen"]
 ```
 
-**Why it fails at scale:** If your 25G storage pool talks to your 10G compute pool across different VLANs, the traffic must travel from the Storage Node, up the trunk link to the Router, get processed by the Router's CPU, and travel back down the exact same trunk link to the Compute node. This is called *hairpin routing*. The router CPU will immediately choke, creating a massive bottleneck and destroying your 25Gbps investment.
+That is my lab. The RB5009 is the only router and holds the gateway of every VLAN. The CRS310 is only a switch. Two hosts in the same VLAN talk through the switch without touching the router; anything that changes VLAN goes up the trunk and comes back down.
 
-## Collapsed Core (The Enterprise Standard)
+The point of it is simple: there is one router, so there is one firewall, and every packet between VLANs passes it.
 
-To solve the East-West bottleneck, we use a **Collapsed Core** architecture. This design collapses the traditional "Core" and "Distribution" network layers into a single high-speed backbone switch.
+### The Hairpin
+
+Traffic between two VLANs on the switch goes up the trunk to the router and back down the same cable. [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) follows one such frame across the trunk twice.
+
+The extreme case is a **hairpin**: traffic that leaves a machine and comes back to it through the router. In my design the backup server runs as a container on one of the Proxmox nodes, in VLAN 20, while the node's own address is in VLAN 10. So a backup of that node leaves the machine and comes straight back:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant H as pve-ryzen host<br/>10.0.10.21 (vmbr0, untagged)
+    participant CR as Switch ether5<br/>(node trunk)
+    participant RB as Router
+    participant PBS as Backup server container<br/>VLAN 20 (vmbr0, tag 20)
+    rect rgba(59, 130, 246, 0.14)
+    Note over H: [L3] the backup server is not<br/>in 10.0.10.0/24: send to<br/>the gateway 10.0.10.1
+    H->>CR: [L2] out the 2.5G NIC<br/>UNTAGGED (VLAN 10 by PVID)
+    CR->>RB: [L2] up the trunk, tag 10
+    end
+    rect rgba(34, 197, 94, 0.14)
+    Note over RB: [L3] route VLAN 10 to VLAN 20<br/>[L4] this node may reach the<br/>backup server's port: ACCEPT
+    RB->>CR: [L2] down the trunk, tag 20
+    CR->>PBS: [L2] out ether5 with tag 20, into the same machine,<br/>vmbr0 hands it to the container
+    end
+```
+
+Every byte of that backup crosses the node's 2.5G link twice and the router once. It works, and FastTrack keeps the router's CPU cost low, but it is why big restores take time.
+
+The earlier version of this page said the router would choke on traffic like this. The measurements below say otherwise, at least at the speeds I have.
+
+## What It Really Costs
+
+A link has two speeds. The **port speed** is the most the socket can do. The **negotiated speed** is what the two ends agreed on when the cable went in: the fastest speed both ends support, and the cable can carry. I read the negotiated speeds from both MikroTiks on 13 November 2026:
+
+| Link | Cable | Port speed | Links at |
+|---|---|---|---|
+| Router `sfp-sfpplus1` to switch `sfp-sfpplus1`: the backbone, all ten VLANs | DAC | 10G | 10 Gb/s |
+| Switch `sfp-sfpplus2` to pve-epyc | DAC | 10G | 10 Gb/s |
+| Switch `ether5` to pve-ryzen | copper | 2.5G | 2.5 Gb/s |
+| Router `ether2` to `ether5`: my Mac, a Tailscale router, the Pi-hole, the proxy | copper | 1G | 1 Gb/s each, except the Pi-hole: 100 Mb/s |
+| Switch `ether1` to an unmanaged switch (BMCs, KVM) | copper | 2.5G | 1 Gb/s (the unmanaged switch is 1G) |
+| Switch `ether2` to the monitoring board | copper | 2.5G | 2.5 Gb/s |
+
+A **DAC** (direct-attach copper) is a short, thick copper cable with an SFP+ plug moulded onto each end. Inside one rack it does the job of two optical modules and a fibre, for less money and less heat.
+
+Two rows deserve a word:
+
+- **The Pi-hole links at 100 Mb/s, and that is correct.** It runs on a Raspberry Pi 3 Model B, which has 100 Mb/s Ethernet,[^1] so that is its top speed on any port and any cable. A DNS answer is a few hundred bytes, so this costs nothing.
+- **My Mac links at 1 Gb/s.** Its USB adapter can do 10G, but the router's `ether2` is a 1G port, so the pair settles on 1G.
+
+A path is as fast as its **slowest link**. I measured two paths end to end, with a raw TCP stream for 8 seconds each way:
+
+| Path | Measured | In MB/s | The slowest link |
+|---|---|---|---|
+| An apps VM on pve-ryzen to and from the NAS VM on pve-epyc, inside one VLAN | 2.2 to 2.35 Gb/s | about 280 | pve-ryzen's 2.5G port on the switch |
+| My Mac to and from the same apps VM, routed by the router | 0.93 Gb/s | about 117 | the router's 1G `ether2` port |
+
+Both paths run at close to the full speed of their slowest link, so the cables, the switch chip and the routed hop cost almost nothing. The VMs use virtio network cards, which have no speed of their own, and the MTU is 1500 on every link.
+
+One honest limit: the routed path was tested at 1 Gb/s, because that is my Mac's port. I have not measured a routed path at 10G.
+
+What this means day to day:
+
+- **10G is used only between the router, the switch and pve-epyc.** Anything that starts or ends on pve-ryzen is capped at 2.5 Gb/s. Both SFP+ cages on the switch are taken, so pve-ryzen's own 10G card stays unplugged until there is a switch with more SFP+ cages.
+- **A wired Mac copies to the NAS at about 115 MB/s**, or about 400 GB an hour.
+- **Wi-Fi is not measured yet.** Expect it to be the slowest link for phones and laptops.
+
+## Collapsed Core
+
+The usual answer to heavy east-west traffic is a **Collapsed Core**. It collapses the traditional "Core" and "Distribution" network layers into a single high-speed backbone switch.
 
 ```mermaid
 flowchart TD
     Router[Router/Firewall] -.->|North-South Routing| CoreSwitch[Core Switch ASIC]
-    CoreSwitch ====|25Gbps East-West| Compute[Compute Node]
-    CoreSwitch ====|25Gbps East-West| Storage[Storage Node]
-    CoreSwitch ---|2.5Gbps| AccessSwitch[Access Switch]
+    CoreSwitch ====|fast east-west link| Compute[Compute Node]
+    CoreSwitch ====|fast east-west link| Storage[Storage Node]
+    CoreSwitch ---|slower access link| AccessSwitch[Access Switch]
     AccessSwitch --- Clients[Laptops / IoT]
 ```
 
-In this design, the Core Switch (e.g., a MikroTik CRS510) acts as the high-speed backbone. 
+The router still handles routing between VLANs where a security boundary matters, for example keeping IoT devices away from management. Bulk transfers between compute and storage are kept *inside one VLAN*, so the core switch moves them in hardware and they never touch the router.
 
-**The Performance Gain:**
-While the router still handles inter-VLAN routing for strict security boundaries (e.g., blocking IoT devices from reaching the Management VLAN), we ensure that bulk data transfers (Compute ↔ Storage) occur *within the same VLAN* at the Core Switch layer. 
+My first measured path above is exactly that: VM to NAS inside one VLAN, switched by the switch chip, with no router involved. A collapsed core does the same thing with bigger links.
 
-By keeping heavy East-West traffic strictly at Layer 2 on the same VLAN, the massive traffic never touches the router CPU. It is switched entirely in hardware by the Core Switch's ASIC, guaranteeing line-rate 400Gbps+ performance.
+The design on [Network Segmentation Migration](/pages/networking/homelab-network/enterprise-segmentation-migration) adds a MikroTik CRS510 as that core switch. Today the lab runs without it, and the numbers above say one router is enough at these speeds.
 
-### Layer 3 Hardware Offloading (L3HW)
+### Routing In The Switch Chip
 
-Advanced switches (like the MikroTik CRS3xx/CRS5xx series) blur the line further by offering **L3 Hardware Offloading**. 
+Some MikroTik switches can route between VLANs in the switch chip itself, which MikroTik calls L3 Hardware Offloading.[^2] Compute and storage can then sit in separate VLANs without the trip to the router.
 
-Instead of sending cross-VLAN traffic to the router CPU, the switch's ASIC can route packets between VLANs at wire speed. This allows you to place Compute and Storage on separate VLANs for security, without suffering the CPU bottleneck of a Router-on-a-Stick topology.
+Two things to check first. Only the models MikroTik lists support it, and some of those lack features such as FastTrack and NAT offloading.[^2] And the routing then happens in the switch, not in the one router where my firewall lives.
+
+## Related Topics
+
+- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - a frame across the trunk, hop by hop.
+- [Router Essentials](/pages/networking/basics/router-essentials) - what the router does with every packet that changes VLAN.
+- [Network Segmentation Migration](/pages/networking/homelab-network/enterprise-segmentation-migration) - the move from a flat network to VLANs.
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - every cable and port, drawn.
+
+[^1]: [Raspberry Pi 3 Model B](https://www.raspberrypi.com/products/raspberry-pi-3-model-b/): "100 Base Ethernet".
+[^2]: [MikroTik, L3 Hardware Offloading](https://manual.mikrotik.com/docs/bridging-and-switching/l3-hardware-offloading/): it offloads some router features onto the switch chip, only the devices listed in its table support it, and some of them lack features including FastTrack and NAT connection offloading.

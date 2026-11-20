@@ -1,7 +1,8 @@
 ---
 title: "Networking Basics"
-description: "OSI model, TCP/IP, how routers work, DNS resolution, and IP addressing - the foundational concepts behind all network communication."
+description: "How a network works from the first cable up: layers, addresses, TCP and UDP, what a router does, VLANs, DNS and topologies, each taught with my own lab as the example."
 publishedAt: "2024-06-12"
+updatedAt: "2026-11-20"
 order: 1
 status: published
 ---
@@ -10,16 +11,47 @@ status: published
 
 These concepts sit underneath everything else in a homelab. Routers, containers, VMs, DNS, and service discovery all rely on the same core networking building blocks.
 
+I teach them here with my own lab as the example, from the first idea (what a cable carries) to a stateful firewall and VLAN tags on a trunk. Every step in a diagram says which **layer** it happens at, and [OSI Model](/pages/networking/basics/osi-model) explains the tags.
+
+The everyday picture runs through every page: a network is a **building** of flats. The **MAC address** is the label on a flat's door, the **IP address** is the street address, and the **port** is the person inside the flat.
+
+## The Cast
+
+These names appear in almost every diagram. The examples show the lab as it ran in November 2026.
+
+| Name in diagrams | What it is | Address |
+|---|---|---|
+| **Mac** | My admin MacBook, on a USB 10G adapter, plugged into the router's `ether2` | `10.0.20.100` (VLAN 20) |
+| **Router** | MikroTik RB5009: router, firewall, NAT, and a switch | `.1` in every VLAN, e.g. `10.0.20.1` |
+| **Switch** | MikroTik CRS310: a switch only (no routing for my traffic) | `10.0.20.2` (its own management) |
+| **Pi-hole** | The primary Pi-hole, a Raspberry Pi 3B on the router's `ether3` | `10.0.40.10` (VLAN 40) |
+| **Proxy** | A Raspberry Pi 4B on the router's `ether5`: Squid and apt-cacher-ng | `10.0.40.19` (VLAN 40) |
+| **ts-sbc** | A Tailscale subnet router, a Raspberry Pi 4B on the router's `ether4` | `10.0.20.13` (VLAN 20) |
+| **Rock Pi** | A Rock Pi 5B that runs monitoring, on the switch's `ether2` | `10.0.50.10` (VLAN 50) |
+| **pve-epyc / pve-ryzen** | The two Proxmox nodes | `10.0.10.20` / `10.0.10.21` (VLAN 10) |
+| **Caddy** | The reverse proxy, a container on pve-ryzen | `10.0.20.12` (VLAN 20) |
+
+MAC addresses are never written down. Diagrams use names instead: `mac:Mac` means "the admin Mac's MAC address", `mac:Router` means "the router's MAC address on that VLAN", and so on.
+
 ## In This Section
 
-- [OSI Model](/pages/networking/basics/osi-model) - how network traffic moves from application data down to the wire and back again.
-- [TCP/IP Protocols](/pages/networking/basics/tcp-ip-protocols) - reliable vs fast transport, handshakes, and where TCP and UDP fit.
-- [Router Essentials](/pages/networking/basics/router-essentials) - DHCP, NAT, firewall behavior, and what your router actually does.
-- [IP Addressing and Subnetting](/pages/networking/basics/ip-addressing-subnetting) - private address space, `/24` notation, and a practical homelab layout.
-- [DNS Fundamentals](/pages/networking/basics/dns-fundamentals) - resolution flow, local hostnames, and custom DNS entries.
-- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - isolating traffic at Layer 2 using Virtual LANs and trunk ports.
-- [Network Topologies](/pages/networking/basics/network-topologies) - understanding the performance benefits of Collapsed Core versus legacy Router-on-a-Stick designs.
+- [Network Words In A Nutshell](/pages/networking/basics/network-words) - every word in this section in learning order, each with an everyday comparison. Start here if ARP, NAT or DHCP are new to you.
+- [OSI Model](/pages/networking/basics/osi-model) - envelopes inside envelopes, the layers that matter in practice, and how a symptom tells you which layer broke.
+- [IP Addressing and Subnetting](/pages/networking/basics/ip-addressing-subnetting) - MAC, IP and port, private ranges, `/24` notation, ARP, and how my lab numbers its addresses.
+- [TCP/IP Protocols](/pages/networking/basics/tcp-ip-protocols) - ports, TCP and UDP, connection tracking, drop versus reject, and what a ping really proves.
+- [Router Essentials](/pages/networking/basics/router-essentials) - routing, DHCP, the firewall's three chains, NAT and time, then one web request followed hop by hop.
+- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - many networks on one cable: tags, access and trunk ports, routing between VLANs, and Proxmox node trunks.
+- [DNS Fundamentals](/pages/networking/basics/dns-fundamentals) - a name followed hop by hop through my Pi-holes, why a dead server makes everything flaky, and local names.
+- [Network Topologies](/pages/networking/basics/network-topologies) - north-south and east-west traffic, one router on one trunk, and what the hairpin really costs when measured.
 
 ## Suggested Reading Order
 
-Start with the OSI model if you want the mental model first, then move through TCP/IP, router behavior, addressing, and DNS. If you are troubleshooting a service that is already deployed, the router, addressing, and DNS pages are usually the fastest path.
+Read the pages in the order above. Each one only uses words from the pages before it.
+
+If you are troubleshooting a service that is already deployed, start with the last section of [OSI Model](/pages/networking/basics/osi-model): it shows how to find the broken layer. After that, the router, addressing, and DNS pages are usually the fastest path.
+
+## Related Topics
+
+- [Homelab Drawing Set](/pages/homelab-architecture/drawing-set) - the lab these examples come from, drawn sheet by sheet.
+- [Homelab Network Architecture](/pages/networking/homelab-network) - bridges, container and VM networking, security and troubleshooting.
+- [Why The Lab Is Built This Way](/pages/homelab-architecture/decisions) - the decisions behind the network.
