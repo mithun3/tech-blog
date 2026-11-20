@@ -1,8 +1,9 @@
 ---
 title: "Router Essentials"
-description: "What your router does for the network: DHCP, NAT, firewalling, and DNS relaying."
+description: "What a router does that a switch does not: routing, DHCP, the firewall's three chains, NAT and time, then one web request followed hop by hop out of the house."
 publishedAt: "2024-06-29"
-order: 3
+updatedAt: "2026-11-20"
+order: 5
 status: published
 ---
 
@@ -10,15 +11,62 @@ status: published
 
 The router is the gateway between your private local network and the internet. In a homelab it is usually doing several jobs at the same time.
 
+In my lab that router is a MikroTik RB5009. It owns the `.1` address in every VLAN, so every packet that changes VLAN or leaves the house passes through it:
+
 ```text
-Internet <-> [ASUS Router] <-> Your Devices
+Internet <-> [RB5009] <-> Your Devices
                |
+               |- Routing: moves packets between VLANs and out to the internet
                |- DHCP Server: assigns IP addresses to devices
+               |- Firewall: drops anything not explicitly allowed
                |- NAT: translates private <-> public IPs
-               |- Firewall: blocks unauthorized inbound traffic
-               |- WiFi: wireless access
-               `- DNS Relay: forwards DNS queries upstream
+               `- NTP: tells every VLAN the time
 ```
+
+Two jobs moved off the router. Wi-Fi now comes from the old ASUS router in access point mode ([The Old Router Became An Access Point](/pages/homelab-architecture/decisions/wifi-access-point)), and DNS has two Pi-holes of its own ([DNS Fundamentals](/pages/networking/basics/dns-fundamentals)).
+
+## Switch, Router, Firewall, NAT
+
+These are four different jobs, often in one box:
+
+| Box | Layer | What it decides | Reads | Rewrites |
+|---|---|---|---|---|
+| **Switch** (or bridge) | L2 | Which port should this frame go out of? | Destination MAC, VLAN tag | Nothing (except adding or removing VLAN tags at the edge) |
+| **Router** | L3 | Which network should this packet go to next? | Destination IP | The L2 envelope (new source and destination MAC), and TTL minus 1 |
+| **Firewall** | L3 + L4 | May this packet pass? | IPs, ports, interface, connection state | Nothing (it accepts or drops) |
+| **NAT** | L3 + L4 | Hide private addresses behind one public one | Source IP and port | Source IP and port (masquerade) |
+
+The **RB5009 is all four boxes in one**. My switch, a MikroTik CRS310, is **only a switch** for my traffic; it has an IP of its own just so I can manage it.
+
+### How A Switch Learns
+
+A switch learns where everyone is by watching source MACs:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Host A
+    participant SW as Switch<br/>(MAC table)
+    participant B as Host B
+    participant C as Host C
+    rect rgba(59, 130, 246, 0.14)
+    A->>SW: [L2] frame src<br/>mac:A dst mac:B
+    Note over SW: [L2] learns "mac:A is on port 1".<br/>mac:B unknown, so FLOOD to<br/>every port in this VLAN
+    SW->>B: [L2] copy of the frame
+    SW->>C: [L2] copy of the frame (C ignores it, not its MAC)
+    B->>SW: [L2] reply src<br/>mac:B dst mac:A
+    Note over SW: [L2] learns "mac:B is on port 2".<br/>mac:A is known:<br/>send to port 1 only
+    SW->>A: [L2] reply
+    end
+```
+
+## Routing
+
+A router connects different networks and moves packets between them, choosing the next hop by the destination IP address. At every hop it puts the packet into a new L2 envelope, with new MAC addresses, and lowers its hop counter, the TTL, by one.[^1] The TTL is what stops a packet looping forever.
+
+Think of the post office between buildings. It reads the street address, ignores the door label, and writes a new label for the next leg.
+
+The **gateway** is the router's address inside your subnet, and every device sends packets for other subnets there. [IP Addressing and Subnetting](/pages/networking/basics/ip-addressing-subnetting) shows how a device decides.
 
 ## DHCP
 
@@ -30,29 +78,68 @@ Device disconnects  -> IP gets recycled for reuse
 Static assignment   -> Router always gives the same IP to a known MAC address
 ```
 
-DHCP reservations are the practical middle ground for servers and infrastructure. They keep addresses stable without forcing manual configuration on every machine.
+It takes four messages: Discover, Offer, Request, Acknowledge, or "DORA".[^2] Here is my Mac plugging into the router's `ether2`, a port in VLAN 20:
 
-## NAT
-
-Your router usually has one public IP from the ISP, but many devices behind it. NAT makes that arrangement possible.
-
-```text
-Your PC (192.168.1.100:12345)
-         v router translates outbound source
-Internet sees: 203.0.113.45:60000  (router's public IP)
-         v router remembers the mapping
-Response arrives at: 203.0.113.45:60000
-         v router translates back
-Your PC receives at: 192.168.1.100:12345
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Mac as Mac
+    participant P2 as Router ether2<br/>access, PVID 20
+    participant BR as bridge1<br/>(switch chip)
+    participant CPU as Router CPU<br/>VLAN 20 + DHCP server
+    rect rgba(100, 116, 139, 0.14)
+    Mac->>P2: [L1] cable in: link up at 1<br/>Gbit/s (ether2 is a 1G port,<br/>the adapter could do 10G)
+    end
+    rect rgba(59, 130, 246, 0.14)
+    Mac->>P2: [L2] DHCPDISCOVER in a<br/>broadcast frame, src mac:Mac<br/>[L3] src 0.0.0.0<br/>dst 255.255.255.255<br/>[L4] udp 68 to 67
+    P2->>BR: [L2] untagged + PVID 20<br/>= this frame is VLAN 20
+    BR->>CPU: [L2] flooded to every<br/>VLAN 20 member,<br/>and the CPU
+    end
+    rect rgba(34, 197, 94, 0.14)
+    Note over CPU: [L3/L4] input chain:<br/>DHCP requests on udp 67, 68: ACCEPT
+    end
+    rect rgba(234, 179, 8, 0.14)
+    Note over CPU: [L7] the VLAN 20 DHCP server<br/>looks up mac:Mac:<br/>STATIC lease = 10.0.20.100
+    CPU->>Mac: [L7] DHCPOFFER 10.0.20.100
+    Mac->>CPU: [L7] DHCPREQUEST 10.0.20.100 (broadcast again: "I take this one")
+    CPU->>Mac: [L7] DHCPACK: 10.0.20.100/24, router 10.0.20.1, DNS<br/>10.0.40.254 and 10.0.40.11, lease 30 min
+    end
+    rect rgba(59, 130, 246, 0.14)
+    Mac->>BR: [L2] ARP probe: "does anyone else already<br/>use 10.0.20.100?" (no answer = safe)
+    Mac->>BR: [L2] ARP announcement: "10.0.20.100 is at<br/>mac:Mac" (everyone updates their cache)
+    end
+    Note over Mac,CPU: [L7] after 15 min the Mac renews by unicast to 10.0.20.1, and keeps the address
 ```
 
-Side effects of NAT:
+What to notice:
 
-- Your private IPs are not exposed to the internet.
-- Inbound connections are blocked by default.
-- Port forwarding opens a specific path for services you intentionally expose.
+- **DHCP happens before the device has an IP**, which is why it uses `0.0.0.0` and broadcast.[^2] It is also why there is one DHCP server per VLAN: broadcasts never cross the router.
+- **A static lease is still DHCP.** The router fixes the address (this MAC always gets that IP); nobody types it into the device. That is my rule for physical hardware, so the router stays the one source of truth. Containers and VMs set their own fixed address instead.
+- **The renewal at half the lease** is the DHCP default.[^2] With a 30-minute lease, the Mac asks again after 15 minutes.
+- **A device that asks for its old address** may get it back until that lease runs out. After you change a pool, that "stale lease" can hand out an address you thought was gone.
 
-## Stateful Firewall
+DHCP reservations are the practical middle ground for servers and infrastructure. They keep addresses stable without forcing manual configuration on every machine.
+
+## The Firewall's Three Doors
+
+RouterOS sorts every packet into one of three chains, by **who it is for**:[^3]
+
+```mermaid
+flowchart TD
+    IN["Packet arrives on some interface"] --> Q{{"Is the destination IP<br/>one of the router's OWN addresses?<br/>(10.0.x.1, the public address on ether1)"}}
+    Q -->|"yes, e.g. WinBox to 10.0.20.1"| INPUT["chain INPUT<br/>(traffic TO the router)"]
+    Q -->|"no, e.g. Mac to Pi-hole"| ROUTE["[L3] routing decision:<br/>which interface leads to the destination?"]
+    ROUTE --> FWD["chain FORWARD<br/>(traffic THROUGH the router)"]
+    FWD --> NAT{"Leaving via ether1 (WAN)?"}
+    NAT -->|"yes"| SRCNAT["srcnat: masquerade<br/>(source becomes the WAN address)"]
+    NAT -->|"no"| OUT1["out of the VLAN interface"]
+    SRCNAT --> OUT2["out of ether1"]
+    ROUTER["The router's OWN traffic<br/>(its NTP client, its DHCP client, its replies)"] --> OUTPUT["chain OUTPUT<br/>(no rules here: everything allowed)"]
+```
+
+Rules in a chain are read **top to bottom**; the **first rule that matches decides**. In my router, the input and forward chains both end in a rule that drops everything and logs it, so anything not explicitly allowed is refused.
+
+### Stateful Firewall
 
 A **Stateful Firewall** remembers the state of a connection (Stateful Packet Inspection tracks conversations, not just destination ports).
 
@@ -69,4 +156,123 @@ Unsolicited inbound (attack):
 Router checks:     "I don't recognise this - drop"
 ```
 
+[TCP/IP Protocols](/pages/networking/basics/tcp-ip-protocols) explains the connection states behind this, and FastTrack, the shortcut for connections already allowed.
+
+### A Knock From The Internet
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant X as Random host on the internet
+    participant RB as Router ether1<br/>(the public address)
+    X->>RB: [L4] TCP SYN to my<br/>public IP, some port
+    Note over RB: input chain: drop all<br/>unsolicited WAN input, and log it.<br/>forward chain: no port forward exists,<br/>and everything new from the WAN<br/>is dropped
+```
+
+Answers to *my* connections come back fine, because they are `established`. Only unsolicited traffic is refused, which is the whole point of a stateful firewall.
+
 That default-deny behavior is why home networks are reasonably safe even when most devices are not hardened individually.
+
+## NAT: Why The Internet Never Sees 10.0.x.x
+
+Your router usually has one public IP from the ISP, but many devices behind it. NAT makes that arrangement possible.
+
+```text
+Your PC (192.168.1.100:12345)
+         v router translates outbound source
+Internet sees: 203.0.113.45:60000  (router's public IP)
+         v router remembers the mapping
+Response arrives at: 203.0.113.45:60000
+         v router translates back
+Your PC receives at: 192.168.1.100:12345
+```
+
+Private addresses are not routed on the internet. So when a packet leaves through `ether1`, my router replaces the source address with its own WAN address and remembers the swap, in the same connection tracking table the firewall uses. That is **masquerade**: source NAT to whatever address the outgoing interface has right now. MikroTik made it for a public address that can change, which mine can, because the provider hands it out by DHCP.[^4]
+
+Side effects of NAT:
+
+- Your private IPs are not exposed to the internet.
+- Inbound connections are blocked by default.
+- Port forwarding opens a specific path for services you intentionally expose. I forward none; I reach the lab through Tailscale instead ([Tailscale, And No Open Ports](/pages/homelab-architecture/decisions/remote-access)).
+
+**Double NAT** is two NATs in a row: your router's and then another router in front of it. Until 16 November 2026 the provider's router sat in front of mine and did the swap a second time. Going out works fine like that. Coming in, and direct device-to-device connections, usually do not; Tailscale had to relay through its servers. Since the internet cable went straight into my router, its masquerade is the only NAT.
+
+## One Web Request, Hop By Hop
+
+Here is everything above working together: my Mac opens a website. DNS has already answered ([DNS Fundamentals](/pages/networking/basics/dns-fundamentals) shows that part).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Mac as Mac 10.0.20.100
+    participant RB as Router<br/>(route, filter, the only NAT)
+    participant Web as Website<br/>198.51.100.7:443
+    rect rgba(249, 115, 22, 0.14)
+    Mac->>RB: [L2] to mac:Router [L3]<br/>10.0.20.100 to<br/>198.51.100.7 [L4] TCP<br/>SYN, port 51000 to 443
+    Note over RB: [L3] route: not a local<br/>subnet, use the default route<br/>via the provider (ether1)<br/>[L4] forward chain, new:<br/>VLAN 20 may reach the internet: ACCEPT<br/>[L3/L4] masquerade:<br/>source becomes PUBLIC-IP<br/>(conntrack remembers)
+    RB->>Web: [L2] new frame out of ether1,<br/>through the fibre box,<br/>to the provider's gateway [L3]<br/>PUBLIC-IP to 198.51.100.7
+    Web->>RB: [L4] SYN-ACK
+    Note over RB: [L4] conntrack: this belongs<br/>to a known connection, state<br/>established<br/>[L3] un-NAT: destination<br/>becomes 10.0.20.100:51000<br/>FastTrack: the rest<br/>skips the filter
+    RB->>Mac: [L2] mac:Router to mac:Mac,<br/>VLAN 20 [L4] SYN-ACK
+    Mac->>Web: [L4] ACK (FastTracked from now on)
+    end
+    rect rgba(168, 85, 247, 0.14)
+    Mac->>Web: [TLS] handshake: the website proves its identity with a PUBLIC CA certificate
+    end
+    rect rgba(234, 179, 8, 0.14)
+    Mac->>Web: [L7] encrypted HTTP GET /
+    Web->>Mac: [L7] encrypted page
+    end
+```
+
+The website's address comes from a range set aside for documentation,[^6] and `PUBLIC-IP` stands for my real public address.
+
+What each envelope looks like at each hop:
+
+| Hop | L2 source → destination | VLAN tag | L3 source → destination | L4 ports | TTL |
+|---|---|---|---|---|---|
+| Mac → router (`ether2`) | `mac:Mac` → `mac:Router` | none on the cable (VLAN 20 by PVID) | `10.0.20.100` → `198.51.100.7` | `51000` → `443` | 64 |
+| Router → the provider (`ether1`) | `mac:Router-ether1` → `mac:provider-gateway` | none (`ether1` is not in the bridge) | `PUBLIC-IP` → `198.51.100.7` | `51000` → `443` (RouterOS keeps the port if it is free) | 63 |
+
+What to notice:
+
+- The **MAC addresses changed at the router**, the **source IP changed once** (the NAT), and the **destination IP never**.
+- The router never sees the page: TLS encrypts it end to end. It sees only IPs, ports and the connection state.
+- **FastTrack** is why a big download does not load the router's CPU much: after the first packets, the connection is handled on a fast path.
+
+`traceroute -n 1.1.1.1` shows the path from the Mac: the first hop is `10.0.20.1`, then the provider's network.
+
+## Time
+
+My router is also the time server for every VLAN. Each Linux host points its time client at its own VLAN's gateway, and the router syncs itself from the public NTP pool:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Pi as Pi-hole (VLAN 40)
+    participant R as Router 10.0.40.1<br/>NTP server
+    participant P as pool.ntp.org
+    rect rgba(234, 179, 8, 0.14)
+    R->>P: [L7] the router syncs itself (output chain is open, then NAT)
+    Pi->>R: [L7] NTP request to its<br/>gateway 10.0.40.1, udp 123
+    Note over R: [L3/L4] input chain: NTP from<br/>the internal VLANs (never<br/>from the WAN): ACCEPT
+    R->>Pi: [L7] the time
+    end
+```
+
+So even the VLANs with no internet at all keep the right time.[^5] That matters more than it seems: TLS certificates have dates, logs are compared across hosts, and backups run on the clock.
+
+## Related Topics
+
+- [Network Words In A Nutshell](/pages/networking/basics/network-words) - router, gateway, firewall, NAT and DHCP in one page.
+- [TCP/IP Protocols](/pages/networking/basics/tcp-ip-protocols) - connection tracking, FastTrack, and drop versus reject.
+- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - routing between VLANs, and the traffic the router never sees.
+- [Network Security](/pages/networking/homelab-network/network-security) - the layered security model built on top of this.
+- [ASUS Merlin - Router Firmware](/pages/networking/router-firmware) - the router I used before, and what I ran on it.
+
+[^1]: [RFC 791, Internet Protocol](https://www.rfc-editor.org/rfc/rfc791), section 3.1, "Time to Live": the field must be decreased at each point that the internet header is processed.
+[^2]: [RFC 2131, Dynamic Host Configuration Protocol](https://www.rfc-editor.org/rfc/rfc2131): section 4.1 (a client with no address yet sends from source address 0), section 4.4.1 (DHCPDISCOVER goes to the broadcast address) and section 4.4.5 (T1 defaults to half the lease).
+[^3]: [MikroTik, Filter](https://manual.mikrotik.com/docs/firewall-and-quality-of-service/firewall/filter/): `input` processes packets addressed to the router, `forward` packets that pass through it, and `output` packets the router itself sends.
+[^4]: [MikroTik, NAT](https://manual.mikrotik.com/docs/firewall-and-quality-of-service/firewall/nat/): masquerade replaces the source address with the address of the interface the packet leaves through, and is made for a public address that can change.
+[^5]: [RFC 5905, Network Time Protocol Version 4](https://www.rfc-editor.org/rfc/rfc5905) is the protocol; UDP port 123 is assigned to it.
+[^6]: [RFC 5737, IPv4 Address Blocks Reserved for Documentation](https://www.rfc-editor.org/rfc/rfc5737): `192.0.2.0/24`, `198.51.100.0/24` and `203.0.113.0/24`. The NAT example above uses the last one.
