@@ -18,7 +18,7 @@ if (!fs.existsSync(PAGES)) {
 }
 
 // Keep in sync with the mdxComponents map in app/pages/[[...slug]]/page.tsx.
-const MDX_COMPONENTS = new Set(['Callout', 'Video', 'Audio', 'Mermaid'])
+const MDX_COMPONENTS = new Set(['Callout', 'Video', 'Audio', 'Mermaid', 'LabSheet'])
 const STATUSES = new Set(['published', 'draft', 'archived'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 

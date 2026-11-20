@@ -14,6 +14,7 @@ import { Video } from '@/components/mdx/video'
 import { Audio } from '@/components/mdx/audio'
 import { Callout } from '@/components/mdx/callout'
 import { Mermaid } from '@/components/mdx/mermaid'
+import { LabSheet } from '@/components/mdx/lab-sheet'
 import { visit } from 'unist-util-visit'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ const mdxComponents = {
   Audio,
   Callout,
   Mermaid,
+  LabSheet,
 }
 
 // ─── Remark Plugin for Mermaid ────────────────────────────────────────────────
