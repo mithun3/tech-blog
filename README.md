@@ -82,7 +82,7 @@ public/
 
 | Route | Description |
 |---|---|
-| `/` | Home — hero + topics grid |
+| `/` | Home — hero, topics grid, and the newest wiki pages (by `publishedAt`) and blog post |
 | `/blog` | Blog index |
 | `/blog/[slug]` | Individual blog post |
 | `/pages` | Wiki index |
