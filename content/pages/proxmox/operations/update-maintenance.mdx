@@ -2,12 +2,20 @@
 title: "Update And Maintenance"
 description: "A practical maintenance rhythm for updating the Proxmox host, LXC containers, and service workloads without turning a quiet Sunday into a rebuild session."
 publishedAt: "2024-12-01"
-updatedAt: "2026-06-08"
+updatedAt: "2026-11-21"
 order: 4
-status: published
+status: archived
 ---
 
 # Update And Maintenance
+
+<Callout type="warning">
+
+This is how I updated the lab by hand: a snapshot of every container first, then the host, then the containers in a loop. It still works for a single host. The lab is now updated by Ansible, one host at a time: [Monthly Updates With Ansible](/pages/proxmox/operations/monthly-updates).
+
+One check below trusts `/var/run/reboot-required` to say a new kernel needs a reboot. On my Proxmox hosts that file does not appear after a kernel update, so the new page compares the running kernel with the installed ones instead.
+
+</Callout>
 
 Homelab failures often arrive during maintenance windows, not during the quiet weeks in between them.
 

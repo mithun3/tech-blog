@@ -2,7 +2,7 @@
 title: "Proxmox Setup"
 description: "Host bring-up guides for Proxmox: hardware planning, BIOS choices, installation, and the first decisions that shape the rest of the lab."
 publishedAt: "2024-10-15"
-updatedAt: "2025-01-30"
+updatedAt: "2026-11-21"
 order: 2
 status: published
 ---
@@ -27,16 +27,17 @@ Use this section when the question is not "what is Proxmox?" but "how do I stand
 ## In This Section
 
 - [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the destructive preflight for second-hand disks before they earn a place in Proxmox, TrueNAS, or any other pool you would rather not rebuild.
-- [Homelab Installation](/pages/proxmox/setup/homelab-installation) — BIOS choices, installer path, storage layout, and the early host decisions that are easier to get right before the lab depends on them.
-- [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot) — Creating an ultra-low latency baremetal proving ground on NVMe drives while preserving Proxmox ZFS RAID1 redundancy.
+- [How I Build A Node Now](/pages/proxmox/setup/building-a-node) — how my nodes are built today: a ZFS mirror, an out-of-band VLAN with no internet, and a playbook for everything after the installer.
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) — my first install, Proxmox VE 8 on a flat home network: BIOS choices, installer path and storage layout. Kept as it was.
+- [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot) — a Rocky Linux proving ground next to Proxmox on the same NVMe drives. Retired: no host runs Rocky Linux now.
 
 ## How To Read It
 
-Start here when you are building or rebuilding the Proxmox host itself.
+Start here when you are building or rebuilding a node.
 
-If used disks are part of the storage plan, read [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you let those drives near a production pool. Then move into [Homelab Installation](/pages/proxmox/setup/homelab-installation) for the host bring-up itself.
+If used disks are part of the storage plan, read [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) before you let those drives near a production pool. Then read [How I Build A Node Now](/pages/proxmox/setup/building-a-node) for the node itself.
 
-If your hardware must serve dual duty for low-latency baremetal testing, follow up the installation with [Dual Boot: Proxmox & Rocky Linux](/pages/proxmox/setup/rocky-linux-dual-boot).
+[Homelab Installation](/pages/proxmox/setup/homelab-installation) is the simpler first install. For one host on a home network, its BIOS settings and installer steps are still a good start.
 
 If remote recovery matters, pair that bring-up with [Wake-on-LAN For Proxmox](/pages/hardware/jetkvm/wake-on-lan-for-proxmox) before you lock down the final firmware and power settings.
 

@@ -2,11 +2,20 @@
 title: "PVE 9.2 Upgrade Runbook"
 description: "The Proxmox VE 9.1.6 to 9.2 runbook: PBS backups, container updates, host upgrade, NVIDIA 595.71.05, post-upgrade checks, and recovery paths."
 publishedAt: "2026-06-08"
+updatedAt: "2026-11-21"
 order: 1
 status: published
 ---
 
 # PVE 9.2 Upgrade Runbook
+
+<Callout type="info">
+
+Since this was written: the page says 580.x drivers cannot build against kernel 7.0. That was true of the 580 driver I had then, 580.126.09. The lab now runs 580.178.04 on the 7.0 kernel, on the host and in the GPU container. It comes from NVIDIA's R580 branch, which NVIDIA lists as a long-term support branch.[^r580]
+
+The PBS container, the package cache container and the `192.168.50.x` addresses below are from June 2026. How the lab is updated now is on [Monthly Updates With Ansible](/pages/proxmox/operations/monthly-updates).
+
+</Callout>
 
 This was the planned work: move the host from Proxmox VE 9.1.6 to 9.2 on the same Debian Trixie base, with PBS backups taken first and GPU driver work handled deliberately after the host moved to kernel 7.0.
 
@@ -587,3 +596,4 @@ reboot
 - [GPU Passthrough On Proxmox](/pages/gpu-ai/gpu-passthrough) - the broader NVIDIA host/container model.
 
 [^1]: Proxmox VE 9.2 release notes list the major component changes, including Linux kernel 7.0, QEMU 11.0, LXC 7.0, and ZFS 2.4: https://pve.proxmox.com/wiki/Roadmap#Proxmox_VE_9.2
+[^r580]: [NVIDIA Data Center Documentation, "Supported Drivers and CUDA Toolkit Versions"](https://docs.nvidia.com/datacenter/tesla/drivers/supported-drivers-and-cuda-toolkit-versions.html): R580 is listed as a Long Term Support Branch, with end of life in June 2028.

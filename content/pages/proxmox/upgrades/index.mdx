@@ -2,6 +2,7 @@
 title: "Proxmox Upgrades"
 description: "Major Proxmox upgrade runbooks, post-upgrade checks, and RCA notes for when a kernel or driver change exposes hidden host assumptions."
 publishedAt: "2026-06-08"
+updatedAt: "2026-11-21"
 order: 5
 status: published
 ---
@@ -12,7 +13,7 @@ Routine updates are one thing. A Proxmox point release with a new kernel is anot
 
 This section is for the higher-risk path: the work that starts with a backup window, touches the host kernel, crosses GPU driver boundaries, and can expose old assumptions in networking, initramfs, or hardware drivers.
 
-The current story has a very specific order:
+The June 2026 story has a very specific order:
 
 ```text
 PVE 9.2 upgrade
@@ -27,7 +28,7 @@ The boot hang is not a separate incident. It is the side effect that came into v
 
 ## In This Section
 
-- [PVE 9.2 Upgrade Runbook](/pages/proxmox/upgrades/pve-9-2-upgrade) - the pre-flight checks, PBS backup window, container package updates, host upgrade, NVIDIA 595.71.05 driver sync, verification, cleanup, and recovery paths.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/upgrades/pve-9-2-upgrade) - the pre-flight checks, PBS backup window, container package updates, host upgrade, NVIDIA 595.71.05 driver sync, verification, cleanup, and recovery paths. The lab has since gone back to the 580 driver, 580.178.04.
 - [Kernel 7 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca) - the post-upgrade failure where kernel `7.0.6-2-pve` auto-loaded `nova_core`, blocked `udevadm settle`, and exposed a broken `eth0`/missing `vmbr0` network config.
 
 ## How To Read It
@@ -36,7 +37,7 @@ Read the PVE 9.2 runbook first. It is the planned work.
 
 Read the RCA second. It is what the reboot taught the machine.
 
-If you are not doing a major upgrade yet, start with [Update And Maintenance](/pages/proxmox/operations/update-maintenance). That page covers the normal maintenance rhythm. Come back here when the operation includes a new kernel, DKMS, NVIDIA driver changes, or network-interface risk.
+If you are not doing a major upgrade yet, start with [Monthly Updates With Ansible](/pages/proxmox/operations/monthly-updates). That page covers the normal update rhythm. [Update And Maintenance](/pages/proxmox/operations/update-maintenance) is the older one, by hand on the host. Come back here when the operation includes a new kernel, DKMS, NVIDIA driver changes, or network-interface risk.
 
 ## Related Topics
 

@@ -1,0 +1,117 @@
+---
+title: "Monthly Updates With Ansible"
+description: "How the lab is updated now: one playbook, one host at a time, a canary first, and a kernel check the reboot flag could not give me."
+publishedAt: "2026-11-21"
+order: 4
+status: published
+---
+
+# Monthly Updates With Ansible
+
+My old update routine ran on the Proxmox host. A snapshot of every container first, then the host, then each container in a loop. [Update And Maintenance](/pages/proxmox/operations/update-maintenance) is that routine.
+
+It stopped fitting the lab. There are two nodes and a handful of small boards now, and most of them have no internet of their own.
+
+So the updates come from my Mac: one playbook, run against one host at a time. The plan is once a month. The first full run was on 8 November 2026, and this page is that run, with its lessons built in.
+
+<LabSheet sheet="services" focus="chain-egress" caption="The way out, on sheet 3. Every package on this page comes through it." />
+
+## What The Playbook Does
+
+On each host, five steps:
+
+1. Upgrade every package, allowing apt to remove one when it has to. That is what Proxmox asks for: a plain `apt upgrade` can leave a Proxmox host half upgraded.[^full-upgrade]
+2. On the Pi-hole boards, run Pi-hole's own updater, but only when a part of Pi-hole is behind.
+3. Look for `/var/run/reboot-required`.
+4. If it is there, reboot. Unless the host is a Proxmox node.
+5. On a Proxmox node with the flag, print a reminder to reboot it by hand.
+
+Every package comes through the [package cache](/pages/services/package-cache-on-a-pi), like everything else in the lab.
+
+Apps that are pinned to a version, like the monitoring images, are not apt's business. Their pins are bumped in their own role, on purpose.
+
+## One Host At A Time
+
+I could point the playbook at everything at once. I don't. The first run showed me why:
+
+- The hosts come in a different order every time. A full run could reboot the proxy, or a node, before the canary has even been tried.
+- The small boards each have their own sudo password, and one run takes only one.
+- With one host per run, a failure shows at once, and nothing after it has changed.
+
+So it is one command per host:
+
+```bash
+ansible-playbook ansible/playbooks/update_all.yml --limit searxng
+```
+
+Before the first host, and after every host, I ask Prometheus one question: is anything down?
+
+```bash
+curl -s 'http://10.0.50.10:9090/api/v1/query?query=up%3D%3D0%20or%20probe_success%3D%3D0'
+```
+
+An empty `result` means nothing is. Anything else, I stop and fix that first.
+
+## The Order
+
+1. **The canary**, `searxng`, a small container. If its update goes wrong, nothing else has changed yet.
+2. **The other guests**, one by one. If Docker itself is among the updates, their apps restart with it.
+3. **The reverse proxy.** apt leaves its custom Caddy build alone.
+4. **The two Tailscale routers**, one after the other, so one of them is always serving.
+5. **The small boards.** The proxy first. Then the Pi-holes, the secondary before the primary, so one of them always answers.
+6. **The node, last.** Its guests keep running while it updates. When it needs a reboot, I do that by hand.
+
+That reboot takes the front door and the home hub away for about three minutes, so the household hears about it first. The run sits in an early-afternoon window, and I budget 90 minutes for it.
+
+## The Reboot Flag That Never Came
+
+The old routine trusted `/var/run/reboot-required`. If the file was there, reboot. If not, done.
+
+After the first run I looked at which hosts actually write that file. Debian's kernel packages do not. A hook in `/etc/kernel/postinst.d/` does, such as the one `unattended-upgrades` installs. On 8 November 2026 exactly one host in my lab had such a hook: the proxy board.
+
+So on every other host a new kernel could be installed, the flag would stay quiet, and the Proxmox reminder would never print.
+
+The check I use now does not ask the flag. It compares the running kernel with the newest one installed:
+
+```bash
+r=$(uname -r)
+f=$(echo "$r" | sed "s/^[^+]*+//; s/^.*-pve$/-pve/")
+n=$(ls /lib/modules | grep -F -- "$f" | sort -V | tail -1)
+if [ "$r" = "$n" ]; then
+  echo "$(hostname): running $r, the newest installed: no reboot"
+else
+  echo "$(hostname): running $r, installed $n: REBOOT DUE"
+fi
+```
+
+The second line picks out the kernel's kind, so a Proxmox kernel is only compared with Proxmox kernels, and a Raspberry Pi kernel with Raspberry Pi kernels. Containers are left out: they run their node's kernel.
+
+## The GPU Node Gets Its Own Window
+
+The node with the GPUs is not in the monthly run. Two rules keep it out:
+
+- **The driver module is built before the reboot.** `dkms status` must show the NVIDIA module `installed` for the new kernel before the node boots into it.
+- **The host and the GPU container run the same driver.** Today that is 580.178.04, on both.
+
+[The PVE 9.2 upgrade](/pages/proxmox/upgrades/pve-9-2-upgrade) in June 2026 is where both rules mattered most.
+
+One more check belongs to that window. The blacklist that keeps the open-source NVIDIA drivers off the GPUs has to be inside the new initramfs. [Kernel 7 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca) is why.
+
+## Rolling Back
+
+- **Packages have no undo.** A bad package is fixed forward: a newer one, or an older version pinned from the mirror.
+- **A kernel that misbehaves** on a Proxmox node: boot the previous kernel and pin it with `proxmox-boot-tool kernel pin <version>`, then run `proxmox-boot-tool refresh`. Without the refresh, the pin does not reach the boot partitions. Unpin once a fixed kernel arrives.[^pin]
+- **`apt -f install` is not a rollback.** It retries the same step that failed.
+
+The old routine trusted a flag. This one asks the kernel.
+
+## Related Topics
+
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - the old routine, by hand on the host.
+- [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi) - where every package comes from.
+- [PVE 9.2 Upgrade Runbook](/pages/proxmox/upgrades/pve-9-2-upgrade) - a major upgrade, which is a window of its own.
+- [Kernel 7 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca) - why the GPU node's blacklist matters.
+- [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) - why a playbook at all.
+
+[^full-upgrade]: [Proxmox VE Administration Guide, "System Software Updates"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#system_software_updates): "apt upgrade may result in a partially upgraded or broken package state", because `apt full-upgrade` can remove existing packages to satisfy dependencies and `apt upgrade` cannot.
+[^pin]: [Proxmox VE Administration Guide, "Host Bootloader"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#sysboot_kernel_pin): `proxmox-boot-tool kernel pin` pins the system to a kernel version, and after setting or clearing a pin the ESPs must be synchronised with the `refresh` subcommand.

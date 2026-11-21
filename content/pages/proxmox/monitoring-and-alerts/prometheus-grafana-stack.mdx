@@ -2,11 +2,18 @@
 title: "Prometheus And Grafana Stack On Proxmox"
 description: "Build a dedicated monitoring LXC, install host exporters, configure Prometheus scrape targets, and bring Grafana online for a Proxmox homelab."
 publishedAt: "2025-01-28"
+updatedAt: "2026-11-21"
 order: 1
-status: published
+status: archived
 ---
 
 # Prometheus And Grafana Stack On Proxmox
+
+<Callout type="warning">
+
+This is how I ran monitoring at first: a container on the same Proxmox host it was watching. It still works if that is what you want. Monitoring now has a board of its own: [Monitoring On Its Own Board](/pages/proxmox/monitoring-and-alerts/monitoring-on-its-own-board). Why it moved is on [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts).
+
+</Callout>
 
 This page owns the actual stack build.
 

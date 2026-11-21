@@ -1,0 +1,169 @@
+---
+title: "How I Build A Node Now"
+description: "How my Proxmox nodes are built today: a hand install on a ZFS mirror, an out-of-band VLAN with no internet, and a playbook for everything after."
+publishedAt: "2026-11-21"
+order: 2
+status: published
+---
+
+# How I Build A Node Now
+
+My first Proxmox host went in by hand, on the home network, with an address picked from the router's range. [Homelab Installation](/pages/proxmox/setup/homelab-installation) is that install, and it still works.
+
+My nodes are not built that way any more.
+
+The installer is still mine to click through. Everything after it is a playbook. Why the lab is built from code is on [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code), and why there are two nodes and no cluster is on [Two Nodes, No Cluster](/pages/homelab-architecture/decisions/standalone-nodes). This page is the how.
+
+<LabSheet sheet="logical" focus="pve-epyc pve-ryzen vlan-10" caption="Both nodes on the VLAN 10 bus of sheet 2." />
+
+## What Changed
+
+| | My first install | Now |
+|---|---|---|
+| Proxmox | VE 8 | VE 9 |
+| Boot disks | one NVMe, a mirror "later" | a ZFS mirror from the first boot |
+| Network | the home LAN, one flat `192.168.x.x` | VLAN 10, on a VLAN trunk |
+| Internet | direct | none, only through a proxy |
+| After the installer | the web UI | a playbook |
+
+## Before The Installer
+
+If second-hand disks are going into the node, they go through [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) first.
+
+Then the USB stick. Some of my install sticks failed their media check, and the likely cause was boring: a computer mounted the stick again after it was written, and changed it.
+
+So now the stick gets checked twice, and nothing else gets to touch it:
+
+```bash
+# 1. The ISO matches the hash on the download page
+shasum -a 256 proxmox-ve_9.2-1.iso
+
+# 2. Write it (macOS; find the stick with diskutil list)
+sudo dd if=proxmox-ve_9.2-1.iso of=/dev/rdiskN bs=4m
+
+# 3. Read the stick back and compare: same hash as step 1
+sudo head -c $(stat -f%z proxmox-ve_9.2-1.iso) /dev/rdiskN | shasum -a 256
+```
+
+On Windows, Rufus works too, in DD mode, not ISO mode.
+
+After step 3 the stick goes straight into the server. Not back into the Mac, not into a Windows PC "just to check".
+
+## The Install
+
+Three choices, and one thing to check.
+
+- **Filesystem:** `zfs (RAID1)` across both NVMe drives, compression `zstd`. I leave the other advanced options alone.
+- **Address:** a static one in VLAN 10, for example `10.0.10.21/24` with gateway `10.0.10.1`. VLAN 10 has no DHCP at all, so there is nothing to pick from.
+- **Hostname:** this one is for life. Proxmox keeps each guest's configuration under the node's name, and its own guide says a node should only be renamed when it is empty.[^rename]
+
+The thing to check is the network card. On my second node the installer picked the 25G card I was not using yet, and I had to fix the bridge from the server's remote console. The cheaper fix is to look at that dropdown before clicking Next.
+
+## The Network It Lives On
+
+This is the part that changed most.
+
+The first host sat on the home network. One flat range, one bridge, everything able to reach everything. [Linux Bridges in Proxmox](/pages/networking/homelab-network/linux-bridges-proxmox) draws it.
+
+Now each node has one cable to the switch, and that cable is a trunk. The host's own address is untagged, in VLAN 10. Every guest's network card carries a tag for its own VLAN. [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains#proxmox-one-trunk-per-node) explains the pattern, and the two mistakes it makes easy.
+
+On the host that is one VLAN-aware bridge. The playbook writes it. This is Node 1's:
+
+```text
+auto vmbr0
+iface vmbr0 inet static
+    address 10.0.10.20/24
+    gateway 10.0.10.1
+    bridge-ports enp66s0f1np1
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids 2-4094
+```
+
+It is the same shape as the VLAN-aware bridge in the Proxmox admin guide.[^vlan]
+
+`bridge-ports` is the uplink card, and the playbook has no default for it. It stops unless I name the card for that node, and it checks the card exists first. A wrong guess here takes the host off the network, so a guess is not allowed.
+
+The playbook removes the installer's own `vmbr0` first, writes this one, and applies it with `ifreload -a`, no reboot.[^ifreload] I run that part from the remote console, never over SSH. The SSH session can drop when the bridge reloads, and if I named the wrong card, the console is the only way back in.
+
+One cable per node, standard 1500-byte frames, no bonding. Nothing clever.
+
+### The Lockout
+
+Node 1 moved onto its trunk on 29 October 2026. The first try, ten days earlier, locked me out.
+
+Proxmox was not the problem. The router held a static ARP entry for the node's address, typed in by hand back when that machine ran Rocky Linux. It tied the address to the old network card. When the bridge moved to the new card, the router kept pointing the node's address at the old one, and my Mac reaches that network through the router.
+
+Now the order is fixed: remove the static entry first, then move the bridge. The router does normal ARP on that VLAN, so it learns the new card by itself.
+
+### No Internet, On Purpose
+
+VLAN 10 is OOBM, my out-of-band network. It holds the hosts, the server consoles and the NAS admin pages, and it has no route to the internet.
+
+Packages still have to come from somewhere, so they come through one small proxy board:
+
+- **apt on the host** uses the package cache, through the same file every Debian machine in the lab gets. [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi) covers it.
+- **Proxmox's own downloads** go through the datacenter `http_proxy` option, pointed at the same proxy.[^proxy] In my lab that includes the container templates.
+
+If the proxy board is down, the node waits for its updates. That is the trade.
+
+## Everything After The Installer
+
+From the admin Mac, one playbook prepares a node:
+
+- the no-subscription repository on, the enterprise one off
+- the "No valid subscription" pop-up removed, and kept removed after upgrades
+- the apt proxy file and the datacenter proxy
+- the bridge above, only when I ask for that part, with the console open
+- a dedicated API user with a custom role, for creating guests
+
+Ansible checks the node's API against the node's own CA certificate, copied once from `/etc/pve/pve-root-ca.pem`.
+
+On the GPU node the same playbook does three more things. It loads the VFIO modules for the disk controller that goes to TrueNAS, blacklists the open-source NVIDIA drivers (the reason is in [Kernel 7 Boot Hang RCA](/pages/proxmox/upgrades/kernel-7-boot-hang-rca)), and installs two small services that create the GPU device nodes before any container starts.
+
+There is no GRUB step. That node boots from ZFS with systemd-boot, so a kernel command line would go in `/etc/kernel/cmdline`, not `/etc/default/grub`.[^boot]
+
+### The API Token
+
+New guests are created through the Proxmox API, with a token. The token is the one step I still do by hand, once per node, because Proxmox shows its secret only once.[^token]
+
+```bash
+pveum user token add <user>@pve <token-name> --privsep 1 --expire $(date -d '+1 year' +%s)
+```
+
+Two settings matter:
+
+- `--privsep 1` makes it a privilege-separated token. Its rights are the overlap of the user's rights and its own, so it can never do more than I granted it.[^token]
+- `--expire` gives it an end date. Mine get a year.
+
+The playbook then grants the token rights on exactly what it needs: the guests it is meant to create, their storage, and the VLANs they use. On Node 2 that comes to ten paths. Anything more is a bug.
+
+Guests I built by hand get no rights at all, so the token cannot touch them.
+
+## What Proxmox Owns Now
+
+Less than it used to.
+
+Each node keeps its two boot disks. The family's data sits on disks behind a controller that is passed straight through to a TrueNAS VM, so Proxmox never touches them. That story is on [Family Data Gets Three Copies](/pages/homelab-architecture/decisions/family-data).
+
+The pools I used to build on the host itself, in [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs), are gone.
+
+The installer is still a few screens of clicking. After that, almost everything about a node is written down in one repository, and that is the point.
+
+## Related Topics
+
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) - my first install, on a flat home network.
+- [Linux Bridges in Proxmox](/pages/networking/homelab-network/linux-bridges-proxmox) - the flat network itself.
+- [VLANs & Broadcast Domains](/pages/networking/basics/vlans-and-broadcast-domains) - the node trunk, from the network side.
+- [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi) - the proxy every node updates through.
+- [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) - the disk checks before any of this.
+- [The Lab Is Built From Code](/pages/homelab-architecture/decisions/lab-as-code) - why a playbook.
+- [Two Nodes, No Cluster](/pages/homelab-architecture/decisions/standalone-nodes) - why two standalone nodes.
+
+[^rename]: [Proxmox VE Administration Guide, "Files"](https://pve.proxmox.com/pve-docs/chapter-pmxcfs.html#_files): guest configurations live in `nodes/<NAME>/qemu-server/` and `nodes/<NAME>/lxc/`. [Proxmox VE wiki, "Renaming a PVE node"](https://pve.proxmox.com/wiki/Renaming_a_PVE_node): the rename has to be done on an empty node.
+[^vlan]: [Proxmox VE Administration Guide, "VLAN on the Host"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#_vlan_on_the_host): the example VLAN-aware bridge sets `bridge-vlan-aware yes` and `bridge-vids 2-4094`.
+[^ifreload]: [Proxmox VE Administration Guide, "Live-Reload Network with ifupdown2"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#_live_reload_network_with_ifupdown2): changes to the network configuration can be applied by running `ifreload -a`.
+[^proxy]: [`datacenter.cfg(5)`, `http_proxy`](https://pve.proxmox.com/pve-docs/datacenter.cfg.5.html#_options): "Specify external http proxy which is used for downloads".
+[^token]: [Proxmox VE Administration Guide, "API Tokens"](https://pve.proxmox.com/pve-docs/chapter-pveum.html#pveum_tokens): the token value is only shown once, when it is generated; a privilege-separated token's effective permissions are the intersection of the user's and the token's; a token can be given an expiry date.
+[^boot]: [Proxmox VE Administration Guide, "Host Bootloader"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#sysboot): EFI systems installed with ZFS as the root filesystem use systemd-boot unless Secure Boot is enabled, and systemd-boot reads the kernel command line from `/etc/kernel/cmdline`.
