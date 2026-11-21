@@ -2,12 +2,20 @@
 title: "Storage And ZFS"
 description: "Day-two storage work on Proxmox: understanding rpool, secondary pools, compression, scrubs, and the risky-but-sometimes-necessary pool expansion tasks that happen after the install." 
 publishedAt: "2024-11-28"
-updatedAt: "2025-01-30"
+updatedAt: "2026-11-21"
 order: 1
-status: published
+status: archived
 ---
 
 # Storage And ZFS
+
+<Callout type="warning">
+
+This is the storage I first ran on the host itself: a `backup` mirror and a `naspool`, both managed by Proxmox. Neither exists now. The data disks belong to TrueNAS, and Proxmox keeps only its boot mirror: [How I Build A Node Now](/pages/proxmox/setup/building-a-node) and [Family Data Gets Three Copies](/pages/homelab-architecture/decisions/family-data).
+
+Two things below are wrong for a ZFS install, and I have left them as they were written. The dataset names at the top (`pve-root`, `pve-data`, `pve-swap`) come from an LVM install; a ZFS install has `rpool/ROOT/pve-1` and `rpool/data`.[^zfs-root] And to replace a failed disk in a boot mirror, follow the Proxmox guide, not the bare `zpool replace` near the end: the new disk needs its boot partitions too.[^failed-disk]
+
+</Callout>
 
 Storage looks tidy during installation because the installer hides most of the consequences behind a few sensible defaults.
 
@@ -196,8 +204,8 @@ zpool set autoexpand=on rpool
 
 # Tell ZFS to re-read the new partition size for each vdev
 # (use exact by-id paths from: zpool status rpool)
-zpool online -e rpool nvme-Force_MP600_20148230000128563050-part3
-zpool online -e rpool nvme-nvme.1e4b-323530333237373535323030313738-53504343204d2e32205043496520535344-00000001-part3
+zpool online -e rpool <first-disk-by-id>-part3
+zpool online -e rpool <second-disk-by-id>-part3
 ```
 
 ### Verify The Result
@@ -295,3 +303,6 @@ zfs set compression=zstd rpool/pve-data
 - [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — where scrub cadence, snapshots, and GPU-safe maintenance windows intersect.
 - [Storage And Snapshots](/pages/proxmox/basics/storage-and-snapshots) — the conceptual storage explanation before the operational layer.
 - [Used Drive Validation Before Deployment](/pages/proxmox/setup/used-drive-validation) — the destructive disk preflight that should happen before reused drives join a real pool.
+
+[^zfs-root]: [Proxmox VE Administration Guide, "Installation as Root File System"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#_installation_as_root_file_system): the installer puts the root file system on `rpool/ROOT/pve-1` and creates `rpool/data` for guest images. The LVM layout, with the volumes `root`, `data` and `swap` in the volume group `pve`, is in the [LVM section](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#chapter_lvm).
+[^failed-disk]: [Proxmox VE Administration Guide, "Changing a failed device"](https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#sysadmin_zfs_change_failed_dev): copy the partition table from a healthy disk, replace the ZFS partition, then make the new disk bootable with `proxmox-boot-tool`.

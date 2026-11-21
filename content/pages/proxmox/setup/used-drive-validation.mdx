@@ -2,6 +2,7 @@
 title: "Used Drive Validation Before Deployment"
 description: "Test second-hand hard drives before they touch a production pool so old disks do not arrive in the lab disguised as cheap capacity."
 publishedAt: "2024-12-11"
+updatedAt: "2026-11-21"
 order: 1
 status: published
 ---
@@ -12,7 +13,7 @@ This page is for the part of homelab storage that is cheap right up until it bec
 
 Used drives can be a perfectly rational buy. They can also be ten-year-old roulette if you let price talk louder than evidence. The goal here is simple: do the destructive testing before the drive earns a place in Proxmox, TrueNAS, or any pool you would be annoyed to rebuild.
 
-If you are still building the host itself, keep [Homelab Installation](/pages/proxmox/setup/homelab-installation) open as the next page. If the host already exists and you are preparing disks for pool work, this page is the right starting point.
+If you are still building the host itself, keep [How I Build A Node Now](/pages/proxmox/setup/building-a-node) open as the next page. If the host already exists and you are preparing disks for pool work, this page is the right starting point.
 
 ## Why This Belongs In Setup
 
@@ -35,6 +36,8 @@ The testing flow below is deliberately progressive.
 | 5 | performance and temperature checks | degraded throughput and cooling problems | under an hour |
 
 That sounds slow because it is slow. The point is to spend the time here instead of spending it during a degraded resilver later.
+
+One note on that `badblocks` figure. The `-wsvb 4096` command below writes four patterns and reads each one back, so it goes over the whole disk eight times.[^badblocks] On my 8 TB WD Reds that is about five days, not two. A single random pattern (`-t random`) is two passes, about a day and a half on the same drives, and that is the run the 24 to 48 hours fits.
 
 ## Start With Physical Inspection
 
@@ -427,5 +430,8 @@ zpool labelclear -f /dev/sdX
 
 Once the drives pass here, they can graduate into real storage decisions.
 
-- [Homelab Installation](/pages/proxmox/setup/homelab-installation) if the host is still being built and storage layout choices are still in front of you.
+- [How I Build A Node Now](/pages/proxmox/setup/building-a-node) if the host is still being built.
+- [Homelab Installation](/pages/proxmox/setup/homelab-installation) for my first, simpler install, if storage layout choices are still in front of you.
 - [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) if the Proxmox host already exists and you are planning pools, compression, scrubs, or root-pool growth.
+
+[^badblocks]: [`badblocks(8)`](https://manpages.debian.org/trixie/e2fsprogs/badblocks.8.en.html#w): `-w` tests by "writing some patterns (0xaa, 0x55, 0xff, 0x00) on every block of the device, reading every block and comparing the contents"; [`-t random`](https://manpages.debian.org/trixie/e2fsprogs/badblocks.8.en.html#t) fills each block with a random bit pattern instead.

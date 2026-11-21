@@ -2,12 +2,20 @@
 title: "Apt-Cacher-NG LXC On Proxmox"
 description: "Add a dedicated apt-cacher-ng LXC container so repeated Debian package downloads across Proxmox guests are cached once and reused locally."
 publishedAt: "2026-06-08"
-updatedAt: "2026-06-08"
-order: 1
-status: published
+updatedAt: "2026-11-21"
+order: 2
+status: archived
 ---
 
 # Apt-Cacher-NG LXC On Proxmox
+
+<Callout type="warning">
+
+This is the package cache as I first built it: an LXC container on Proxmox. It still works if a container is what you want. The cache now lives on a Raspberry Pi, behind the proxy every isolated network already uses: [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi).
+
+The two commands that write the proxy file into a container were wrong as first published: they wrote it on the Proxmox host instead. Both are fixed below.
+
+</Callout>
 
 While carrying out upgrades across the lab, I kept seeing the same pattern: every container reached out and downloaded the same packages again.
 
@@ -110,15 +118,18 @@ The first run still downloads packages. The savings show up when the second, thi
 
 The command below is the tested downstream proxy configuration from this lab. It intentionally uses the working client-side proxy path from the implementation notes.
 
-For each downstream container, execute:
+For each downstream container, write the file on the host, then copy it in:
 
 ```bash
-pct exec <container_id> -- cat > /etc/apt/apt.conf.d/02proxy << 'EOF'
+cat > /tmp/02proxy << 'EOF'
 Acquire::http::Proxy "http://10.0.3.1:3142";
 Acquire::http::Proxy::localhost "DIRECT";
 Acquire::http::Proxy::127.0.0.1 "DIRECT";
 EOF
+pct push <container_id> /tmp/02proxy /etc/apt/apt.conf.d/02proxy
 ```
+
+The first version of this page ran `pct exec <container_id> -- cat > /etc/apt/apt.conf.d/02proxy`. The `>` in that line is read by the host's shell, not the container's, so the file landed on the Proxmox host. `pct push` copies a file from the host into the container.[^9]
 
 The `localhost` and `127.0.0.1` exceptions keep local package sources from accidentally looping through the proxy.
 
@@ -127,8 +138,10 @@ The `localhost` and `127.0.0.1` exceptions keep local package sources from accid
 If a private repository should bypass the cache or use a different route, add a per-host override.
 
 ```bash
-pct exec <container_id> -- echo 'Acquire::http::Proxy::private-repo.local "DIRECT";' >> /etc/apt/apt.conf.d/02proxy
+pct exec <container_id> -- sh -c 'echo "Acquire::http::Proxy::private-repo.local \"DIRECT\";" >> /etc/apt/apt.conf.d/02proxy'
 ```
+
+The `sh -c` keeps the `>>` inside the container. Without it, the host's shell appends the line to the host's own file.
 
 ## Expected Bandwidth Savings
 
@@ -231,3 +244,4 @@ The cache is an accelerator, not the source of truth. Removing it should return 
 [^6]: Apt-Cacher NG maintenance documentation describes automated cache cleanup through `/etc/cron.daily/apt-cacher-ng` on Debian installations: https://www.unix-ag.uni-kl.de/~bloch/acng/html/maint.html
 [^7]: Apt-Cacher NG security documentation covers LAN/interface access control, firewall restriction, and service-account permissions: https://www.unix-ag.uni-kl.de/~bloch/acng/html/secure.html
 [^8]: Debian security tracker entry for the `apt-cacher-ng` source package: https://security-tracker.debian.org/tracker/source-package/apt-cacher-ng
+[^9]: The Proxmox `pct(1)` manual describes `pct push <vmid> <file> <destination>` as "Copy a local file to the container": https://pve.proxmox.com/pve-docs/pct.1.html

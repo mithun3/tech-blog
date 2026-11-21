@@ -2,11 +2,18 @@
 title: "Linux Bridges in Proxmox"
 description: "Physical layout, network zones, traffic flow, Linux bridges, and where VLANs fit in a Proxmox homelab."
 publishedAt: "2024-08-04"
+updatedAt: "2026-11-21"
 order: 1
 status: published
 ---
 
 # Linux Bridges in Proxmox
+
+<Callout type="warning">
+
+This is the network my first Proxmox host lived on: one home network behind the ASUS router, and one bridge for everything. The bridge explanation still holds, and one flat network is still a fine place to start with a single host. My nodes now sit on a VLAN trunk, and that router has become a Wi-Fi access point: [How I Build A Node Now](/pages/proxmox/setup/building-a-node) and [The Old Router Became An Access Point](/pages/homelab-architecture/decisions/wifi-access-point).
+
+</Callout>
 
 This page covers how a Proxmox host connects the physical LAN to containers and VMs through Linux bridges.
 

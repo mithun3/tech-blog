@@ -2,7 +2,7 @@
 title: "Self-Hosted Services"
 description: "Service guides that live on top of the Proxmox host: NAS, Kubernetes, search, and the small infrastructure containers around them."
 publishedAt: "2024-12-05"
-updatedAt: "2026-06-08"
+updatedAt: "2026-11-21"
 order: 6
 status: published
 ---
@@ -23,7 +23,8 @@ If the workload is common and the immediate question is just "what is the fastes
 ## In This Section
 
 - [Proxmox Helper Scripts](/pages/services/proxmox-helper-scripts) - the first stop for community-scripts.org when you want the quickest sane Proxmox path before following a workload-specific runbook.
-- [Apt-Cacher-NG LXC On Proxmox](/pages/services/apt-cacher-ng-lxc) - the small infrastructure container that caches repeated Debian package downloads across LXC maintenance windows.
+- [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi) - the package cache as it runs now: apt-cacher-ng on a small board, behind the Squid allowlist every isolated network goes out through.
+- [Apt-Cacher-NG LXC On Proxmox](/pages/services/apt-cacher-ng-lxc) - the container version, as I first built it: one small LXC that caches repeated Debian package downloads.
 - [TrueNAS SCALE On Proxmox](/pages/services/truenas-scale) - the path for moving a host-side `naspool` into a managed NAS VM with SMB, NFS, alerting, and a mirror-plus-spare layout.
 - [Kubernetes On Proxmox With k3s](/pages/services/kubernetes) - the path when a single Docker-style guest stops being enough and the lab actually wants a small Kubernetes cluster with storage, ingress, and LAN-facing service IPs.
 - [SearXNG LXC On Proxmox](/pages/services/searxng-lxc) - the local metasearch backend for OpenClaw research and other retrieval-heavy workflows that should stop depending on public instances.

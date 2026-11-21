@@ -34,7 +34,7 @@ Booting the previous kernel, `6.17.13-13-pve`, worked with no other changes.
 | Broken kernel | `7.0.6-2-pve` |
 | Working kernel | `6.17.13-13-pve` |
 | Host IP | `192.168.50.20` |
-| NIC | Realtek RTL8125 2.5GbE, MAC `2c:f0:5d:d6:08:48`, PCI `26:00.0` |
+| NIC | Realtek RTL8125 2.5GbE, MAC `xx:xx:xx:xx:xx:xx`, PCI `26:00.0` |
 | Working NIC name | `nic0` through installer-created `.link` file |
 | Emergency NIC name | `enp38s0` because udev had not settled |
 | GPUs | 2x NVIDIA GeForce RTX 3090, GA102 |
@@ -54,7 +54,7 @@ The NIC visible in emergency mode was not the expected `nic0`:
 
 ```text
 2: enp38s0: <BROADCAST,MULTICAST> mtu 1500 ... state DOWN
-    link/ether 2c:f0:5d:d6:08:48
+    link/ether xx:xx:xx:xx:xx:xx
 ```
 
 The interfaces file was also wrong:
@@ -98,7 +98,7 @@ find /etc/systemd/network /usr/local/lib/systemd/network -name "*.link" | xargs 
 # Output:
 # # setup by the Proxmox installer.
 # [Match]
-# MACAddress=2c:f0:5d:d6:08:48
+# MACAddress=xx:xx:xx:xx:xx:xx
 # Type=ether
 # [Link]
 # Name=nic0
@@ -158,7 +158,7 @@ After the `nova_core` blacklist, the host booted past the hang but still had no 
 ```bash
 ip link show
 # 2: nic0: <BROADCAST,MULTICAST> mtu 1500 ... state DOWN
-#    link/ether 2c:f0:5d:d6:08:48
+#    link/ether xx:xx:xx:xx:xx:xx
 
 cat /etc/network/interfaces
 # references eth0 — wrong name, no vmbr0

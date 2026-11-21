@@ -1,7 +1,8 @@
 ---
 title: "Monitoring And Alerts"
-description: "Start with shell-level health checks, then move into a Prometheus and Grafana stack once the Proxmox host matters enough to deserve real telemetry."
+description: "Start with shell-level health checks, then a Prometheus and Grafana stack on hardware of its own once the lab matters enough to deserve real telemetry."
 publishedAt: "2025-01-22"
+updatedAt: "2026-11-21"
 order: 6
 status: published
 ---
@@ -17,7 +18,7 @@ This subsection keeps those two layers separate on purpose.
 - the lightweight manual checks that sharpen your intuition
 - the proper Prometheus and Grafana stack for when the lab is mature enough to justify one
 
-Pair this subsection with [Email Notifications](/pages/proxmox/operations/email-notifications) so alerts have somewhere useful to go.
+Where that stack runs matters as much as what it runs. Mine started in a container on the host it was watching. It now runs on [a board of its own](/pages/proxmox/monitoring-and-alerts/monitoring-on-its-own-board), so it is still there when a host is not.
 
 ## Start With The Simple Checks
 
@@ -25,10 +26,10 @@ Before building a dashboard, know the host well enough to inspect it directly.
 
 ```bash
 # SSH into Proxmox
-ssh root@192.168.50.20
+ssh root@10.0.10.21
 
-# Check system health
-proxmox-ve-hello
+# Proxmox version and package versions
+pveversion -v
 
 # View system load and memory
 top -b -n 1 | head -20
@@ -50,29 +51,31 @@ That does not replace a monitoring system, but it does teach you what normal loo
 
 ## The Stack Shape
 
-The full stack in this section uses:
+The stack I run now uses:
 
-- `node_exporter` for host metrics
-- `nvidia_gpu_exporter` for GPU metrics
-- a SMART textfile collector for disk health
-- Prometheus for scraping and storage
-- Grafana for dashboards and alerting
-- optional `pve-exporter` for Proxmox API visibility
+- the node exporter on every Debian host, both Proxmox nodes included
+- two exporters for the GPUs and the model server, inside the container that runs the models
+- the blackbox exporter, probing the HTTPS routes, DNS and the internet
+- Prometheus for scraping, storage and the alert rules
+- Alertmanager, sending the alerts to my phone through ntfy
+- Grafana, as a viewer only
 
 ## In This Subsection
 
-- [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) - build the monitoring LXC, install exporters, wire Prometheus, and bring Grafana online.
-- [Dashboards And Alerting On Proxmox](/pages/proxmox/monitoring-and-alerts/dashboards-and-alerting) - import useful dashboards, validate the targets, and turn raw metrics into alerts that actually matter.
+- [Monitoring On Its Own Board](/pages/proxmox/monitoring-and-alerts/monitoring-on-its-own-board) - the stack as it runs now: a Rock 5B, pinned images, dashboards and alert rules as files, and pushes to my phone.
+- [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) - how I started: a monitoring container on the host, with the exporters installed on the host itself.
+- [Dashboards And Alerting On Proxmox](/pages/proxmox/monitoring-and-alerts/dashboards-and-alerting) - how I started: dashboard imports, and Grafana alerts by email.
 
 ## How To Read It
 
 If the host is new or the lab is still small, start with the manual checks above and wait until patterns emerge.
 
-If the host is already running workloads you care about, move straight to [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack), then finish with [Dashboards And Alerting On Proxmox](/pages/proxmox/monitoring-and-alerts/dashboards-and-alerting).
+When the lab runs things you care about, read [Monitoring On Its Own Board](/pages/proxmox/monitoring-and-alerts/monitoring-on-its-own-board). The two older pages are still a working way to get a first stack up on a single host.
 
 ## Related Topics
 
-- [Email Notifications](/pages/proxmox/operations/email-notifications) - the SMTP path that makes alerts useful.
-- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) - where monitoring data should shape maintenance windows instead of being admired after the fact.
+- [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts) - why monitoring moved off the host.
+- [Email Notifications](/pages/proxmox/operations/email-notifications) - getting a Proxmox host's own mail out of the machine.
+- [Monthly Updates With Ansible](/pages/proxmox/operations/monthly-updates) - the update run, which asks Prometheus what is down before it starts and after each host.
 - [GPU Passthrough On Proxmox](/pages/gpu-ai/gpu-passthrough) - the host-side groundwork behind the GPU telemetry this subsection watches.
 - [Secure Service Exposure On Proxmox](/pages/networking/service-exposure) - the place to decide how Grafana or Prometheus should be exposed, if they should be exposed at all.

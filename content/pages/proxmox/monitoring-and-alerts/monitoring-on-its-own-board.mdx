@@ -1,0 +1,132 @@
+---
+title: "Monitoring On Its Own Board"
+description: "Prometheus, Grafana and Alertmanager on a Rock 5B: pinned images, dashboards and alert rules as files, and alerts that reach my phone through the proxy."
+publishedAt: "2026-11-21"
+order: 1
+status: published
+---
+
+# Monitoring On Its Own Board
+
+My first monitoring stack lived in a container on the Proxmox host it was watching. [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) builds it.
+
+It worked. It also had a blind spot exactly the size of the host.
+
+Now the stack runs on a small board that shares nothing with either Proxmox node. Why it moved is on [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts). This page is how it is put together.
+
+<LabSheet sheet="physical" focus="rockpi5b" caption="The Rock 5B on its own switch port, in the monitoring VLAN." />
+
+## The Board
+
+- A Radxa Rock 5B, running Armbian: Debian 13 with the vendor 6.1 kernel.
+- The whole system lives on its 1 TB NVMe. The bootloader sits in the board's own SPI flash.
+- The microSD card is not in the slot. It is a rescue card, kept out of the board.
+- It has a VLAN to itself, MONITOR (VLAN 50), at `10.0.50.10`. That VLAN has no internet.
+
+The SD card stays out on purpose. With the system on the card, Docker, apt and the logs write to it all day, and every boot depends on it. With the card out, the only thing in the boot path is the NVMe, and the card cannot wear out while it waits.
+
+## The Stack
+
+Four containers in Docker Compose. An Ansible role writes the compose file and every config file, and one playbook puts the whole stack on the board from the repository.
+
+| Container | Image | Tag |
+|---|---|---|
+| Prometheus | `prom/prometheus` | `v3.13.5` |
+| Grafana | `grafana/grafana` | `12.4.15` |
+| Alertmanager | `prom/alertmanager` | `v0.34.2` |
+| Blackbox exporter | `prom/blackbox-exporter` | `v0.29.1` |
+
+Never `latest`. I bump the tags by hand, about once a quarter, and run the playbook again. The old images stay on the board, so going back to the previous tag needs no download.
+
+Every container uses host networking, and every listener is bound to one address, never `0.0.0.0`. Alertmanager and the blackbox exporter listen on the board's loopback only, because nothing else needs them.
+
+Prometheus scrapes every 15 seconds and keeps 90 days.
+
+## What It Watches
+
+- **Every Debian host**, both Proxmox nodes included, through the node exporter. That is the plain Debian package `prometheus-node-exporter`, not a container, so it is updated with everything else on the host.
+- **The GPUs and the model server**, through two exporters inside the container that runs the models. Not on the host.
+- **The front door.** An HTTPS probe for every service address, through the reverse proxy. The same probe reads each certificate's expiry date.
+- **DNS.** Both Pi-holes, and the address they share, must answer with the right record.
+- **The internet**, through the proxy, every two minutes. That is the path the alerts take, so when it fails I also know the pushes cannot leave.
+
+The list of hosts is not typed anywhere. Prometheus's scrape jobs are generated from the Ansible inventory, so a new host is watched from the next run of the monitoring playbook.
+
+## Dashboards Are Files
+
+Grafana gets its data source and its dashboards from files.[^provisioning] Nothing is clicked into place, and the dashboards are read-only in the UI. To change one, I change its JSON in the repository and run the playbook.
+
+Import by ID cannot work here anyway, because Grafana has no internet. When I want a community dashboard, I download its JSON on my Mac, point it at the lab's data source, and add the file.
+
+The set is small:
+
+- **Lab status**, my own, and Grafana's home page. One tile per system, coloured by the same alert rules that push to my phone, so the page and the pushes cannot disagree.
+- **Node Exporter Full** (1860)
+- **Prometheus Blackbox Exporter** (7587)
+- **Nvidia GPU Metrics** (14574)
+- **AI farm activity**, my own.
+
+## Alert Rules Are Files Too
+
+The alerts are Prometheus rules, not Grafana alerts. Grafana is a viewer here: no alert rules, no contact points, and its mail is switched off. One alert path is enough.
+
+There are sixteen rules. A few of them:
+
+| Alert | Fires when |
+|---|---|
+| `TargetDown` | something has not answered its scrape for 5 minutes |
+| `FilesystemLow` | a filesystem has less than 10% free |
+| `ZfsPoolDegraded` | a ZFS pool on a Proxmox node is not online |
+| `GpuHot` | a GPU stays above 85 °C for 10 minutes |
+| `CertExpiringSoon` | a certificate behind the front door has under 14 days left |
+| `HostRebooted` | a host booted less than 10 minutes ago |
+
+The rules have unit tests. Before the playbook replaces the live rules, it runs `promtool test rules` with the pinned Prometheus image.[^promtool] A failing test stops the run. So does a rules file or an Alertmanager config that does not parse. The broken file never reaches the running stack.
+
+## How An Alert Reaches My Phone
+
+The monitoring VLAN has no internet, so Alertmanager posts through the proxy board to ntfy.sh, and the ntfy app on my phone shows it. One receiver looks like this, with the topic left out:
+
+```yaml
+- name: 'ntfy-critical'
+  webhook_configs:
+    - url: 'https://ntfy.sh/<topic>?template=alertmanager&priority=5'
+      send_resolved: true
+      http_config:
+        proxy_url: 'http://10.0.40.19:3128'
+```
+
+- **ntfy formats the alert itself.** Its built-in `alertmanager` template turns Alertmanager's message into something readable, so there is no bridge in between.[^ntfy]
+- **Priority follows severity.** Critical alerts go out as urgent (5), warnings as default (3), and a reboot as low (2).[^ntfy]
+- **One push, not twelve.** Every HTTPS probe goes through the reverse proxy, so when the proxy itself is down, every probe fails with it. One inhibit rule holds those back while the proxy's own alert fires.[^inhibit]
+
+  ```yaml
+  inhibit_rules:
+    - source_matchers: ['alertname="TargetDown"', 'host="caddy"']
+      target_matchers: ['alertname="ProbeFailed"', 'job="blackbox-https"']
+  ```
+
+- **Unresolved alerts come back every four hours**, and I get the resolved message too.
+
+One alert never reaches the phone. It is always firing, and it goes to Healthchecks.io every few minutes instead. If it stops arriving, Healthchecks emails me. That is how a dead board, a dead proxy or a power cut still reaches me, and it is told properly on [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts).
+
+## What It Costs Me
+
+- Alerts leave through the proxy board. If that board is down, the pushes wait, and the silence check is what tells me.
+- Away from home, the dashboards come through the reverse proxy on one of the nodes. With that node down, the pushes still arrive, but the page does not.
+
+The monitor no longer goes down with the thing it monitors. That was the whole job.
+
+## Related Topics
+
+- [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts) - why monitoring moved off the host.
+- [Radxa Rock 5B](/pages/hardware/sbc/rock-5b) - the board.
+- [Prometheus And Grafana Stack On Proxmox](/pages/proxmox/monitoring-and-alerts/prometheus-grafana-stack) - my first stack, in a container on the host.
+- [Dashboards And Alerting On Proxmox](/pages/proxmox/monitoring-and-alerts/dashboards-and-alerting) - my first dashboards, and alerts from Grafana by email.
+- [Package Cache On A Raspberry Pi](/pages/services/package-cache-on-a-pi) - the proxy board the alerts leave through.
+- [GPU Passthrough On Proxmox](/pages/gpu-ai/gpu-passthrough) - where the GPU metrics start.
+
+[^provisioning]: [Grafana documentation, "Provision Grafana"](https://grafana.com/docs/grafana/latest/administration/provisioning/): data sources and dashboards can be defined in files that are version controlled; with `allowUiUpdates` set to `false`, changes to a provisioned dashboard cannot be saved from the UI.
+[^promtool]: [Prometheus documentation, "Unit testing for rules"](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/): `promtool test rules` runs unit tests for alerting rules.
+[^ntfy]: [ntfy documentation, "Publishing"](https://docs.ntfy.sh/publish/): the five [message priorities](https://docs.ntfy.sh/publish/#message-priority), from 1 (min) through 3 (default) to 5 (max, or urgent), and the [pre-defined templates](https://docs.ntfy.sh/publish/#pre-defined-templates), one of which formats Alertmanager's webhook payloads.
+[^inhibit]: [Prometheus documentation, Alertmanager configuration, `inhibit_rule`](https://prometheus.io/docs/alerting/latest/configuration/#inhibit_rule): an inhibition rule mutes alerts matching one set of matchers while an alert matching another set exists.

@@ -2,7 +2,7 @@
 title: "Proxmox Operations"
 description: "Day-two Proxmox work: storage, PBS backups, notifications, updates, major upgrades, and the routines that keep the host recoverable instead of fragile."
 publishedAt: "2024-12-02"
-updatedAt: "2026-06-08"
+updatedAt: "2026-11-21"
 order: 3
 status: published
 ---
@@ -27,11 +27,12 @@ PBS backups, major upgrades, and monitoring have grown into sections of their ow
 
 ## In This Section
 
-- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the operational storage layer: pool health, compression, scrubs, and the risky expansion tasks that only make sense once the host is already in service.
+- [Storage And ZFS](/pages/proxmox/operations/storage-and-zfs) — the pools I first ran on the host itself, before the data disks moved to TrueNAS: pool health, compression, scrubs, and growing `rpool`. Kept as it was.
 - [Disk Space Recovery On Proxmox](/pages/proxmox/operations/disk-space-recovery) — what to do when `/var/lib/vz` or another Proxmox dataset hits 100% and the host needs space back quickly.
 - [Backup And Recovery](/pages/proxmox/operations/backup-and-recovery) — snapshots, vzdump, restore paths, and the backup cadence that keeps recovery boring.
 - [Email Notifications](/pages/proxmox/operations/email-notifications) — make sure backup failures and system events actually leave the host and reach your inbox.
-- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — a host-first maintenance rhythm for Proxmox, LXC guests, and the services already living on top of them.
+- [Monthly Updates With Ansible](/pages/proxmox/operations/monthly-updates) — how the lab is updated now: one playbook, one host at a time, a canary first, and a kernel check that does not trust the reboot flag.
+- [Update And Maintenance](/pages/proxmox/operations/update-maintenance) — the earlier routine, by hand on the host: snapshots first, then the host, then the containers. Kept as it was.
 - [Container Network Throttling](/pages/proxmox/operations/container-network-throttling) — use `tc` when a specific LXC should keep downloading without consuming the entire link.
 - [VM Lifecycle](/pages/proxmox/operations/vm-lifecycle) — create, baseline, snapshot, clone, back up, migrate, and retire guests in Proxmox.
 - [Best Practices](/pages/proxmox/operations/best-practices) — practical habits for keeping a Proxmox-based lab stable, understandable, and easy to recover.
@@ -41,7 +42,7 @@ PBS backups, major upgrades, and monitoring have grown into sections of their ow
 
 Read this section once the host exists and you care about keeping it stable.
 
-Read VM Lifecycle first if you are setting up new guests. Use Best Practices as a checklist once the lab is running. Return to Troubleshooting whenever something breaks.
+Read VM Lifecycle first if you are setting up new guests. Read Monthly Updates With Ansible for how updates run today. Use Best Practices as a checklist once the lab is running. Return to Troubleshooting whenever something breaks.
 
 If you are still building the machine, start with [Proxmox Setup](/pages/proxmox/setup). If you are deploying services on top of the host, use [Self-Hosted Services](/pages/services) for the platform-specific runbooks and come back here when those services need backup, maintenance, upgrade, or recovery discipline.
 

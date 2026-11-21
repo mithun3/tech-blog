@@ -2,11 +2,18 @@
 title: "Dashboards And Alerting On Proxmox"
 description: "Import the right Grafana dashboards, validate the Prometheus data path, and turn host, GPU, and disk signals into alerts that can leave the lab."
 publishedAt: "2025-02-03"
+updatedAt: "2026-11-21"
 order: 2
-status: published
+status: archived
 ---
 
 # Dashboards And Alerting On Proxmox
+
+<Callout type="warning">
+
+This is how I ran dashboards and alerts at first: Grafana in a container on the same Proxmox host it was watching, sending its alerts by email. It still works if that is what you want. Monitoring now has a board of its own, and the alerts come from Prometheus and reach my phone: [Monitoring On Its Own Board](/pages/proxmox/monitoring-and-alerts/monitoring-on-its-own-board). Why it moved is on [Alerts That Still Arrive When The Lab Is Down](/pages/homelab-architecture/decisions/alerts).
+
+</Callout>
 
 Once the stack exists, the question changes.
 
